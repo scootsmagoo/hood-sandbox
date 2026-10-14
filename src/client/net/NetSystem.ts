@@ -24,6 +24,15 @@ export interface ViewState {
   inVehicle: boolean;
   /** Clear length of the camera arm reported by the sim, m. */
   camClear: number;
+  /** The player's health and armour, the heat level (0 to 6) and its phase, and the WASTED or BUSTED overlay (see snapshot.ts). */
+  health: number;
+  armour: number;
+  heat: number;
+  heatPhase: number;
+  overlay: number;
+  overlayT: number;
+  /** 0 to 1: how far the heat has cooled toward clearing. */
+  cooldown: number;
   /** Newest snapshot tick and the last input tick the sim has applied. */
   tick: number;
   ack: number;
@@ -58,7 +67,7 @@ export class NetSystem implements System {
   constructor(private readonly game: Game) {
     game.net = this;
     game.view = {
-      sample: null, entities: new Map(), ped: null, vehicle: null, defs: new Map(), controlled: null, inVehicle: false, camClear: 99, tick: 0, ack: 0, lagTicks: 0,
+      sample: null, entities: new Map(), ped: null, vehicle: null, defs: new Map(), controlled: null, inVehicle: false, camClear: 99, health: 100, armour: 0, heat: 0, heatPhase: 0, overlay: 0, overlayT: 0, cooldown: 0, tick: 0, ack: 0, lagTicks: 0,
     };
     game.onSimEvent = (fn) => this.listeners.push(fn);
     for (const d of game.ready.entities ?? []) game.view.defs.set(d.id, d);
@@ -87,6 +96,13 @@ export class NetSystem implements System {
     v.lagTicks = Math.max(0, this.cmdTick - newest.ack);
     v.camClear = newest.camClear;
     v.inVehicle = newest.inVehicle;
+    v.health = newest.health;
+    v.armour = newest.armour;
+    v.heat = newest.heat;
+    v.heatPhase = newest.heatPhase;
+    v.overlay = newest.overlay;
+    v.overlayT = newest.overlayT;
+    v.cooldown = newest.cooldown;
 
     const sample = this.interpolator.sample(now, this.sample);
     v.sample = sample;
@@ -131,7 +147,8 @@ export class NetSystem implements System {
       (input.down('sprint') ? Button.Sprint : 0) |
       (input.down('interact') ? Button.Interact : 0) |
       (input.down('handbrake') ? Button.Handbrake : 0) |
-      (input.down('reset') ? Button.Reset : 0);
+      (input.down('reset') ? Button.Reset : 0) |
+      (input.down('melee') ? Button.Melee : 0);
     if (buttons === (this.lastSent?.buttons ?? 0) && now - this.lastSendAt < MIN_SEND_GAP) return;
     const axes = new Array<number>(AXIS_COUNT).fill(0);
     const move = input.moveAxes();

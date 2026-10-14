@@ -14,6 +14,7 @@ const BUTTONS: { label: string; actions: Action[]; cls: string }[] = [
   { label: 'Run', actions: ['sprint'], cls: 'b-run' },
   { label: 'Get in', actions: ['interact'], cls: 'b-use' },
   { label: 'Reset', actions: ['reset'], cls: 'b-reset' },
+  { label: 'Punch', actions: ['melee'], cls: 'b-melee' },
 ];
 
 export class TouchControls implements InputSource {

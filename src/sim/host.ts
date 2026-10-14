@@ -46,6 +46,8 @@ export class SimHost {
         startAtVehicle: init.startAtVehicle,
         driverMood: init.driverMood,
         parkedCars: init.parkedCars,
+        bystanders: init.bystanders,
+        armour: init.armour,
       });
       this.sim = sim;
       if (init.snapshotBuffer) this.ring = new SnapshotRing(init.snapshotBuffer, SNAPSHOT_BYTES);

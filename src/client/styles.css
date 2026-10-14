@@ -15,7 +15,7 @@ html, body { margin: 0; height: 100%; background: #0b0d10; color: var(--ink); fo
 .hud-prompt.on { opacity: 1; }
 .hud-toast { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); padding: 6px 14px; border-radius: 6px; background: var(--panel); opacity: 0; transition: opacity 0.2s; }
 .hud-toast.on { opacity: 1; }
-.hud-help { position: absolute; left: 12px; bottom: 12px; padding: 10px 14px; border-radius: 8px; background: var(--panel); opacity: 0; transition: opacity 0.25s; max-width: min(420px, 70vw); }
+.hud-help { position: absolute; left: 12px; bottom: 56px; padding: 10px 14px; border-radius: 8px; background: var(--panel); opacity: 0; transition: opacity 0.25s; max-width: min(420px, 70vw); }
 .hud-help.on { opacity: 1; }
 .hud-help .row { display: flex; gap: 12px; padding: 1px 0; }
 .hud-help b { min-width: 130px; color: var(--accent); font-weight: 600; }
@@ -39,7 +39,38 @@ html, body { margin: 0; height: 100%; background: #0b0d10; color: var(--ink); fo
 .b-run { right: 82px; bottom: 6px; }
 .b-use { right: 8px; bottom: 86px; }
 .b-reset { right: 96px; bottom: 96px; width: 52px; height: 52px; font-size: 11px; }
+.b-melee { right: 158px; bottom: 90px; width: 58px; height: 58px; font-size: 12px; }
 .has-touch .hud-speed { bottom: auto; top: 10px; right: 14px; }
 .has-touch .hud-speed .num { font-size: 34px; }
 .has-touch .hud-state { bottom: auto; top: 54px; }
 .has-touch .hud-help { display: none; }
+
+/* Health and armour */
+.hud-bars { position: absolute; left: 12px; bottom: 14px; width: 210px; display: grid; gap: 4px; }
+.bar { position: relative; height: 12px; border-radius: 3px; background: rgba(12, 14, 17, 0.62); border: 1px solid rgba(255, 255, 255, 0.22); overflow: hidden; }
+.bar .fill { position: absolute; inset: 0 auto 0 0; width: 100%; transition: width 0.15s; }
+.bar.health .fill { background: linear-gradient(#58c76a, #2f9d46); }
+.bar.health.low .fill { background: linear-gradient(#ee5a4a, #b02d22); animation: pulse 0.8s ease-in-out infinite alternate; }
+.bar.armour { height: 8px; }
+.bar.armour .fill { background: linear-gradient(#78b4ff, #3f7fd6); }
+.bar.armour.empty { opacity: 0.45; }
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.55; } }
+
+/* Heat: hollow stars while only reported, solid when seen, flashing when lost */
+.hud-stars { position: absolute; top: 12px; right: 16px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: flex-end; width: 190px; opacity: 0; transition: opacity 0.2s; }
+.hud-stars.active { opacity: 1; }
+.hud-stars .star { width: 28px; height: 28px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); }
+.hud-stars .star polygon { fill: transparent; stroke: rgba(255, 255, 255, 0.28); stroke-width: 1.6; stroke-linejoin: round; }
+.hud-stars .star.on polygon { stroke: #ffd24a; }
+.hud-stars.seen .star.on polygon { fill: #ffd24a; }
+.hud-stars.lost .star.on polygon { fill: #ffd24a; animation: starblink 0.5s steps(1) infinite; }
+@keyframes starblink { 0% { fill-opacity: 1; stroke-opacity: 1; } 50% { fill-opacity: 0; stroke-opacity: 0.35; } }
+.hud-stars .cool { position: absolute; left: 0; bottom: -6px; height: 3px; background: rgba(255, 210, 74, 0.8); border-radius: 2px; transition: width 0.3s linear; }
+.has-touch .hud-stars { top: 88px; }
+
+/* WASTED and BUSTED */
+.hud-overlay { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; pointer-events: none; background: radial-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.78)); }
+.hud-overlay.on { opacity: calc(var(--ov, 0) * var(--ov-out, 1)); }
+.hud-overlay .text { font: 800 min(14vw, 120px) / 1 system-ui, sans-serif; letter-spacing: 0.08em; transform: scale(calc(1.15 - var(--ov, 0) * 0.15)); }
+.hud-overlay.wasted .text { color: #d83a2e; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9); }
+.hud-overlay.busted .text { color: #6aa3ff; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9); }

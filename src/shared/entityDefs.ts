@@ -13,6 +13,10 @@ export interface VehicleDef {
   readonly typeId: string;
   /** Paint, 0xRRGGBB. */
   readonly color: number;
+  /** Registration plate (the description records it; the model may draw it later). */
+  readonly plate: string;
+  /** A police car: the agency's livery and lightbar colours (0xRRGGBB). */
+  readonly police?: { agency: string; body: number; stripe: number; lightbar: [number, number] };
 }
 
 export interface PedDef {
@@ -22,6 +26,8 @@ export interface PedDef {
   readonly outfit: number;
   /** The player's own character. */
   readonly player: boolean;
+  /** An officer: the agency and its uniform colour (0xRRGGBB). */
+  readonly police?: { agency: string; uniform: number };
 }
 
 export type EntityDef = VehicleDef | PedDef;

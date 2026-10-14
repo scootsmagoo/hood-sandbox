@@ -108,6 +108,8 @@ export class RaycastCar {
   private travelTurn = 0;
   /** Largest sudden speed change in the last step, m/s. Used to report impacts. */
   impactSpeedLoss = 0;
+  /** The velocity change of the last step in the world frame, m/s. */
+  readonly impactDv = { x: 0, y: 0, z: 0 };
 
   constructor(
     private readonly R: typeof RAPIER,
@@ -194,6 +196,12 @@ export class RaycastCar {
     this.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.forgetVelocity();
+  }
+
+  /** A move by hand is not a crash: the next step compares against rest. */
+  private forgetVelocity() {
+    this.prevVel.x = this.prevVel.y = this.prevVel.z = 0;
   }
 
   teleport(x: number, y: number, z: number, yaw: number) {
@@ -201,6 +209,7 @@ export class RaycastCar {
     this.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.forgetVelocity();
   }
 
   /** Takes the car out of the physics world for good. */
@@ -233,6 +242,9 @@ export class RaycastCar {
     const dvy = lv.y - this.prevVel.y;
     const dvz = lv.z - this.prevVel.z;
     this.impactSpeedLoss = Math.hypot(dvx, dvy, dvz);
+    this.impactDv.x = dvx;
+    this.impactDv.y = dvy;
+    this.impactDv.z = dvz;
     this.prevVel.x = lv.x;
     this.prevVel.y = lv.y;
     this.prevVel.z = lv.z;

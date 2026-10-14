@@ -29,7 +29,36 @@ export interface VehicleModel {
   root: THREE.Group;
   /** Sets wheels, lights, the driver's door (0 shut to 1 wide open) and body from interpolated sim state. */
   apply(wheels: Float32Array, braking: boolean, reversing: boolean, door?: number): void;
+  /** Police cars: flashes the lightbar. `time` is seconds; `on` false darkens it. */
+  flash(time: number, on: boolean): void;
+  /** Wear: 0 (new) to 1 (wrecked) darkens the paint; `burnt` chars the whole car. */
+  setCondition(wear: number, burnt: boolean): void;
   dispose(): void;
+}
+
+/** What the sim says about a police car's paint. */
+export interface ModelLivery {
+  body: number;
+  stripe: number;
+  lightbar: [number, number];
+}
+
+let glowTexture: THREE.CanvasTexture | null = null;
+/** A soft round glow, shared by every lightbar. */
+export function glowTex(): THREE.CanvasTexture {
+  if (!glowTexture) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    glowTexture = new THREE.CanvasTexture(c);
+  }
+  return glowTexture;
 }
 
 const shared = {
@@ -41,7 +70,7 @@ const shared = {
   head: new THREE.MeshStandardMaterial({ color: 0xfff1c9, emissive: 0xfff1c9, emissiveIntensity: 0.8 }),
 };
 
-export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleModel {
+export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: ModelLivery): VehicleModel {
   const root = new THREE.Group();
   const owned: THREE.Material[] = [];
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.45 });
@@ -114,6 +143,35 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleMod
   }
   const tails = root.children.filter((o) => o.name === 'tail') as THREE.Mesh[];
 
+  // Police: a stripe down the flank and a lightbar on the roof, two lamps that take turns.
+  const lamps: { mat: THREE.MeshStandardMaterial; glow: THREE.Sprite; color: number }[] = [];
+  if (livery) {
+    const stripe = new THREE.MeshStandardMaterial({ color: livery.stripe, roughness: 0.5 });
+    owned.push(stripe);
+    for (const sx of [-1, 1]) root.add(box(0.03, 0.14, hz * 1.5, stripe, sx * (hx + 0.012), c.offset[1] + 0.02, -0.1));
+    const roofY = cab.offset[1] + cab.halfExtents[1] + 0.12;
+    const dark = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 });
+    owned.push(dark);
+    root.add(box(cab.halfExtents[0] * 1.3, 0.07, 0.24, dark, cab.offset[0], roofY - 0.04, cab.offset[2]));
+    for (const [i, sx] of [-1, 1].entries()) {
+      const col = livery.lightbar[i];
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(col).multiplyScalar(0.25), emissive: col, emissiveIntensity: 0, roughness: 0.4 });
+      owned.push(mat);
+      const lamp = box(cab.halfExtents[0] * 0.62, 0.08, 0.2, mat, cab.offset[0] + sx * cab.halfExtents[0] * 0.38, roofY + 0.02, cab.offset[2]);
+      lamp.castShadow = false;
+      root.add(lamp);
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      glow.scale.setScalar(2.4);
+      glow.position.set(lamp.position.x, roofY + 0.15, lamp.position.z);
+      root.add(glow);
+      owned.push(glow.material);
+      lamps.push({ mat, glow, color: col });
+    }
+  }
+  const paintBase = new THREE.Color(color);
+  const doorBase = new THREE.Color(color).multiplyScalar(0.92);
+  const char = new THREE.Color(0x1b1a19);
+
   return {
     root,
     apply(wheels, braking, reversing, door = 0) {
@@ -125,6 +183,22 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleMod
         pivots[i].position.y = wb.mountY - wheels[o + 2];
       }
       for (const t of tails) (t.material as THREE.MeshStandardMaterial).emissiveIntensity = braking ? 2.2 : reversing ? 0.9 : 0.25;
+    },
+    flash(time, on) {
+      // Red-and-blue style: one side then the other, five times a second, each with a double blink.
+      const phase = Math.floor(time * 10) % 10;
+      for (const [i, l] of lamps.entries()) {
+        const lit = on && (i === 0 ? phase === 0 || phase === 2 : phase === 5 || phase === 7);
+        l.mat.emissiveIntensity = lit ? 3 : 0;
+        l.glow.material.opacity = lit ? 0.95 : 0;
+      }
+    },
+    setCondition(wear, burnt) {
+      const k = burnt ? 1 : Math.min(0.55, wear * 0.55);
+      paint.color.copy(paintBase).lerp(char, k);
+      doorMat.color.copy(doorBase).lerp(char, k);
+      paint.roughness = burnt ? 0.95 : 0.38 + wear * 0.3;
+      paint.metalness = burnt ? 0.1 : 0.45;
     },
     dispose() {
       tyreGeo.dispose();
@@ -144,6 +218,8 @@ export interface PedModel {
   root: THREE.Group;
   /** `speed` in m/s; `phase` is advanced by the caller; `swing` is a punch's wind-up, 0 to 1. */
   pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number): void;
+  /** Topples the figure: 1 lies on its back (knocked down), -1 face down (dead), 0 stands. A stand-in for a ragdoll. */
+  lie(amount: number): void;
 }
 
 export interface PedLook {
@@ -214,12 +290,32 @@ export function buildPedModel(look: PedLook = OUTFITS[0]): PedModel {
   if (look.cap !== null) torso.add(box(0.25, 0.06, 0.28, pedMat(look.cap), 0, 0.81, 0.04));
   inner.add(legL, legR, torso, armL, armR);
 
+  let lying = 0;
   return {
     root,
+    lie(amount) {
+      lying = amount;
+    },
     pose(speed, grounded, phase, mode = 'normal', swing = 0) {
       inner.scale.setScalar(mode === 'seated' ? SEATED_SCALE : 1);
       inner.rotation.x = 0;
       inner.position.y = 0;
+      inner.position.z = 0;
+      if (Math.abs(lying) > 0.02 && mode !== 'seated' && mode !== 'dragged') {
+        // On the ground: the whole figure tips over about its feet, limbs a little flung.
+        inner.rotation.x = -lying * (Math.PI / 2);
+        inner.position.y = 0.17 * Math.abs(lying);
+        inner.position.z = 0.85 * lying;
+        const flop = Math.abs(lying);
+        legL.rotation.x = 0.1 * flop;
+        legR.rotation.x = -0.2 * flop;
+        armL.rotation.x = -0.4 * flop;
+        armR.rotation.x = 0.3 * flop;
+        torso.rotation.x = 0;
+        torso.rotation.y = 0.2 * flop;
+        torso.position.y = 0.9;
+        return;
+      }
       if (mode === 'seated') {
         // Thighs forward under the wheel, hands up on it.
         legL.rotation.x = legR.rotation.x = -1.45;

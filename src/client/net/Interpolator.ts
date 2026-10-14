@@ -35,13 +35,18 @@ export interface EntityState {
   /** Ped yaw, or a vehicle's front wheel steer angle. */
   aux0: number;
   aux1: number;
+  /** Ped: health and armour. Vehicle: body and engine health. */
+  health: number;
+  health2: number;
+  /** Vehicle: how far a fire has burnt toward the explosion, 0 to 1. */
+  aux2: number;
   /** Per wheel: steer, roll, suspension length, slip. */
   wheels: Float32Array;
 }
 
 export function newEntityState(): EntityState {
   return {
-    id: 0, kind: 0, x: 0, y: 0, z: 0, q: { x: 0, y: 0, z: 0, w: 1 }, vx: 0, vy: 0, vz: 0, flags: 0, speed: 0, aux0: 0, aux1: 0,
+    id: 0, kind: 0, x: 0, y: 0, z: 0, q: { x: 0, y: 0, z: 0, w: 1 }, vx: 0, vy: 0, vz: 0, flags: 0, speed: 0, aux0: 0, aux1: 0, health: 0, health2: 0, aux2: 0,
     wheels: new Float32Array(WHEEL_COUNT * WHEEL_FLOATS),
   };
 }
@@ -145,6 +150,9 @@ export function blendEntity(s: Sample, id: EntityId, out: EntityState): boolean 
   out.flags = ub[ob + E.Flags];
   out.speed = fb[ob + E.Speed];
   out.aux1 = fb[ob + E.Aux1];
+  out.health = fb[ob + E.Health];
+  out.health2 = fb[ob + E.Health2];
+  out.aux2 = fb[ob + E.Aux2];
   out.vx = fb[ob + E.Vx];
   out.vy = fb[ob + E.Vy];
   out.vz = fb[ob + E.Vz];

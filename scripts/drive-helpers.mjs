@@ -78,3 +78,26 @@ export async function walkTo(page, target, { tol = 0.7, timeoutMs = 20000, sprin
     for (const k of [...held]) await set(k, false);
   }
 }
+
+/** Runs in the page. What the HUD shows for health, armour and the law. */
+export const HUD = () => {
+  const stars = document.querySelector('.hud-stars');
+  const star0 = stars?.querySelector('.star polygon');
+  const css = star0 ? getComputedStyle(star0) : null;
+  const pct = (sel) => parseFloat(document.querySelector(sel)?.style.width ?? '0');
+  const overlay = document.querySelector('.hud-overlay');
+  return {
+    heat: Number(stars?.dataset.heat ?? 0),
+    phase: stars?.dataset.phase ?? 'none',
+    starsVisible: !!stars?.classList.contains('active'),
+    /** The first star's fill: transparent while only reported, solid once seen. */
+    starFill: css?.fill ?? '',
+    starFillOpacity: css ? Number(css.fillOpacity) : 1,
+    health: pct('.bar.health .fill'),
+    armour: pct('.bar.armour .fill'),
+    overlay: overlay?.classList.contains('on') ? (overlay.querySelector('.text')?.textContent ?? '') : '',
+  };
+};
+
+/** Runs in the page with loopback transport: the live simulation, for setting a scene up. */
+export const SIM = '(window.__hood.game.transport.host.simulation)';

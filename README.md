@@ -175,6 +175,12 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
    - **Transit police** control the stations and trains.
 6. **Getting out**: break line of sight and wait out the cooldown, hide in a garage or safehouse, use a paint shop or plate swap, call a "lawyer" contact to pay it down, or get busted or wasted. Getting busted costs cash and weapons, and repeat street-racing busts **impound the car**, as Georgia law now does.
 
+**Built (first pass, heat 1 to 2 in practice):**
+- Crimes are decided from sim events by `src/sim/law/Law.ts`, using the engine table `src/shared/data/crimes.json`: `carjack`, `assault`, `hit_ped`, `kill_ped`, `assault_officer`, and `vehicle_theft` (only if someone sees it). A witness is a civilian inside the crime's radius with a clear line (a ray against the static world), and the victim always counts. They call it in 3 to 8 seconds later (seeded) unless they are knocked down or killed first (`witness:silenced`). An officer who sees it reports it at once.
+- Heat is tracked in the sim (`src/sim/law/heat.ts`): hollow stars while only reported, solid when the police see you, flashing when they lose you, and it clears after a time out of sight that grows with the level. What the police know (car and plate, clothes) is recorded in the `crime` event's `description`.
+- Dispatch reads the city pack's `jurisdictions.json` through the tile id (`docs/contracts/law-data.md`). Cars appear 120 to 200 m away on the road network, out of the camera's view, in the livery of the agency whose area covers the spawn point. They drive with a pure-pursuit controller and a speed governor (`src/sim/police/pursuit.ts`). A restrictive agency does not chase a car for a crime below its `minPursuitSeverity`: it gathers at the scene, and gets out to chase on foot if you are on foot. An officer within 1.5 m of a player who stands still for 2 s arrests them. PIT, helicopters, roadblocks and guns are not built yet.
+- Quick-test parameters: `?peds=N` (idle bystanders near the spawn), `?armour=N`.
+
 ### Pedestrians and the ambient city
 
 - **A population cycle per zone type** (modeled on GTA's `popcycle`): two-hour slots, weekday and weekend, with a budget for peds and cars and weighted model groups (business, students, nightlife, Buford Hwy shoppers, game-day crowds).
@@ -202,6 +208,7 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
   - **Donut**: full throttle with the wheel hard over from rest, or after a handbrake turn, holds a steady circle (sedan about 5 m radius at 8.4 m/s, pickup about 5.8 m at 8 m/s) with the tail out and the rear tyres smoking, and lets go cleanly.
   - Two stand-in vehicle types besides the coupe: the sedan and the **pickup** (heavier, softer, leans several times as far). Add more in `src/shared/data/handling.json`; `?car=<id>` picks the starting car.
 - **Cheap damage**: dent morph targets blended by impact, detachable bumpers and panels, and smoke and fire driven by engine health.
+  - **Built (stand-in):** body and engine health from the velocity change of each crash, scaled by the `damage` block of `handling.json` (`collisionMult`, `engineMult`, ...). The engine smokes below 42%, dies at zero, may then catch fire, and a burning car explodes after 5 to 8 s: a flash and a charred shell that never drives again. Whoever is still inside is hurt by the fire and killed by the blast.
 - Vehicle types (later): motorcycles, boats on the Hooch and the lakes, helicopters.
 
 ### Gangs (fictional)
@@ -231,6 +238,7 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 - **Carjacking** follows the door sockets: walk up, open, pull the driver out, get in. Drivers flee, fight back or chase you, depending on personality.
   - **Built (stand-in timing):** you start on the sidewalk a few metres from a car parked at the curb with a driver in it. Walk to the driver's door and press the use button: the door opens, the driver is dragged out (about 1.4 s in all, `src/sim/carjack.ts`), and you take the wheel. The driver rolls a personality from the seed, then flees along open ground (`src/sim/npc/flee.ts`) or squares up and throws punches for a few seconds before running. The sim emits a `carjack` event for the later law and heat system. Empty cars, including the one you just left, are entered with the same button; a few empty parked cars of mixed types sit along nearby curbs.
   - Quick-test URL parameters: `?start=car` (beside an empty car), `?start=jack` (at the driver's door of the occupied car), `?driver=flee|fight` (force the reaction), `?car=pickup`, `?parked=N`.
+- **Built:** health and armour for the player and every ped, a `damage` event for each hurt (melee, vehicle, fall, explosion, fire), knockdown and death as a topple pose (a stand-in for ragdolls), and a punch on its own key (`Q`, or X on a pad, or the touch Punch button) with a short cooldown, a hit cone and a soft lock-on. Cars hurt peds by closing speed above 3 m/s. A dead player gets the WASTED screen and respawns at the tile's player spawn with the heat cleared; getting busted does the same.
 - Ragdolls on hits, falls and vehicle impacts, then blend back to standing.
 
 ### Side activities (backlog)

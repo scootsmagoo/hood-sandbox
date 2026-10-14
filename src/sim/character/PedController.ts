@@ -29,6 +29,8 @@ export class PedController {
   /** Horizontal velocity. */
   readonly vel = { x: 0, z: 0 };
   vy = 0;
+  /** A shove from outside (a punch, a car), m/s: added to the walking velocity and fading on its own. */
+  readonly ext = { x: 0, z: 0 };
   yaw = 0;
   grounded = false;
   sprinting = false;
@@ -89,9 +91,13 @@ export class PedController {
       this.vy = Math.max(-PED.terminalSpeed, this.vy - PED.gravity * dt);
     }
 
+    const fade = Math.exp(-(this.grounded ? 3.5 : 0.4) * dt);
+    this.ext.x *= fade;
+    this.ext.z *= fade;
+    if (Math.abs(this.ext.x) + Math.abs(this.ext.z) < 0.05) this.ext.x = this.ext.z = 0;
     this.kcc.computeColliderMovement(
       this.collider,
-      { x: this.vel.x * dt, y: this.vy * dt, z: this.vel.z * dt },
+      { x: (this.vel.x + this.ext.x) * dt, y: this.vy * dt, z: (this.vel.z + this.ext.z) * dt },
       undefined,
       GROUPS.actorQuery,
     );
@@ -117,11 +123,21 @@ export class PedController {
     return Math.hypot(this.vel.x, this.vel.z);
   }
 
+  /** Throws the character: a horizontal shove that fades, and an upward kick. */
+  launch(vx: number, vy: number, vz: number) {
+    this.ext.x = vx;
+    this.ext.z = vz;
+    if (vy > 0) {
+      this.vy = vy;
+      this.grounded = false;
+    }
+  }
+
   /** Hides the capsule from the world while the character sits in a vehicle. */
   setEnabled(on: boolean) {
     this.enabled = on;
     this.body.setEnabled(on);
-    if (!on) this.vel.x = this.vel.z = this.vy = 0;
+    if (!on) this.vel.x = this.vel.z = this.vy = this.ext.x = this.ext.z = 0;
   }
 
   /** Puts the character at a feet position, standing. */
@@ -133,7 +149,7 @@ export class PedController {
     this.y = y;
     this.z = z;
     this.yaw = yaw;
-    this.vel.x = this.vel.z = this.vy = 0;
+    this.vel.x = this.vel.z = this.vy = this.ext.x = this.ext.z = 0;
     this.grounded = false;
   }
 

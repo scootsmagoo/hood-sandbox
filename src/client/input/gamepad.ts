@@ -3,7 +3,7 @@
  * Firefox). Polled at the start of every frame as an `InputSource`.
  *
  * On foot the left stick moves and the right stick turns the camera. In a car the triggers are
- * throttle and brake (analog), the left stick steers, and B is the handbrake. Buttons hold actions
+ * throttle and brake (analog), the left stick steers, and B is the handbrake. X punches on foot, and LB stands the car back up. Buttons hold actions
  * directly, so rebinding the keyboard never breaks the pad.
  */
 import type { Action } from './bindings';
@@ -20,8 +20,8 @@ export const PAD_ACTIONS: Readonly<Partial<Record<number, Action>>> = {
   [PAD.A]: 'jump',
   [PAD.B]: 'handbrake',
   [PAD.Y]: 'interact',
-  [PAD.X]: 'reset',
-  [PAD.LB]: 'handbrake',
+  [PAD.X]: 'melee',
+  [PAD.LB]: 'reset',
   [PAD.RB]: 'sprint',
   [PAD.L3]: 'sprint',
   [PAD.R3]: 'lookBack',

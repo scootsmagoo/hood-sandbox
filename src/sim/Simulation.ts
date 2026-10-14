@@ -11,8 +11,17 @@ import { doorGeometry } from '../shared/doors';
 import { DEFAULT_VEHICLE, HANDLING } from '../shared/handling';
 import { quatFromYaw, rotateVec, yawFromDir, yawFromTileHeading, yawOfQuat } from '../shared/math';
 import { AXIS_COUNT, SIM_DT, type InputCommand, type SimEvent } from '../shared/protocol';
+import type { LawData } from '../shared/law';
+import { MAX_HEALTH } from './entities';
+import { COMBAT, damagePed, knockDown } from './combat/damage';
+import { WRECK } from './combat/vehicleDamage';
+import { blastFalloff, overlayOf } from './combat/systems';
+import { leaveVehicle } from './exit';
+import { Law } from './law/Law';
+import { GENERIC_LAW, loadLawForTile } from './law/cityPack';
+import { PoliceManager } from './police/PoliceSystem';
 import { Rng } from '../shared/rng';
-import { E, H, PedFlag, SnapFlag, VehicleFlag, WHEEL_FLOATS, MAX_ENTITIES, SnapshotView } from '../shared/snapshot';
+import { E, H, HeatPhase, PedFlag, SnapFlag, VehicleFlag, WHEEL_FLOATS, MAX_ENTITIES, SnapshotView } from '../shared/snapshot';
 import type { TileData } from '../shared/tile';
 import { PedController } from './character/PedController';
 import type { CarjackState } from './carjack';
@@ -39,12 +48,32 @@ export interface SimOptions {
   driverMood?: Reaction;
   /** Empty cars to park along nearby curbs (default 6). */
   parkedCars?: number;
+  /** Idle pedestrians standing about on nearby sidewalks (default 0). */
+  bystanders?: number;
+  /** The player's starting armour (default 0). */
+  armour?: number;
+  /** The law tables (a city pack's jurisdictions). Left out, the pack of the tile's city is loaded, or a generic one. */
+  law?: LawData;
+}
+
+/** Where the player is while the WASTED or BUSTED screen runs. */
+export interface PlayerLife {
+  mode: 'alive' | 'wasted' | 'busted';
+  /** Seconds into it. */
+  t: number;
 }
 
 /** Colour of the car the player starts beside. */
 const HERO_PAINT = 0xb23a2e;
 /** Types the parked cars cycle through, besides the starting car's. */
 const PARKED_TYPES = ['sedan', 'coupe', 'pickup'] as const;
+
+const clampArmour = (a: number) => Math.max(0, Math.min(100, a));
+
+/** The generic law, for a sim built without `await Simulation.create` and without a pack. */
+function loadedLaw(_opts: SimOptions): LawData {
+  return GENERIC_LAW;
+}
 
 export class Simulation {
   tick = 0;
@@ -64,6 +93,13 @@ export class Simulation {
   private announce = false;
   private readonly systems: SimSystem[];
   private events: SimEvent[] = [];
+  /** The same events, for the rules module to read once per tick. */
+  private ruleEvents: SimEvent[] = [];
+  readonly law: Law;
+  readonly police: PoliceManager;
+  readonly fireRng: Rng;
+  private readonly plateRng: Rng;
+  private readonly lives = new Map<number, PlayerLife>();
   private queued: { slot: number; cmd: InputCommand }[] = [];
 
   constructor(R: typeof RAPIER, opts: SimOptions) {
@@ -74,23 +110,28 @@ export class Simulation {
     this.hasDriver = opts.driver ?? this.start !== 'car';
     this.vehicleType = opts.vehicleType && HANDLING[opts.vehicleType] ? opts.vehicleType : DEFAULT_VEHICLE;
     this.systems = defaultSystems();
-    this.spawnWorld(opts.parkedCars ?? 6);
+    this.fireRng = this.rng.fork('fire');
+    this.plateRng = this.rng.fork('plates');
+    this.law = new Law(this, opts.law ?? loadedLaw(opts));
+    this.police = new PoliceManager(this);
+    this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
     this.announce = true;
   }
 
   static async create(opts: SimOptions): Promise<Simulation> {
-    return new Simulation(await initRapier(), opts);
+    const law = opts.law ?? (await loadLawForTile(opts.tile.manifest.id));
+    return new Simulation(await initRapier(), { ...opts, law });
   }
 
   get tile(): TileData {
     return this.physics.tile;
   }
 
-  private groundAt(x: number, z: number): number {
+  groundAt(x: number, z: number): number {
     return this.physics.groundHeight(x, z);
   }
 
-  private spawnWorld(parked: number) {
+  private spawnWorld(parked: number, bystanders: number, armour: number) {
     const sp = this.tile.manifest.spawns;
     const yaw = yawFromTileHeading(sp.vehicle.heading);
     const hero = this.spawnVehicle(this.vehicleType, sp.vehicle.x, Math.max(sp.vehicle.y, this.groundAt(sp.vehicle.x, sp.vehicle.z)), sp.vehicle.z, yaw, HERO_PAINT);
@@ -110,12 +151,16 @@ export class Simulation {
       py = -Infinity;
       pyaw = yaw - Math.PI / 2;
     }
-    const ped = this.addPed(px, Math.max(py, this.groundAt(px, pz)), pz, pyaw, 0, false);
+    const ped = this.addPed(px, Math.max(py, this.groundAt(px, pz)), pz, pyaw, 0, false, (p) => {
+      p.role = 'player';
+      p.armour = clampArmour(armour);
+    });
     ped.owner = 1;
     this.players.set(1, new PlayerSlot(1, ped.id));
 
     if (this.hasDriver) this.seatDriver(hero);
     if (parked > 0) this.parkCars(parked);
+    if (bystanders > 0) this.placeBystanders(bystanders);
   }
 
   /** Where the body origin sits above flat ground when the car is at rest on its suspension. */
@@ -127,24 +172,27 @@ export class Simulation {
   }
 
   /** Adds a car resting on the ground at (x, z). `groundY` is the road surface there. */
-  spawnVehicle(typeId: string, x: number, groundY: number, z: number, yaw: number, color: number): VehicleEntity {
+  spawnVehicle(typeId: string, x: number, groundY: number, z: number, yaw: number, color: number, init?: (v: VehicleEntity) => void): VehicleEntity {
     const h = HANDLING[typeId] ?? HANDLING[DEFAULT_VEHICLE];
     const y = Math.max(groundY, this.groundAt(x, z)) + this.restHeight(h) + 0.05;
     const reg = this.registry;
     const car = new RaycastCar(this.physics.R, this.physics.world, h, { x, y, z, yaw });
     const v = reg.add(new VehicleEntity(reg.allocateId(), h.id, car, color)) as VehicleEntity;
     v.home = { x, y, z, yaw };
+    v.plate = this.makePlate();
+    init?.(v);
     this.announceSpawn(v);
     return v;
   }
 
   /** Adds a ped standing with its feet at (x, y, z). Non-players get a brain with a seeded personality. */
-  addPed(x: number, y: number, z: number, yaw: number, outfit: number, npc: boolean): PedEntity {
+  addPed(x: number, y: number, z: number, yaw: number, outfit: number, npc: boolean, init?: (p: PedEntity) => void): PedEntity {
     const reg = this.registry;
     const ctrl = new PedController(this.physics.R, this.physics.world, x, y + 0.1, z, yaw);
     const ped = reg.add(new PedEntity(reg.allocateId(), ctrl)) as PedEntity;
     ped.outfit = outfit % OUTFIT_COUNT;
     if (npc) ped.brain = new PedBrain(rollPersonality(this.rng.fork(`ped:${ped.id}`), this.driverMood));
+    init?.(ped);
     this.announceSpawn(ped);
     return ped;
   }
@@ -212,8 +260,8 @@ export class Simulation {
 
   /** The definition of an entity (what the client needs to draw it). */
   defOf(e: SimEntity): EntityDef {
-    if (e instanceof VehicleEntity) return { id: e.id, kind: EntityKind.Vehicle, typeId: e.typeId, color: e.color };
-    return { id: e.id, kind: EntityKind.Ped, outfit: e.outfit, player: e.brain === null };
+    if (e instanceof VehicleEntity) return { id: e.id, kind: EntityKind.Vehicle, typeId: e.typeId, color: e.color, plate: e.plate, ...(e.police ? { police: e.police } : {}) };
+    return { id: e.id, kind: EntityKind.Ped, outfit: e.outfit, player: e.role === 'player', ...(e.officer ? { police: { agency: e.officer.agency, uniform: e.officer.uniform } } : {}) };
   }
 
   /** Definitions of everything that exists, in creation order. */
@@ -274,6 +322,32 @@ export class Simulation {
 
   emit(e: SimEvent) {
     this.events.push(e);
+    this.ruleEvents.push(e);
+  }
+
+  /** The events since the rules module last looked (it looks once a tick). */
+  takeRuleEvents(): SimEvent[] {
+    if (this.ruleEvents.length === 0) return this.ruleEvents;
+    const out = this.ruleEvents;
+    this.ruleEvents = [];
+    return out;
+  }
+
+  *peds(): IterableIterator<PedEntity> {
+    for (const e of this.registry.values()) if (e.kind === EntityKind.Ped) yield e as PedEntity;
+  }
+
+  lifeOf(slot: number): PlayerLife {
+    let l = this.lives.get(slot);
+    if (!l) this.lives.set(slot, (l = { mode: 'alive', t: 0 }));
+    return l;
+  }
+
+  /** A Georgia-style plate: three letters, four digits. */
+  private makePlate(): string {
+    const r = this.plateRng;
+    const L = () => String.fromCharCode(65 + r.int(0, 25));
+    return `${L()}${L()}${L()}${r.int(1000, 9999)}`;
   }
 
   /** Events produced since the last call. */
@@ -311,6 +385,116 @@ export class Simulation {
     if (this.toDespawn.size) this.flushDespawns();
   }
 
+  /** Puts a ped that is sitting in a car onto the ground beside it. */
+  ejectPed(ped: PedEntity) {
+    const v = ped.vehicleId ? (this.registry.get(ped.vehicleId) as VehicleEntity | undefined) : undefined;
+    if (v) leaveVehicle(this, ped, v);
+  }
+
+  /** Damages a car's body and engine, and reports it. */
+  damageVehicle(v: VehicleEntity, body: number, engine: number, sourceId: EntityId) {
+    if (v.burnt || (body <= 0 && engine <= 0)) return;
+    v.health = Math.max(-200, v.health - body);
+    v.engine = Math.max(-500, v.engine - engine);
+    this.emit({ type: 'vehicle:damage', tick: this.tick, vehicleId: v.id, amount: body, body: v.health, engine: v.engine, sourceId });
+  }
+
+  /** The stand-in explosion: a flash, a blast that hurts what is near, and a burnt-out shell that never drives again. */
+  explodeVehicle(v: VehicleEntity) {
+    if (v.burnt) return;
+    v.burnt = true;
+    v.onFire = false;
+    v.engineDead = true;
+    v.smoking = true;
+    v.health = 0;
+    v.engine = Math.min(v.engine, 0);
+    const p = v.car.pose();
+    this.emit({ type: 'vehicle:explode', tick: this.tick, vehicleId: v.id, x: p.x, y: p.y, z: p.z });
+    v.car.body.applyImpulse({ x: 0, y: v.car.h.mass * 3.5, z: 0 }, true);
+    for (const ped of this.peds()) {
+      if (ped.life === 'dead') continue;
+      const c = ped.controller;
+      const dx = c.x - p.x;
+      const dz = c.z - p.z;
+      const f = blastFalloff(Math.hypot(dx, dz, c.y - p.y));
+      if (f <= 0) continue;
+      const inside = ped.vehicleId === v.id;
+      const d = Math.hypot(dx, dz) || 1;
+      if (!inside) {
+        const r = damagePed(this, ped, WRECK.blastDamage * f, 'explosion', 0, v.id);
+        if (r.fatal) c.launch((dx / d) * 6 * f, 3 * f, (dz / d) * 6 * f);
+        else knockDown(this, ped, 2.5, (dx / d) * 7 * f, (dz / d) * 7 * f, 3.5 * f);
+      } else {
+        damagePed(this, ped, WRECK.blastDamage * 2, 'explosion', 0, v.id);
+      }
+    }
+    for (const o of this.vehicles()) {
+      if (o === v || o.burnt) continue;
+      const q = o.car.pose();
+      const f = blastFalloff(Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z));
+      if (f > 0) this.damageVehicle(o, WRECK.blastDamage * WRECK.blastCar * 3 * f, WRECK.blastDamage * 4 * f, 0);
+    }
+  }
+
+  /** The player was arrested by an officer: the booking screen runs, then the respawn. */
+  beginBusted(slot: number, officerId: EntityId) {
+    const life = this.lifeOf(slot);
+    if (life.mode !== 'alive') return;
+    const ped = this.registry.get(this.players.get(slot)!.pedId) as PedEntity;
+    life.mode = 'busted';
+    life.t = 0;
+    ped.melee = null;
+    this.emit({ type: 'player:busted', tick: this.tick, pedId: ped.id, officerId });
+  }
+
+  /** The stand-in for a hospital or a police station: back to the tile's player spawn, healed, with the heat gone. */
+  respawnPlayer(slot: number, reason: 'wasted' | 'busted') {
+    const life = this.lifeOf(slot);
+    const ped = this.registry.get(this.players.get(slot)!.pedId) as PedEntity;
+    if (ped.vehicleId) this.ejectPed(ped);
+    const sp = this.tile.manifest.spawns.player;
+    const y = Math.max(sp.y, this.groundAt(sp.x, sp.z)) + 0.1;
+    ped.controller.teleport(sp.x, y, sp.z);
+    ped.health = MAX_HEALTH;
+    ped.armour = 0;
+    ped.life = 'alive';
+    ped.downT = 0;
+    ped.melee = null;
+    ped.airVy = 0;
+    ped.busy = false;
+    life.mode = 'alive';
+    life.t = 0;
+    this.law.clear(reason);
+    this.police.clearAll();
+    this.emit({ type: 'player:respawn', tick: this.tick, pedId: ped.id, reason, x: sp.x, y, z: sp.z });
+  }
+
+  /** Stands idle pedestrians on sidewalks near the player's spawn: witnesses, and something to punch or run over. */
+  private placeBystanders(count: number) {
+    const roads = this.tile.roads ?? [];
+    const sp = this.tile.manifest.spawns;
+    const rng = this.rng.fork('bystanders');
+    const slots = planParking(
+      roads,
+      { around: sp.player, avoid: [{ x: sp.vehicle.x, z: sp.vehicle.z, r: 6 }, { x: sp.player.x, z: sp.player.z, r: 4 }], count: count * 4, minDist: 12, maxDist: 70 },
+      rng,
+    );
+    let placed = 0;
+    for (const slot of slots) {
+      if (placed >= count) break;
+      // Stand on the kerb side of the slot, off the car line.
+      const x = slot.x - Math.cos(slot.yaw) * 2.6;
+      const z = slot.z + Math.sin(slot.yaw) * 2.6;
+      const gy = this.groundAt(x, z);
+      if (Math.abs(gy - this.groundAt(slot.x, slot.z)) > 0.6) continue;
+      const capsule = new this.physics.R.Capsule(0.55, 0.32);
+      if (this.physics.world.intersectionWithShape({ x, y: gy + 0.95, z }, { x: 0, y: 0, z: 0, w: 1 }, capsule, undefined, GROUPS.actorQuery)) continue;
+      const ped = this.addPed(x, gy, z, rng.range(-Math.PI, Math.PI), 1 + (placed % (OUTFIT_COUNT - 1)), true);
+      ped.brain!.enter('idle');
+      placed++;
+    }
+  }
+
   respawnVehicle(v: VehicleEntity) {
     const h = v.home;
     const y = Math.max(h.y, this.groundAt(h.x, h.z)) + this.restHeight(v.car.h) + 0.05;
@@ -334,6 +518,15 @@ export class Simulation {
     u[H.Flags] = ped.vehicleId ? SnapFlag.InVehicle : 0;
     f[H.CamClear] = player.camClear;
     u[H.PlayerPed] = ped.id;
+    f[H.Health] = ped.health;
+    f[H.Armour] = ped.armour;
+    const heat = this.law.heat;
+    u[H.Heat] = heat.level;
+    u[H.HeatPhase] = heat.phase === 'reported' ? HeatPhase.Reported : heat.phase === 'seen' ? HeatPhase.Seen : heat.phase === 'lost' ? HeatPhase.Lost : HeatPhase.None;
+    const life = this.lifeOf(1);
+    u[H.Overlay] = overlayOf(life.mode);
+    f[H.OverlayT] = life.t;
+    f[H.Cooldown] = heat.cooldownFrac;
     let n = 0;
     for (const e of this.registry.values()) {
       if (n >= MAX_ENTITIES) break;
@@ -365,14 +558,20 @@ export class Simulation {
       (c.grounded ? PedFlag.Grounded : 0) |
       (c.sprinting ? PedFlag.Sprinting : 0) |
       (e.vehicleId ? PedFlag.InVehicle : 0) |
-      (b ? PedFlag.Npc : 0) |
+      (e.role !== 'player' ? PedFlag.Npc : 0) |
+      (e.role === 'police' ? PedFlag.Police : 0) |
+      (e.life === 'downed' ? PedFlag.Downed : 0) |
+      (e.life === 'dead' ? PedFlag.Dead : 0) |
+      (e.melee ? PedFlag.Punching : 0) |
       (b?.state === 'flee' ? PedFlag.Fleeing : 0) |
       (b?.state === 'fight' ? PedFlag.Fighting : 0) |
       (b?.state === 'dragged' ? PedFlag.Dragged : 0) |
       (e.busy ? PedFlag.Busy : 0);
     f[o + E.Speed] = c.speed;
     f[o + E.Aux0] = c.yaw;
-    f[o + E.Aux1] = b?.swing ?? 0;
+    f[o + E.Aux1] = e.melee ? Math.min(1, e.melee.t / COMBAT.swingTime) : (b?.swing ?? 0);
+    f[o + E.Health] = e.health;
+    f[o + E.Health2] = e.armour;
   }
 
   private writeVehicle(view: SnapshotView, o: number, e: VehicleEntity) {
@@ -399,7 +598,16 @@ export class Simulation {
       (car.reversing ? VehicleFlag.Reversing : 0) |
       (car.skidding ? VehicleFlag.Skidding : 0) |
       (car.airborne ? VehicleFlag.Airborne : 0) |
-      (e.doorOpen ? VehicleFlag.DoorOpen : 0);
+      (e.doorOpen ? VehicleFlag.DoorOpen : 0) |
+      (e.smoking ? VehicleFlag.Smoking : 0) |
+      (e.engineDead ? VehicleFlag.EngineDead : 0) |
+      (e.onFire ? VehicleFlag.OnFire : 0) |
+      (e.burnt ? VehicleFlag.Burnt : 0) |
+      (e.police ? VehicleFlag.Police : 0) |
+      (e.lightbar ? VehicleFlag.Lightbar : 0);
+    f[o + E.Health] = e.health;
+    f[o + E.Health2] = e.engine;
+    f[o + E.Aux2] = e.onFire ? Math.min(1, e.burnT / e.burnFor) : 0;
     f[o + E.Speed] = car.speedForward;
     f[o + E.Aux0] = car.steerAngle;
     f[o + E.Aux1] = car.throttleApplied;

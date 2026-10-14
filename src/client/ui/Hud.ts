@@ -7,6 +7,7 @@ import { HANDLING } from '../../shared/handling';
 import { rotateVecInv } from '../../shared/math';
 import { PedFlag, VehicleFlag } from '../../shared/snapshot';
 import type { SimEvent } from '../../shared/protocol';
+import { HeatPhase, Overlay } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
 import { codeLabel } from '../input/bindings';
 import { padButtonFor, padButtonLabel, type GamepadSource } from '../input/gamepad';
@@ -33,6 +34,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent: 
   return e;
 }
 
+/** A five-pointed star in a 24 x 24 box. */
+const STAR_POINTS = '12,1.5 15,8.6 22.5,9.2 16.8,14.1 18.6,21.5 12,17.6 5.4,21.5 7.2,14.1 1.5,9.2 9,8.6';
+
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 /** Compass point of a direction in game axes (north is -Z). */
 export function compassPoint(dx: number, dz: number): string {
@@ -53,11 +57,20 @@ export class Hud implements System {
   private helpEl: HTMLElement;
   private attribEl: HTMLElement;
   private debugEl: HTMLElement;
+  private healthEl: HTMLElement;
+  private healthFill: HTMLElement;
+  private armourEl: HTMLElement;
+  private armourFill: HTMLElement;
+  private starsEl: HTMLElement;
+  private starEls: SVGElement[] = [];
+  private coolFill: HTMLElement;
+  private overlayEl: HTMLElement;
+  private overlayText: HTMLElement;
   private toastUntil = 0;
   private helpUntil = performance.now() + 25000;
   private debugOn: boolean;
   private slow = 0;
-  private cache = { speed: '', state: '', prompt: '', fps: '' };
+  private cache = { speed: '', state: '', prompt: '', fps: '', health: '', armour: '', stars: '', cool: '', overlay: '' };
 
   constructor(private readonly game: Game) {
     game.hud = this;
@@ -70,6 +83,27 @@ export class Hud implements System {
     this.speedUnit = el('span', 'unit', speed, 'mph');
     this.stateEl = el('div', 'hud-state', this.root);
     this.promptEl = el('div', 'hud-prompt', this.root);
+    // Health and armour, bottom left.
+    const bars = el('div', 'hud-bars', this.root);
+    this.armourEl = el('div', 'bar armour', bars);
+    this.armourFill = el('div', 'fill', this.armourEl);
+    this.healthEl = el('div', 'bar health', bars);
+    this.healthFill = el('div', 'fill', this.healthEl);
+    // Stars, top right: hollow while reported, solid when seen, flashing when lost.
+    this.starsEl = el('div', 'hud-stars', this.root);
+    for (let i = 0; i < 6; i++) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('class', 'star');
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      poly.setAttribute('points', STAR_POINTS);
+      svg.appendChild(poly);
+      this.starsEl.appendChild(svg);
+      this.starEls.push(svg);
+    }
+    this.coolFill = el('div', 'cool', this.starsEl);
+    this.overlayEl = el('div', 'hud-overlay', this.root);
+    this.overlayText = el('div', 'text', this.overlayEl);
     this.toastEl = el('div', 'hud-toast', this.root);
     this.helpEl = el('div', 'hud-help', this.root);
     this.attribEl = el('div', 'hud-attrib', this.root);
@@ -107,14 +141,15 @@ export class Hud implements System {
     const pad = this.game.input.device === 'gamepad';
     const touch = this.game.input.device === 'touch';
     const rows: [string, string][] = touch
-      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, reset']]
+      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, punch, reset']]
       : pad
-        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('reset'), 'Reset car']]
+        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('melee'), 'Punch'], [k('reset'), 'Reset car']]
         : [
             ['W A S D', 'Move, or throttle, brake and steer'],
             ['Shift', 'Sprint'],
             [`${k('jump')}`, 'Jump, or handbrake'],
             [k('interact'), 'Get in or out; at a driver\'s door, carjack'],
+            [k('melee'), 'Punch (on foot)'],
             ['Arrow keys / mouse', 'Look (click the game to capture the mouse)'],
             [k('lookBack'), 'Look behind (car)'],
             [`${k('toggleView')} / scroll`, 'Camera distance'],
@@ -141,7 +176,22 @@ export class Hud implements System {
         this.toast('Carjacked', 2200);
         break;
       case 'ped:attack':
-        this.toast('Hit by the driver');
+        if (e.targetId === this.game.view.ped?.id) this.toast('Hit');
+        break;
+      case 'witness:silenced':
+        this.toast('Witness silenced', 1600);
+        break;
+      case 'crime:reported':
+        if (!e.police) this.toast('Someone called it in', 1800);
+        break;
+      case 'vehicle:fire':
+        if (e.vehicleId === this.game.view.vehicle?.id && this.game.view.inVehicle) this.toast('Car on fire. Get out!', 2600);
+        break;
+      case 'vehicle:engine-dead':
+        if (e.vehicleId === this.game.view.vehicle?.id && this.game.view.inVehicle) this.toast('Engine dead', 2000);
+        break;
+      case 'heat:change':
+        if (e.level === 0 && e.prevLevel > 0 && (e.reason === 'cooldown')) this.toast('Heat cleared', 2200);
         break;
       case 'entity:respawn':
         this.toast('Back to the spawn point');
@@ -186,6 +236,7 @@ export class Hud implements System {
     const state = v.inVehicle ? `In car · ${carName}` : 'On foot';
     if (state !== this.cache.state) this.stateEl.textContent = this.cache.state = state;
 
+    this.updateStatus();
     const prompt = this.promptText();
     if (prompt !== this.cache.prompt) {
       this.promptEl.textContent = this.cache.prompt = prompt;
@@ -197,6 +248,57 @@ export class Hud implements System {
     if (this.debugOn && this.slow > 0.25) {
       this.slow = 0;
       this.renderDebug();
+    }
+  }
+
+  /** Health and armour bars, the stars, and the WASTED or BUSTED screen. */
+  private updateStatus() {
+    const v = this.game.view;
+    const hp = Math.max(0, Math.min(100, Math.round(v.health)));
+    const ar = Math.max(0, Math.min(100, Math.round(v.armour)));
+    const hpKey = String(hp);
+    if (hpKey !== this.cache.health) {
+      this.cache.health = hpKey;
+      this.healthFill.style.width = `${hp}%`;
+      this.healthEl.classList.toggle('low', hp > 0 && hp <= 30);
+      this.healthEl.title = `Health ${hp}`;
+    }
+    const arKey = String(ar);
+    if (arKey !== this.cache.armour) {
+      this.cache.armour = arKey;
+      this.armourFill.style.width = `${ar}%`;
+      this.armourEl.classList.toggle('empty', ar === 0);
+      this.armourEl.title = `Armour ${ar}`;
+    }
+
+    const phase = v.heatPhase === HeatPhase.Seen ? 'seen' : v.heatPhase === HeatPhase.Lost ? 'lost' : v.heatPhase === HeatPhase.Reported ? 'reported' : 'none';
+    const starKey = `${v.heat}/${phase}`;
+    if (starKey !== this.cache.stars) {
+      this.cache.stars = starKey;
+      this.starsEl.className = `hud-stars ${phase}${v.heat > 0 ? ' active' : ''}`;
+      this.starEls.forEach((s, i) => s.classList.toggle('on', i < v.heat));
+      this.starsEl.setAttribute('data-heat', String(v.heat));
+      this.starsEl.setAttribute('data-phase', phase);
+    }
+    const cool = v.heat > 0 && phase !== 'seen' ? String(Math.round((1 - v.cooldown) * 50)) : '-';
+    if (cool !== this.cache.cool) {
+      this.cache.cool = cool;
+      this.coolFill.style.width = cool === '-' ? '0%' : `${(1 - v.cooldown) * 100}%`;
+    }
+
+    const ov = v.overlay === Overlay.Wasted ? 'wasted' : v.overlay === Overlay.Busted ? 'busted' : '';
+    if (ov !== this.cache.overlay) {
+      this.cache.overlay = ov;
+      this.overlayEl.className = `hud-overlay ${ov}${ov ? ' on' : ''}`;
+      this.overlayText.textContent = ov === 'wasted' ? 'WASTED' : ov === 'busted' ? 'BUSTED' : '';
+    }
+    if (ov) {
+      // Fades in over the first second and a half, and out as the respawn arrives.
+      const t = v.overlayT;
+      const fadeIn = Math.min(1, t / 1.5);
+      const fadeOut = ov === 'wasted' ? Math.min(1, Math.max(0, (3.4 - t) / 0.5)) : Math.min(1, Math.max(0, (2.8 - t) / 0.5));
+      this.overlayEl.style.setProperty('--ov', String(fadeIn));
+      this.overlayEl.style.setProperty('--ov-out', String(fadeOut));
     }
   }
 

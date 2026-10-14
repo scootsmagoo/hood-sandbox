@@ -1,0 +1,25 @@
+{
+  "_comment": "The law for a tile whose city has no jurisdictions.json (the procedural test ground, a new city before its pack is written): one standard agency that responds everywhere.",
+  "agencies": [
+    {
+      "id": "police",
+      "name": "City Police",
+      "short": "PD",
+      "kind": "city",
+      "pursuit": "standard",
+      "minPursuitSeverity": 2,
+      "pit": false,
+      "livery": { "body": "#23303f", "stripe": "#dcdcdc", "lightbar": ["#1e4dff", "#ff2020"] },
+      "vehicle": "sedan",
+      "minHeat": 1
+    }
+  ],
+  "areas": [{ "agency": "police", "default": true }],
+  "dispatch": {
+    "police": [
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 3, "spawnIntervalS": 12, "unitsPerSpawn": 1, "loadout": "shotgun" }
+    ]
+  }
+}

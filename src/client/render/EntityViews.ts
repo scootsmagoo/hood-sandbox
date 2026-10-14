@@ -10,8 +10,16 @@ import { PedFlag, VehicleFlag } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
 import { OUTFIT_COUNT } from '../../shared/entityDefs';
-import { buildPedModel, buildVehicleModel, OUTFITS, type PedMode, type PedModel, type VehicleModel } from './models';
+import { buildPedModel, buildVehicleModel, glowTex, OUTFITS, type PedMode, type PedModel, type VehicleModel } from './models';
 import { SmokeSystem } from './Smoke';
+
+/** A colour scaled toward black. */
+function shade(color: number, k: number): number {
+  const r = Math.round(((color >> 16) & 255) * k);
+  const g = Math.round(((color >> 8) & 255) * k);
+  const b = Math.round((color & 255) * k);
+  return (r << 16) | (g << 8) | b;
+}
 
 declare module '../Game' {
   interface Game {
@@ -23,6 +31,8 @@ interface PedView {
   kind: 'ped';
   model: PedModel;
   phase: number;
+  /** How far toppled, eased toward the sim's state: 1 on its back, -1 face down. */
+  lie: number;
 }
 interface VehicleView {
   kind: 'vehicle';
@@ -31,6 +41,11 @@ interface VehicleView {
   handlingId: string;
   /** How open the driver's door is drawn, 0 to 1 (eased toward the sim's flag). */
   door: number;
+  /** Last wear and burnt state pushed into the model. */
+  wear: number;
+  burnt: boolean;
+  /** A police car, with a lightbar to flash. */
+  police: boolean;
 }
 type View = PedView | VehicleView;
 
@@ -40,12 +55,34 @@ export class EntityViews implements System {
   private views = new Map<EntityId, View>();
   private group = new THREE.Group();
   readonly smoke: SmokeSystem;
+  /** Engine smoke (dark), flames (additive orange) and the explosion's flash. */
+  private readonly engineSmoke: SmokeSystem;
+  private readonly fire: SmokeSystem;
+  private readonly flashes: { sprite: THREE.Sprite; t: number }[] = [];
+  private time = 0;
 
   constructor(private readonly game: Game) {
     game.views = this;
     this.group.name = 'entities';
     game.scene.add(this.group);
     this.smoke = new SmokeSystem(game.scene);
+    this.engineSmoke = new SmokeSystem(game.scene, { max: 360, color: [0.16, 0.16, 0.18], size: [1.0, 4.2], life: [1.4, 2.8], rise: 2.6, alpha: 0.85 });
+    this.fire = new SmokeSystem(game.scene, { max: 320, color: [1.0, 0.42, 0.08], additive: true, size: [1.6, 0.4], life: [0.4, 0.9], rise: 2.2, alpha: 1 });
+    game.onSimEvent((e) => {
+      if (e.type === 'vehicle:explode') this.explode(e.x, e.y, e.z);
+    });
+  }
+
+  /** The stand-in explosion: a bright flash that swells and fades, a fireball and a burst of black smoke. */
+  private explode(x: number, y: number, z: number) {
+    const mat = new THREE.SpriteMaterial({ map: glowTex(), color: 0xffb060, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(x, y + 1, z);
+    sprite.scale.setScalar(2);
+    this.game.scene.add(sprite);
+    this.flashes.push({ sprite, t: 0 });
+    this.fire.burst(x, y + 0.8, z, 90, 9);
+    this.engineSmoke.burst(x, y + 1, z, 60, 6);
   }
 
   update(dt: number) {
@@ -68,14 +105,19 @@ export class EntityViews implements System {
         v.phase += dt * (3.5 + st.speed * 1.5);
         const mode: PedMode =
           f & PedFlag.Dragged ? 'dragged' : f & PedFlag.InVehicle ? 'seated' : f & PedFlag.Fighting ? 'fighting' : f & PedFlag.Fleeing ? 'fleeing' : 'normal';
+        const lieTo = f & PedFlag.Dead ? -1 : f & PedFlag.Downed ? 1 : 0;
+        v.lie += (lieTo - v.lie) * Math.min(1, dt * 14);
+        v.model.lie(v.lie);
         v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1);
       } else {
         const want = (st.flags & VehicleFlag.DoorOpen) !== 0 ? 1 : 0;
         v.door += (want - v.door) * Math.min(1, dt * 9);
         v.model.apply(st.wheels, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, v.door);
         this.emitSmoke(v, st, dt);
+        this.condition(v, st, dt);
       }
     }
+    this.time += dt;
     for (const [id, v] of this.views) {
       if (!entities.has(id) || !defs.has(id)) {
         this.group.remove(v.model.root);
@@ -85,16 +127,74 @@ export class EntityViews implements System {
     }
     const cam = this.game.camera;
     this.game.renderer.getDrawingBufferSize(this.size);
-    this.smoke.setScale(this.size.y / (2 * Math.tan((cam.fov * Math.PI) / 360)));
-    this.smoke.update(dt);
+    const scale = this.size.y / (2 * Math.tan((cam.fov * Math.PI) / 360));
+    for (const sys of [this.smoke, this.engineSmoke, this.fire]) {
+      sys.setScale(scale);
+      sys.update(dt);
+    }
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i];
+      f.t += dt;
+      const k = f.t / 0.9;
+      f.sprite.scale.setScalar(3 + Math.min(1, f.t / 0.2) * 22);
+      (f.sprite.material as THREE.SpriteMaterial).opacity = 0.85 * Math.max(0, 1 - k) ** 1.5;
+      if (k >= 1) {
+        this.game.scene.remove(f.sprite);
+        f.sprite.material.dispose();
+        this.flashes.splice(i, 1);
+      }
+    }
   }
 
   private make(def: EntityDef): View {
     if (def.kind === EntityKind.Ped) {
-      return { kind: 'ped', model: buildPedModel(OUTFITS[def.outfit % OUTFIT_COUNT]), phase: 0 };
+      const base = OUTFITS[def.outfit % OUTFIT_COUNT];
+      // An officer wears the agency's colour, with darker trousers and cap.
+      const look = def.police
+        ? { jacket: def.police.uniform, jeans: shade(def.police.uniform, 0.55), skin: base.skin, cap: shade(def.police.uniform, 0.7) }
+        : base;
+      return { kind: 'ped', model: buildPedModel(look), phase: 0, lie: 0 };
     }
     const h = HANDLING[def.typeId] ?? HANDLING.sedan;
-    return { kind: 'vehicle', model: buildVehicleModel(h, def.color), handlingId: h.id, door: 0 };
+    return {
+      kind: 'vehicle',
+      model: buildVehicleModel(h, def.color, def.police ? { body: def.police.body, stripe: def.police.stripe, lightbar: def.police.lightbar } : undefined),
+      handlingId: h.id,
+      door: 0,
+      wear: 0,
+      burnt: false,
+      police: !!def.police,
+    };
+  }
+
+  /** Wear on the paint, the lightbar, and the smoke and flames of a wreck. */
+  private condition(v: VehicleView, st: EntityState, dt: number) {
+    const h = HANDLING[v.handlingId] ?? HANDLING.sedan;
+    const burnt = (st.flags & VehicleFlag.Burnt) !== 0;
+    const wear = Math.round(Math.max(0, Math.min(1, 1 - st.health / h.damage.bodyHealth)) * 20) / 20;
+    if (wear !== v.wear || burnt !== v.burnt) {
+      v.wear = wear;
+      v.burnt = burnt;
+      v.model.setCondition(wear, burnt);
+    }
+    if (v.police) v.model.flash(this.time, (st.flags & VehicleFlag.Lightbar) !== 0);
+    this.q.set(st.q.x, st.q.y, st.q.z, st.q.w);
+    // The engine is at the front of the car, under the bonnet.
+    this.tmp.set(0, h.chassis.offset[1] + h.chassis.halfExtents[1] + 0.1, h.chassis.halfExtents[2] * 0.62).applyQuaternion(this.q);
+    const x = st.x + this.tmp.x;
+    const y = st.y + this.tmp.y;
+    const z = st.z + this.tmp.z;
+    const f = st.flags;
+    if (f & VehicleFlag.OnFire) {
+      this.fire.emit(x, y, z, 0, 0, dt, 1.6);
+      this.engineSmoke.emit(x, y + 0.4, z, 0, 0, dt, 1);
+    } else if (f & VehicleFlag.Smoking && !burnt) {
+      // Thin and pale when the engine first starts to give, thick and dark as it dies.
+      const strength = Math.max(0.15, Math.min(1, 1 - st.health2 / (h.damage.engineHealth * 0.42)));
+      this.engineSmoke.emit(x, y, z, st.vx * 0.2, st.vz * 0.2, dt, strength);
+    } else if (burnt) {
+      this.engineSmoke.emit(x, y + 0.3, z, 0, 0, dt, 0.35);
+    }
   }
 
   private readonly size = new THREE.Vector2();
@@ -119,5 +219,7 @@ export class EntityViews implements System {
 
   dispose() {
     this.smoke.dispose();
+    this.engineSmoke.dispose();
+    this.fire.dispose();
   }
 }

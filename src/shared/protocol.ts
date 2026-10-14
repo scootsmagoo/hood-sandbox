@@ -5,6 +5,7 @@
  */
 import type { EntityDef } from './entityDefs';
 import type { EntityId } from './entities';
+import type { CrimeId } from './law';
 import type { TileManifest } from './tile';
 
 export const SIM_HZ = 60;
@@ -20,6 +21,8 @@ export const Button = {
   /** Stand the vehicle back on its wheels. */
   Reset: 1 << 4,
   Horn: 1 << 5,
+  /** On foot: throw a punch. */
+  Melee: 1 << 6,
 } as const;
 
 /** Indices into `InputCommand.axes`. */
@@ -69,8 +72,53 @@ export type SimEvent =
    * listens for; `reaction` is how the victim will respond, rolled from their personality.
    */
   | { type: 'carjack'; tick: number; pedId: EntityId; victimId: EntityId; vehicleId: EntityId; x: number; y: number; z: number; reaction: 'flee' | 'fight' }
-  /** A ped landed a blow. */
-  | { type: 'ped:attack'; tick: number; pedId: EntityId; targetId: EntityId; damage: number };
+  /** A ped landed a blow (the player's or an NPC's). */
+  | { type: 'ped:attack'; tick: number; pedId: EntityId; targetId: EntityId; damage: number }
+  /** A ped started a punch (hit or miss). */
+  | { type: 'melee:swing'; tick: number; pedId: EntityId }
+  /** Something hurt a ped. `sourceId` is the ped responsible (0 for a fall); for `vehicle`, `vehicleId` is the car. */
+  | { type: 'damage'; tick: number; sourceId: EntityId; targetId: EntityId; amount: number; kind: DamageKind; health: number; armour: number; fatal: boolean; x: number; y: number; z: number; vehicleId?: EntityId }
+  /** A ped was knocked to the ground (alive). */
+  | { type: 'ped:down'; tick: number; pedId: EntityId; seconds: number }
+  /** A downed ped got back up. */
+  | { type: 'ped:up'; tick: number; pedId: EntityId }
+  | { type: 'ped:dead'; tick: number; pedId: EntityId; sourceId: EntityId; kind: DamageKind; x: number; y: number; z: number }
+  /** A car's body or engine took damage. `body` and `engine` are the health left. */
+  | { type: 'vehicle:damage'; tick: number; vehicleId: EntityId; amount: number; body: number; engine: number; sourceId: EntityId }
+  /** The engine dropped below the smoking threshold. */
+  | { type: 'vehicle:smoke'; tick: number; vehicleId: EntityId }
+  | { type: 'vehicle:engine-dead'; tick: number; vehicleId: EntityId }
+  | { type: 'vehicle:fire'; tick: number; vehicleId: EntityId }
+  /** The stand-in explosion: a flash, and the car is burnt out and disabled for good. */
+  | { type: 'vehicle:explode'; tick: number; vehicleId: EntityId; x: number; y: number; z: number }
+  /** A crime was committed (before anyone reports it). */
+  | { type: 'crime'; tick: number; crime: CrimeId; severity: number; heat: number; x: number; y: number; z: number; perpetratorId: EntityId; victimId: EntityId; vehicleId: EntityId; witnesses: number; description: CrimeDescription }
+  /** A witness called it in, or police saw it. */
+  | { type: 'crime:reported'; tick: number; crime: CrimeId; reporterId: EntityId; police: boolean; x: number; z: number }
+  /** A witness who was going to call was knocked down or killed first. */
+  | { type: 'witness:silenced'; tick: number; pedId: EntityId; crime: CrimeId }
+  /** The heat level or its phase changed. `phase`: none, reported (hollow stars), seen (solid), lost (flashing). */
+  | { type: 'heat:change'; tick: number; level: number; prevLevel: number; phase: HeatPhaseName; prevPhase: HeatPhaseName; reason: 'crime' | 'sighting' | 'lost' | 'cooldown' | 'busted' | 'wasted'; lastKnown: { x: number; z: number } | null }
+  | { type: 'police:spawn'; tick: number; vehicleId: EntityId; officerIds: EntityId[]; agency: string }
+  /** Units stood down and are leaving. */
+  | { type: 'police:stand-down'; tick: number }
+  /** An officer got out to chase on foot. */
+  | { type: 'police:dismount'; tick: number; pedId: EntityId; vehicleId: EntityId }
+  | { type: 'player:wasted'; tick: number; pedId: EntityId; x: number; y: number; z: number }
+  | { type: 'player:busted'; tick: number; pedId: EntityId; officerId: EntityId }
+  | { type: 'player:respawn'; tick: number; pedId: EntityId; reason: 'wasted' | 'busted'; x: number; y: number; z: number };
+
+export type DamageKind = 'melee' | 'vehicle' | 'fall' | 'explosion' | 'fire';
+export type HeatPhaseName = 'none' | 'reported' | 'seen' | 'lost';
+
+/** What the police know about the culprit. Each part can be cleared on its own later. */
+export interface CrimeDescription {
+  vehicle: { id: EntityId; typeId: string; plate: string; color: number } | null;
+  /** Index into the outfit table, or -1 when nobody saw the clothes. */
+  clothes: number;
+  face: boolean;
+  cctv: boolean;
+}
 
 export interface SimInit {
   seed: number;
@@ -92,6 +140,10 @@ export interface SimInit {
   driverMood?: 'flee' | 'fight';
   /** How many empty cars to park along nearby curbs (default 6). */
   parkedCars?: number;
+  /** Idle pedestrians to stand about on nearby sidewalks (default 0): witnesses, and something to punch or run over. */
+  bystanders?: number;
+  /** Starting armour for the player, 0 to 100 (default 0). */
+  armour?: number;
   /** Run the clock by itself. Tests turn this off and call `advance`. */
   autoRun: boolean;
 }

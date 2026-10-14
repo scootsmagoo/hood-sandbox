@@ -1,0 +1,130 @@
+{
+  "agencies": [
+    {
+      "id": "acp",
+      "name": "Atlanta City Police",
+      "short": "ACP",
+      "kind": "city",
+      "pursuit": "restrictive",
+      "minPursuitSeverity": 3,
+      "pit": false,
+      "livery": { "body": "#2c3e50", "stripe": "#e8c547", "lightbar": ["#3ea8ff", "#ffb000"] },
+      "vehicle": "sedan",
+      "minHeat": 1
+    },
+    {
+      "id": "ghp",
+      "name": "Georgia Highway Patrol",
+      "short": "GHP",
+      "kind": "state",
+      "pursuit": "aggressive",
+      "minPursuitSeverity": 1,
+      "pit": true,
+      "livery": { "body": "#1f4d3a", "stripe": "#e9e4d4", "lightbar": ["#ff4422", "#ffd000"] },
+      "vehicle": "coupe",
+      "minHeat": 1
+    },
+    {
+      "id": "tap",
+      "name": "Transit Authority Police",
+      "short": "TAP",
+      "kind": "transit",
+      "pursuit": "standard",
+      "minPursuitSeverity": 2,
+      "pit": false,
+      "livery": { "body": "#6b2d5c", "stripe": "#f5f5f5", "lightbar": ["#00d1c1", "#ffffff"] },
+      "vehicle": "sedan",
+      "minHeat": 1
+    },
+    {
+      "id": "gtf",
+      "name": "Peach State Investigations Task Force",
+      "short": "GTF",
+      "kind": "state_investigations",
+      "pursuit": "standard",
+      "minPursuitSeverity": 3,
+      "pit": false,
+      "livery": { "body": "#15171a", "stripe": "#2a2d33", "lightbar": ["#252a31", "#2a2526"] },
+      "vehicle": "coupe",
+      "minHeat": 4
+    },
+    {
+      "id": "fed",
+      "name": "Federal Joint Task Force",
+      "short": "FJTF",
+      "kind": "federal",
+      "pursuit": "standard",
+      "minPursuitSeverity": 3,
+      "pit": false,
+      "livery": { "body": "#3d4046", "stripe": "#8a8f98", "lightbar": ["#f0f0f0", "#6a7cff"] },
+      "vehicle": "pickup",
+      "minHeat": 5
+    },
+    {
+      "id": "guard",
+      "name": "Regional Home Guard",
+      "short": "RHG",
+      "kind": "military",
+      "pursuit": "standard",
+      "minPursuitSeverity": 4,
+      "pit": false,
+      "livery": { "body": "#4b5320", "stripe": "#2e3218", "lightbar": ["#c9b15a", "#8a7a3a"] },
+      "vehicle": "pickup",
+      "minHeat": 6
+    },
+    {
+      "id": "fcp",
+      "name": "Fulton County Police",
+      "short": "FCP",
+      "kind": "county",
+      "pursuit": "standard",
+      "minPursuitSeverity": 2,
+      "pit": false,
+      "livery": { "body": "#2f6f8f", "stripe": "#f7f7f2", "lightbar": ["#ff7a00", "#00a6ff"] },
+      "vehicle": "sedan",
+      "minHeat": 1
+    }
+  ],
+  "areas": [
+    { "agency": "ghp", "roadClasses": ["motorway", "motorway_link", "trunk", "trunk_link"], "maxDistanceM": 15 },
+    { "agency": "acp", "default": true }
+  ],
+  "dispatch": {
+    "acp": [
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 25, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 4, "maxUnits": 3, "spawnIntervalS": 12, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 5, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 6, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "rifle" }
+    ],
+    "ghp": [
+      { "heat": 1, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 3, "maxUnits": 4, "spawnIntervalS": 8, "unitsPerSpawn": 2, "loadout": "shotgun" },
+      { "heat": 4, "maxUnits": 4, "spawnIntervalS": 8, "unitsPerSpawn": 1, "loadout": "rifle" },
+      { "heat": 5, "maxUnits": 4, "spawnIntervalS": 6, "unitsPerSpawn": 1, "loadout": "rifle" },
+      { "heat": 6, "maxUnits": 4, "spawnIntervalS": 6, "unitsPerSpawn": 1, "loadout": "rifle" }
+    ],
+    "tap": [
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" }
+    ],
+    "gtf": [
+      { "heat": 4, "maxUnits": 2, "spawnIntervalS": 30, "unitsPerSpawn": 1, "loadout": "rifle" },
+      { "heat": 5, "maxUnits": 2, "spawnIntervalS": 25, "unitsPerSpawn": 1, "loadout": "rifle" },
+      { "heat": 6, "maxUnits": 2, "spawnIntervalS": 25, "unitsPerSpawn": 1, "loadout": "rifle" }
+    ],
+    "fed": [
+      { "heat": 5, "maxUnits": 1, "spawnIntervalS": 45, "unitsPerSpawn": 1, "loadout": "rifle" },
+      { "heat": 6, "maxUnits": 1, "spawnIntervalS": 45, "unitsPerSpawn": 1, "loadout": "rifle" }
+    ],
+    "guard": [
+      { "heat": 6, "maxUnits": 1, "spawnIntervalS": 60, "unitsPerSpawn": 1, "loadout": "rifle" }
+    ],
+    "fcp": [
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 1, "spawnIntervalS": 30, "unitsPerSpawn": 1, "loadout": "pistol" }
+    ]
+  }
+}

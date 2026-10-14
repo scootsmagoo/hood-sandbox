@@ -1,5 +1,5 @@
 {
-  "_comment": "Handling per vehicle type. Speeds in m/s, forces as accelerations in m/s^2, angles in degrees. Entries other than sedan only list what they change. Axes: +Z forward, +Y up, +X left.",
+  "_comment": "Handling per vehicle type. damage: multipliers on collision, engine, weapon and deformation damage (1 = the sedan), and the starting body and engine health. Speeds in m/s, forces as accelerations in m/s^2, angles in degrees. Entries other than sedan only list what they change. Axes: +Z forward, +Y up, +X left.",
   "sedan": {
     "name": "Sedan (stand-in)",
     "body": "sedan",
@@ -29,7 +29,8 @@
       "handbrakeGripMult": 0.32, "forceHeight": 0.35
     },
     "assists": { "counterSteer": 0.75, "yawAssist": 0.8, "maxSlideDeg": 40, "yawRateMax": 2.2, "downforce": 0.004,
-      "donutYawRate": 1.55, "donutSpeed": 8.5, "donutMaxSpeed": 14, "donutRearGrip": 0.3, "donutBrake": 6, "burnoutHold": 5.2, "burnoutCreep": 1.0, "donutFrontGrip": 0.6, "donutSlideDeg": 55 }
+      "donutYawRate": 1.55, "donutSpeed": 8.5, "donutMaxSpeed": 14, "donutRearGrip": 0.3, "donutBrake": 6, "burnoutHold": 5.2, "burnoutCreep": 1.0, "donutFrontGrip": 0.6, "donutSlideDeg": 55 },
+    "damage": { "collisionMult": 1.0, "engineMult": 1.0, "weaponMult": 1.0, "deformMult": 1.0, "bodyHealth": 1000, "engineHealth": 1000 }
   },
   "coupe": {
     "name": "Coupe (stand-in)",
@@ -38,7 +39,8 @@
     "drive": { "driveForce": 9.5, "maxFlatVel": 68, "driveBiasFront": 0.0 },
     "steering": { "lockDeg": 36, "rateDeg": 190 },
     "traction": { "curveMax": 1.7, "curveMin": 1.2, "curveLateralDeg": 8 },
-    "assists": { "burnoutHold": 6.2 }
+    "assists": { "burnoutHold": 6.2 },
+    "damage": { "collisionMult": 1.15, "engineMult": 1.25, "deformMult": 1.2 }
   }
   ,
   "pickup": {
@@ -68,6 +70,7 @@
       "curveMax": 1.4, "curveMin": 1.05, "curveLateralDeg": 10, "lateralStiffness": 0.4,
       "handbrakeGripMult": 0.3, "forceHeight": 0.05
     },
-    "assists": { "counterSteer": 0.7, "yawAssist": 0.7, "maxSlideDeg": 38, "yawRateMax": 1.9, "donutYawRate": 1.3, "donutSpeed": 8, "burnoutHold": 6.4, "donutSlideDeg": 50 }
+    "assists": { "counterSteer": 0.7, "yawAssist": 0.7, "maxSlideDeg": 38, "yawRateMax": 1.9, "donutYawRate": 1.3, "donutSpeed": 8, "burnoutHold": 6.4, "donutSlideDeg": 50 },
+    "damage": { "collisionMult": 0.75, "engineMult": 0.8, "weaponMult": 0.9, "deformMult": 0.7, "bodyHealth": 1200, "engineHealth": 1200 }
   }
 }

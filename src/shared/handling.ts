@@ -112,6 +112,19 @@ export interface HandlingData {
     /** Angle between the nose and the direction of travel a donut settles at, degrees. */
     donutSlideDeg: number;
   };
+  /** GTA-style damage multipliers (1 is the sedan) and the health a new car starts with. */
+  damage: {
+    /** Body damage from collisions. */
+    collisionMult: number;
+    /** Engine damage from collisions (front impacts count most). */
+    engineMult: number;
+    /** Damage from gunfire and explosions (no weapons yet). */
+    weaponMult: number;
+    /** How far a hit dents the body (render). */
+    deformMult: number;
+    bodyHealth: number;
+    engineHealth: number;
+  };
 }
 
 const DEFAULT_ID = 'sedan';
@@ -151,6 +164,8 @@ export function parseHandling(id: string, entry: unknown, base?: HandlingData): 
   need(h.drive.driveBiasFront >= 0 && h.drive.driveBiasFront <= 1, 'driveBiasFront must be 0 to 1');
   need(h.traction.curveMax >= h.traction.curveMin && h.traction.curveMin > 0, 'traction curve must fall from max to min');
   need(h.traction.lateralStiffness > 0 && h.traction.lateralStiffness <= 1, 'lateralStiffness must be in (0, 1]');
+  need(h.damage.bodyHealth > 0 && h.damage.engineHealth > 0, 'damage health must be positive');
+  need(h.damage.collisionMult >= 0 && h.damage.engineMult >= 0, 'damage multipliers cannot be negative');
   return h;
 }
 

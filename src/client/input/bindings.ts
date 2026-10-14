@@ -13,6 +13,7 @@ export type Action =
   | 'interact'
   | 'handbrake'
   | 'reset'
+  | 'melee'
   | 'lookLeft'
   | 'lookRight'
   | 'lookUp'
@@ -39,6 +40,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   interact: ['KeyE', 'KeyF'],
   handbrake: ['Space'],
   reset: ['KeyR'],
+  melee: ['KeyQ'],
   lookLeft: ['ArrowLeft'],
   lookRight: ['ArrowRight'],
   lookUp: ['ArrowUp'],

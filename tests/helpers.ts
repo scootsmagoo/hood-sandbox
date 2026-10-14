@@ -80,3 +80,48 @@ export function telemetry(car: import('../src/sim/vehicles/RaycastCar').RaycastC
     steerDeg: (car.steerAngle * 180) / Math.PI,
   };
 }
+
+import type { RoadData } from '../src/shared/tile';
+import type { SimEvent } from '../src/shared/protocol';
+
+/** An idle bystander standing at (x, z) on the flat ground, facing `yaw`. */
+export function addNpc(sim: Simulation, x: number, z: number, yaw = 0, mood?: 'flee' | 'fight'): PedEntity {
+  const p = sim.addPed(x, 0, z, yaw, 2, true);
+  p.brain!.enter('idle');
+  if (mood) (p.brain!.personality as { reaction: string }).reaction = mood;
+  return p;
+}
+
+/** A grid of two-way streets every 300 m out to 600 m, each block side its own road so the ends meet. */
+export function gridRoads(): RoadData[] {
+  const out: RoadData[] = [];
+  const xs = [-600, -300, 0, 300, 600];
+  const mk = (id: string, a: [number, number], b: [number, number]): RoadData => ({
+    id, class: 'secondary', lanes: 2, oneway: false, bridge: false, layer: 0, width: 8, points: [[a[0], 0, a[1]], [b[0], 0, b[1]]],
+  });
+  for (let i = 0; i < xs.length; i++) {
+    for (let j = 0; j < xs.length - 1; j++) {
+      out.push(mk(`h${i}-${j}`, [xs[j], xs[i]], [xs[j + 1], xs[i]]));
+      out.push(mk(`v${i}-${j}`, [xs[i], xs[j]], [xs[i], xs[j + 1]]));
+    }
+  }
+  return out;
+}
+
+/** The empty flat tile with the street grid. */
+export function gridTile(): TileData {
+  return { ...flatTile(), roads: gridRoads() };
+}
+
+/** Runs ticks and returns every event they produced. */
+export function runLog(sim: Simulation, ticks: number, c: InputCommand | (() => InputCommand) = () => cmd()): SimEvent[] {
+  const out: SimEvent[] = [];
+  for (let i = 0; i < ticks; i++) {
+    sim.pushInput(1, typeof c === 'function' ? c() : { ...c, tick: ++cmdTick });
+    sim.step();
+    out.push(...sim.drainEvents());
+  }
+  return out;
+}
+
+export const ofType = <T extends SimEvent['type']>(events: readonly SimEvent[], type: T) => events.filter((e): e is Extract<SimEvent, { type: T }> => e.type === type);

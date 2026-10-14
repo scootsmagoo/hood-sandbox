@@ -20,7 +20,7 @@ import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
-import { STATE, carPoint, doorStand, walkTo } from './drive-helpers.mjs';
+import { HUD, STATE, carPoint, doorStand, walkTo } from './drive-helpers.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = Object.fromEntries(
@@ -389,7 +389,7 @@ async function carjackSuite(name) {
   });
   await check('the driver runs away from the car', async () => {
     const t = await until(page, (s) => s.peds.some((p) => !p.player && p.speed > 5), 3000, 'the driver to run');
-    const run0 = t.peds.find((p) => !p.player);
+    const run0 = t.peds.find((p) => !p.player && (p.flags & 1024) === 0);
     await wait(1200);
     const s = await st();
     const now = s.peds.find((p) => p.id === run0.id);
@@ -400,7 +400,8 @@ async function carjackSuite(name) {
     return `${d0.toFixed(1)} -> ${d1.toFixed(1)} m, ${now.speed.toFixed(1)} m/s`;
   });
   await check('and is removed from the world once far away', async () => {
-    await until(page, (s) => !s.peds.some((p) => !p.player), 25000, 'the driver to be despawned');
+    // (the carjack calls the police: officers are not the driver)
+    await until(page, (s) => !s.peds.some((p) => !p.player && (p.flags & 1024) === 0), 25000, 'the driver to be despawned');
     const d = await eventsOf(page, 'entity:despawn');
     expect(d.length >= 1, 'no despawn event');
   });
@@ -448,7 +449,7 @@ async function carjackSuite(name) {
   });
   await ctx.close();
   let fails = c.fails();
-  if (name === 'worker') fails += (await fightSuite()) + (await handlingSuite());
+  if (name === 'worker') fails += (await fightSuite()) + (await handlingSuite()) + (await lawSuite('procedural'));
   return fails;
 }
 
@@ -615,7 +616,7 @@ async function realTile() {
     expect(errors.length === 0, errors.join(' | '));
   });
   await ctx.close();
-  return c.fails() + (await realCarjack());
+  return c.fails() + (await realCarjack()) + (await lawSuite('baked'));
 }
 
 /** The same flow on the real Five Points tile: sidewalk start, round the car, jack it, drive off. */
@@ -659,6 +660,246 @@ async function realCarjack() {
   });
   await ctx.close();
   return c.fails();
+}
+
+// ------------------------------------------------------------------------------------------------
+// Damage, crime, heat and the police
+
+/**
+ * Melee, the carjack's heat, running a ped over, and getting busted, with real key presses. The sim runs on the
+ * main thread (loopback) so a scene can be set up through it: peds placed, a report raised. `kind` is the ground:
+ * 'baked' is the real Five Points tile (the police need its streets, so only it checks the arrest), 'procedural'
+ * the flat test ground.
+ */
+async function lawSuite(kind) {
+  console.log(`--- law and damage (${kind})`);
+  const tile = kind === 'procedural' ? 'tile=none&' : '';
+  const base = `${tile}graphics=low&transport=loopback`;
+  const sim = (page, fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  const hud = (page) => page.evaluate(HUD);
+  const untilHud = async (page, cond, ms, label) => {
+    const t0 = Date.now();
+    for (;;) {
+      const h = await hud(page);
+      if (cond(h)) return h;
+      if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${label} (hud ${JSON.stringify(h)})`);
+      await page.waitForTimeout(WAIT_STEP);
+    }
+  };
+  let fails = 0;
+
+  // ---- melee on an NPC
+  {
+    const { page, errors, ctx } = await open(`${base}&driver=flee&parked=0`);
+    const c = makeChecker(page, `melee-${kind}`);
+    const { check, tap, wait, st, expect } = c;
+    await wait(800);
+    await installEventLog(page);
+    let npcId = 0;
+    await check('an NPC stands a step ahead', async () => {
+      npcId = await sim(page, (S) => {
+        const p = S.registry.get(S.playerPedId).controller;
+        const x = p.x + Math.sin(p.yaw) * 1.3;
+        const z = p.z + Math.cos(p.yaw) * 1.3;
+        const n = S.addPed(x, S.groundAt(x, z), z, p.yaw + Math.PI, 3, true);
+        n.brain.enter('idle');
+        return n.id;
+      });
+      await wait(400);
+      const s = await st();
+      expect(s.peds.some((p) => p.id === npcId), 'the NPC is not in the world');
+    });
+    await check('the HUD shows full health and no stars', async () => {
+      const h = await hud(page);
+      expect(h.health === 100, `health bar ${h.health}%`);
+      expect(!h.starsVisible && h.heat === 0, `stars ${JSON.stringify(h)}`);
+    });
+    await check('Q punches: the NPC takes damage and goes down', async () => {
+      await tap('KeyQ');
+      await wait(500);
+      const s = await st();
+      const n = s.peds.find((p) => p.id === npcId);
+      expect((n.flags & 256) !== 0, `NPC flags ${n.flags} (not downed)`);
+      const swing = await page.evaluate(() => window.__events.filter((e) => e.type === 'melee:swing').length);
+      const dmg = await page.evaluate(() => window.__events.filter((e) => e.type === 'damage'));
+      expect(swing === 1, `${swing} swings`);
+      expect(dmg.length === 1 && dmg[0].kind === 'melee' && dmg[0].health === 80, `damage events ${JSON.stringify(dmg)}`);
+      return `damage ${dmg[0].amount}, health left ${dmg[0].health}`;
+    });
+    await check('it gets back up after a couple of seconds', async () => {
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'ped:up'), null, { timeout: 6000 });
+    });
+    await check('punching again right away is on cooldown, a second later it lands', async () => {
+      const before = await page.evaluate(() => window.__events.filter((e) => e.type === 'melee:swing').length);
+      await tap('KeyQ');
+      await tap('KeyQ');
+      const mid = await page.evaluate(() => window.__events.filter((e) => e.type === 'melee:swing').length);
+      expect(mid - before <= 1, `${mid - before} swings in two taps`);
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- a carjack puts stars in the HUD
+  {
+    const { page, errors, ctx } = await open(`${base}&driver=flee&parked=0`);
+    const c = makeChecker(page, `jack-heat-${kind}`);
+    const { check, tap, wait, st, expect } = c;
+    await wait(800);
+    await installEventLog(page);
+    const hero = (await st()).car;
+    await check('no stars before the crime', async () => {
+      const h = await hud(page);
+      expect(!h.starsVisible && h.heat === 0, JSON.stringify(h));
+    });
+    await check('carjack, and within seconds the victim calls it in: one hollow star', async () => {
+      expect(await walkToDriverDoor(page, hero.id), 'did not reach the door');
+      await tap('KeyE');
+      await until(page, (s) => s.inCar, 5000, 'the player to be in the car');
+      const crime = await page.evaluate(() => window.__events.filter((e) => e.type === 'crime'));
+      expect(crime.length === 1 && crime[0].crime === 'carjack', `crime events ${JSON.stringify(crime.map((e) => e.crime))}`);
+      expect(/^[A-Z]{3}\d{4}$/.test(crime[0].description.vehicle?.plate ?? ''), `plate ${crime[0].description.vehicle?.plate}`);
+      const h = await untilHud(page, (x) => x.heat >= 1, 14000, 'a star');
+      expect(h.starsVisible, 'stars hidden');
+      expect(h.phase === 'reported' || h.phase === 'seen', `phase ${h.phase}`);
+      if (h.phase === 'reported') expect(h.starFill === 'none' || /rgba\(0, 0, 0, 0\)|transparent/.test(h.starFill), `hollow star has fill ${h.starFill}`);
+      return `heat ${h.heat} (${h.phase})`;
+    });
+    await check('the call is a crime:reported event from the victim', async () => {
+      const rep = await page.evaluate(() => window.__events.filter((e) => e.type === 'crime:reported'));
+      const jack = await page.evaluate(() => window.__events.find((e) => e.type === 'carjack'));
+      expect(rep.length === 1 && rep[0].reporterId === jack.victimId, JSON.stringify(rep));
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- running a ped over is heat 2
+  {
+    const { page, errors, ctx } = await open(`${base}&start=car&parked=0`);
+    const c = makeChecker(page, `runover-${kind}`);
+    const { check, tap, wait, st, expect, k } = c;
+    await wait(800);
+    await installEventLog(page);
+    await check('in the car, a pedestrian ahead on the road and a witness off to the side', async () => {
+      await tap('KeyE');
+      await wait(400);
+      expect((await st()).inCar, 'not in the car');
+      await sim(page, (S) => {
+        const v = S.registry.get(S.vehicleId);
+        const p = v.car.pose();
+        const f = { x: Math.sin(v.car.yaw), z: Math.cos(v.car.yaw) };
+        const l = { x: Math.cos(v.car.yaw), z: -Math.sin(v.car.yaw) };
+        const at = (d, side) => ({ x: p.x + f.x * d + l.x * side, z: p.z + f.z * d + l.z * side });
+        const a = at(8.5, 0);
+        const victim = S.addPed(a.x, S.groundAt(a.x, a.z), a.z, 0, 4, true);
+        victim.brain.enter('idle');
+        const b = at(14, 9);
+        const witness = S.addPed(b.x, S.groundAt(b.x, b.z), b.z, 0, 2, true);
+        witness.brain.enter('idle');
+        window.__victim = victim.id;
+      });
+      // let the theft of the empty car (nobody saw it from there) pass
+      await wait(300);
+    });
+    await check('driving into the pedestrian hurts them and is a hit_ped, heat 2', async () => {
+      await k.down('KeyW');
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'damage' && e.kind === 'vehicle'), null, { timeout: 8000 });
+      await k.up('KeyW');
+      await k.down('KeyS');
+      await wait(900);
+      await k.up('KeyS');
+      const d = await page.evaluate(() => window.__events.find((e) => e.type === 'damage' && e.kind === 'vehicle'));
+      expect(d.amount > 15 && d.sourceId > 0, `damage ${JSON.stringify(d)}`);
+      const h = await untilHud(page, (x) => x.heat >= 2, 14000, 'two stars');
+      expect(h.heat === 2, `heat ${h.heat}`);
+      const crimes = await page.evaluate(() => window.__events.filter((e) => e.type === 'crime').map((e) => e.crime));
+      expect(crimes.includes('hit_ped'), `crimes ${crimes}`);
+      return `damage ${Math.round(d.amount)}, ${h.heat} stars (${h.phase}), crimes ${crimes}`;
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- busted
+  if (kind === 'baked') {
+    const { page, errors, ctx } = await open(`${base}&parked=0`);
+    const c = makeChecker(page, `busted-${kind}`);
+    const { check, wait, st, expect } = c;
+    await wait(800);
+    await installEventLog(page);
+    await check('a reported crime, then a police car arrives and an officer gets out', async () => {
+      await sim(page, (S) => {
+        const p = S.playerPosition();
+        S.law.heat.report(1, 2, p.x, p.z);
+      });
+      const s = await until(page, (x) => x.cars.some((car) => (car.flags & 2048) !== 0), 20000, 'a police car');
+      const cop = s.cars.find((car) => (car.flags & 2048) !== 0);
+      expect((cop.flags & 4096) !== 0, 'lightbar off');
+      const hh = await hud(page);
+      expect(hh.starsVisible && hh.heat === 1, JSON.stringify(hh));
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'police:dismount'), null, { timeout: 45000 });
+    });
+    await check('standing still within reach for two seconds: BUSTED', async () => {
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'player:busted'), null, { timeout: 40000 });
+      const h = await untilHud(page, (x) => x.overlay === 'BUSTED', 3000, 'the BUSTED screen');
+      expect(h.overlay === 'BUSTED', h.overlay);
+    });
+    await check('then back at the spawn with the heat gone', async () => {
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'player:respawn' && e.reason === 'busted'), null, { timeout: 8000 });
+      const h = await untilHud(page, (x) => x.heat === 0 && !x.starsVisible && x.overlay === '', 4000, 'the heat to clear');
+      const s = await st();
+      const sp = await sim(page, (S) => S.tile.manifest.spawns.player);
+      expect(Math.hypot(s.ped.x - sp.x, s.ped.z - sp.z) < 3, `respawned ${Math.hypot(s.ped.x - sp.x, s.ped.z - sp.z).toFixed(1)} m from the spawn`);
+      expect(h.health === 100, `health ${h.health}`);
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- the flashing stars
+  {
+    const { page, ctx } = await open(`${base}&parked=0`);
+    const c = makeChecker(page, `stars-${kind}`);
+    const { check, wait, expect } = c;
+    await wait(600);
+    await check('stars are hollow when reported, solid when seen, and flash when lost', async () => {
+      await sim(page, (S) => { const p = S.playerPosition(); S.law.heat.report(3, 3, p.x, p.z); });
+      await wait(400);
+      const reported = await hud(page);
+      expect(reported.heat === 3 && reported.phase === 'reported', JSON.stringify(reported));
+      expect(reported.starFill === 'none' || /rgba\(0, 0, 0, 0\)|transparent/.test(reported.starFill), `reported fill ${reported.starFill}`);
+      await sim(page, (S) => { const p = S.playerPosition(); S.law.heat.sight(p.x, p.z); });
+      await wait(400);
+      const seen = await hud(page);
+      expect(seen.phase === 'seen' && /255, 210, 74/.test(seen.starFill), JSON.stringify(seen));
+      await sim(page, (S) => S.law.heat.step(2, false));
+      await wait(200);
+      const seenOpacity = new Set();
+      for (let i = 0; i < 24; i++) {
+        const h = await hud(page);
+        expect(h.phase === 'lost', `phase ${h.phase}`);
+        seenOpacity.add(h.starFillOpacity > 0.5 ? 'on' : 'off');
+        await wait(70);
+      }
+      expect(seenOpacity.size === 2, `the stars did not flash (${[...seenOpacity]})`);
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+  return fails;
 }
 
 await main();

@@ -3,6 +3,7 @@ import { HANDLING } from './shared/handling';
 import { SIM_HZ } from './shared/protocol';
 import { CameraRig } from './client/camera/CameraRig';
 import { Game } from './client/Game';
+import { AudioSystem } from './client/audio/AudioSystem';
 import { GamepadSource } from './client/input/gamepad';
 import { TouchControls } from './client/input/touch';
 import { NetSystem } from './client/net/NetSystem';
@@ -52,6 +53,8 @@ async function main() {
       start: ['car', 'jack'].includes(params.get('start') ?? '') ? (params.get('start') as 'car' | 'jack') : undefined,
       driverMood: ['flee', 'fight'].includes(params.get('driver') ?? '') ? (params.get('driver') as 'flee' | 'fight') : undefined,
       parkedCars: params.has('parked') ? Math.max(0, Math.min(20, Number(params.get('parked')) || 0)) : undefined,
+      bystanders: params.has('peds') ? Math.max(0, Math.min(12, Number(params.get('peds')) || 0)) : undefined,
+      armour: params.has('armour') ? Math.max(0, Math.min(100, Number(params.get('armour')) || 0)) : undefined,
       autoRun: true,
     });
 
@@ -72,6 +75,7 @@ async function main() {
     game.addSystem(new CameraRig(game));
     game.addSystem(new Atmosphere(game));
     game.addSystem(new Hud(game));
+    game.addSystem(new AudioSystem(game));
     game.gamepad = new GamepadSource();
     game.input.addSource(game.gamepad);
     game.touch = new TouchControls(document.body, game.input);

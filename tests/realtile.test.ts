@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadBakedTile } from '../src/shared/tile';
+import type { SimEvent } from '../src/shared/protocol';
 import { Simulation } from '../src/sim/Simulation';
 import { doorGeometry } from '../src/shared/doors';
 import { rotateVec } from '../src/shared/math';
@@ -91,5 +92,23 @@ describe.skipIf(!have)('the baked Five Points tile', () => {
     const p1 = car.car.pose();
     expect(Math.hypot(p1.x - p0.x, p1.z - p0.z)).toBeGreaterThan(15);
     expect(telemetry(car.car).upY).toBeGreaterThan(0.9);
+  });
+});
+
+describe.skipIf(!have)('the police on the baked Five Points tile', () => {
+  it('sends the Atlanta city police to a reported crime, by the real streets, and arrests a player who stands still', async () => {
+    const tile = await loadBakedTile(DIR, fsFetch);
+    const sim = await Simulation.create({ seed: 1, tile, parkedCars: 0 });
+    run(sim, 60, cmd());
+    sim.law.heat.report(1, 2, ped(sim).controller.x, ped(sim).controller.z);
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 60 * 70 && !events.some((e) => e.type === 'player:busted'); i++) {
+      run(sim, 1, cmd());
+      events.push(...sim.drainEvents());
+    }
+    const spawn = events.find((e) => e.type === 'police:spawn');
+    expect(spawn?.agency).toBe('acp');
+    expect(events.some((e) => e.type === 'police:dismount')).toBe(true);
+    expect(events.some((e) => e.type === 'player:busted')).toBe(true);
   });
 });
