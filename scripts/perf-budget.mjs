@@ -43,6 +43,10 @@ const budgetFile = existsSync(budgetPath) ? JSON.parse(readFileSync(budgetPath, 
 const PHASE_METRICS = ['frameP50', 'frameP95', 'cpuMean', 'cpuP95', 'gpuP50', 'gpuP95', 'draws', 'triangles', 'slowFrames'];
 const RUN_METRICS = ['bootMs', 'heapMB', 'geometries', 'textures'];
 const TIMED = new Set(['frameP50', 'frameP95', 'cpuMean', 'cpuP95', 'gpuP50', 'gpuP95', 'slowFrames', 'bootMs']);
+/** Measured values whose budget is based on the worst run (timings, and counts that follow the route). */
+const WORST = new Set([...TIMED, 'draws', 'triangles']);
+/** Frame times are display-bound (16.7 ms at 60 Hz), so their budget is a fixed drop threshold, not measured x headroom (which would accept 30 fps). */
+const FRAME_BUDGET_MS = 25;
 const PHASES = ['idle', 'walk', 'drive', 'look'];
 
 const server = await startServer(args);
@@ -101,14 +105,15 @@ if (args['write-budget'] !== undefined) {
     for (const ph of PHASES) {
       b.phases[ph] = {};
       for (const k of PHASE_METRICS) {
-        const v = m.phases[ph][k];
-        b.phases[ph][k] = k === 'draws' ? Math.ceil((v * 1.3) / 10) * 10 : k === 'triangles' ? Math.ceil((v * 1.3) / 1e4) * 1e4 : k === 'slowFrames' ? Math.max(6, Math.ceil(v * 2)) : v === null ? null : +Math.max(v * headroom, v + 1).toFixed(1);
+        const v = WORST.has(k) && typeof m.worst?.[ph]?.[k] === 'number' ? m.worst[ph][k] : m.phases[ph][k];
+        b.phases[ph][k] = k === 'frameP50' || k === 'frameP95' ? FRAME_BUDGET_MS : k === 'draws' ? Math.ceil((v * 1.3) / 10) * 10 : k === 'triangles' ? Math.ceil((v * 1.3) / 1e4) * 1e4 : k === 'slowFrames' ? Math.max(6, Math.ceil(v * 2)) : v === null ? null : Math.ceil(Math.max(v * headroom, v + 1) * 10 - 1e-9) / 10; // up to 0.1 ms: toFixed rounded half of them below the slack
       }
     }
-    b.bootMs = Math.round(m.bootMs * 2);
-    b.heapMB = Math.ceil(m.heapMB * 1.4 + 10);
-    b.geometries = Math.ceil(m.geometries * 1.3);
-    b.textures = Math.max(8, Math.ceil(m.textures * 1.5));
+    const top = (k) => Math.max(m[k], m.worstRun?.[k] ?? m[k]);
+    b.bootMs = Math.round(top('bootMs') * 2);
+    b.heapMB = Math.ceil(top('heapMB') * 1.4 + 10);
+    b.geometries = Math.ceil(top('geometries') * 1.3);
+    b.textures = Math.max(8, Math.ceil(top('textures') * 1.5));
     out.profiles[name] = b;
   }
   writeFileSync(budgetPath, JSON.stringify(out, null, 2) + '\n');
@@ -153,13 +158,22 @@ async function runProfile(name) {
   }
 }
 
+/** The best of the runs for the gate (`phases`, `bootMs`), and the worst for the budget's headroom (`worst`, `worstRun`): timing tails swing 2x between runs and counts follow the route. */
 function merge(a, b) {
-  const out = { ...b, phases: {} };
+  const out = { ...b, phases: {}, worst: {} };
   for (const ph of PHASES) {
     out.phases[ph] = {};
-    for (const k of Object.keys(b.phases[ph])) out.phases[ph][k] = TIMED.has(k) && typeof b.phases[ph][k] === 'number' ? Math.min(a.phases[ph][k], b.phases[ph][k]) : b.phases[ph][k];
+    out.worst[ph] = {};
+    for (const k of Object.keys(b.phases[ph])) {
+      const num = typeof b.phases[ph][k] === 'number';
+      // the gate: timings at their best run, counts at their worst (a heavier route in one run must still be seen)
+      out.phases[ph][k] = num && TIMED.has(k) ? Math.min(a.phases[ph][k], b.phases[ph][k]) : num && WORST.has(k) ? Math.max(a.phases[ph][k], b.phases[ph][k]) : b.phases[ph][k];
+      out.worst[ph][k] = num && WORST.has(k) ? Math.max(a.worst?.[ph]?.[k] ?? a.phases[ph][k], b.phases[ph][k]) : b.phases[ph][k];
+    }
   }
   out.bootMs = Math.min(a.bootMs, b.bootMs);
+  out.worstRun = {};
+  for (const k of ['bootMs', 'heapMB', 'geometries', 'textures']) out.worstRun[k] = Math.max(a.worstRun?.[k] ?? a[k], b[k]);
   out.errors = [...a.errors, ...b.errors];
   return out;
 }

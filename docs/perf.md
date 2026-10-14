@@ -69,6 +69,18 @@ Same scripted route, before = the tile above, after = the tile with road profile
 
 Draw calls do not grow (markings add one draw per visible chunk, and take away the crosswalk ribbon draws; the route differs a little from run to run). Triangles grow by 10 to 15%. The tile grows from 5.7 MB to 7.3 MB (`roads.glb` 1.3 -> 2.0 MB for the markings, junction surfaces and the bridges the pipeline made; `junctions.json` 0.9 MB, 0.15 MB gzipped; `collision.bin` 1.40 -> 1.72 MB for the derived bridges).
 
+## Road markings: first-visit uploads (2026-10-14)
+
+The re-baked tile has one road-markings mesh per 256 m chunk (62 of them), drawn only within 320 m x lodScale and hidden beyond. The soak's raw `geometries` count then rose by about 22 in the window it judges, and the soak failed against its limit of 8. The cause is not a leak: three.js uploads a geometry the first time it draws one of its objects, and frees it only on `dispose()`. Hiding a chunk does not free it, and does not need to. So the raw count rises once for every chunk the camera first sees, whatever its type (markings, ground levels, roads, buildings) and whatever the route, and never falls.
+
+An 8-minute probe of the soak loop (desktop-medium, sampled every 15 s, each geometry tagged on its first draw) showed it: the raw count went 395 -> 535. Of that, 28 of the 62 markings meshes were drawn for the first time; the rest was ground levels and roads newly in view. It stood still at 523 from 3.75 to 4.75 min and at 535 from 6.5 to 8 min, while the bot drove over ground it had already covered. Markings were only part of the 22.
+
+**The check now measures what can actually leak.** `scripts/lib/page.mjs` wraps `renderer.renderBufferDirect` (every draw, shadow passes included) and records which geometries have been drawn. `unusedGeometries` = the geometries the renderer holds minus the drawn ones still in the scene. A geometry that is uploaded and then removed from the scene without `dispose()` raises it; a first view does not, because the chunk is still in the scene. Checked with two temporary meshes: drawn and removed with `dispose()` five times gives +0; drawn and removed without it five times gives +5. The soak's limit (8) now applies to that number. The raw count is printed in every window and in the verdict, not judged.
+
+A warm-up was the other option, and it does not fit: the bot's route is seeded but runs in real time, and a warm-up that covers every chunk in the tile would take far longer than the soak. The perf-budget geometry count is a budget, not a leak check: it is the count after one scripted route, re-baselined like the others (see below).
+
+**Triangles.** The tile is denser: the budget for desktop-low `walk.triangles` was 150k and one run here measured 123k (the 157k report did not reproduce on this box; routes differ between runs). The new budget comes from the worst of two runs x1.3, so it covers route variation.
+
 ## The harnesses
 
 All live in `scripts/`; each starts its own Vite server and Chromium unless you pass `--url <base>` (an already-running server) or `--dist` (a preview of `dist/`, after `npm run build`). They need the baked tile (`cd tools/pipeline && npm run bake`). Shared code: `scripts/lib/harness.mjs` (servers, profiles, boot) and `scripts/lib/page.mjs` (what runs in the page).
@@ -86,20 +98,24 @@ node scripts/perf-budget.mjs --profile desktop-high --repeat 2   # best of 2 tim
 node scripts/perf-budget.mjs --write-budget --profile desktop-high,desktop-medium,desktop-low,phone-low --repeat 2
 ```
 
-Four phases (idle 4 s, walk out and back 60 m, drive 40 s, look round 6 s). Per phase: `frameP50/P95` (ms between animation frames, so 16.7 on a 60 Hz display; it catches dropped frames), `cpuMean/P95` (main-thread ms per frame, `game.cpuMs`), `gpuP50/P95` (timer queries around `renderer.render`; Chromium only), `draws` and `triangles` (maximum of any frame, all passes), `slowFrames` (over 33 ms). Per run: `bootMs`, `heapMB` (after a forced GC), `geometries`, `textures`. Exits 1 when a number is over its budget or the page logs an error. `--write-budget` writes new budgets (timings x2 with at least 1 ms slack, draws, triangles and geometries x1.3, slow frames at least 6, heap x1.4 + 10 MB): use it only after a change meant to cost more or less, and say why. `--uncapped` lifts the display's frame limit, which on a headless GPU only lets the main thread run ahead, so frame times mean nothing then.
+Four phases (idle 4 s, walk out and back 60 m, drive 40 s, look round 6 s). Per phase: `frameP50/P95` (ms between animation frames, so 16.7 on a 60 Hz display; it catches dropped frames), `cpuMean/P95` (main-thread ms per frame, `game.cpuMs`), `gpuP50/P95` (timer queries around `renderer.render`; Chromium only), `draws` and `triangles` (maximum of any frame, all passes), `slowFrames` (over 33 ms). Per run: `bootMs`, `heapMB` (after a forced GC), `geometries`, `textures`. Exits 1 when a number is over its budget or the page logs an error. `--write-budget` writes new budgets from the **worst** of the `--repeat` runs (the gate takes the best timing of the runs, and the worst count): timings x2 with at least 1 ms slack, rounded up to 0.1 ms; draws, triangles and geometries x1.3; slow frames at least 6; heap x1.4 + 10 MB; boot time x2. Frame times are not headroom-scaled: they are display-bound (16.7 ms at 60 Hz), so their budget is a fixed 25 ms drop threshold (x2 would accept 30 fps). The worst run is the base because timing tails (p95) swing about 2x between runs on this box, and triangle and draw counts follow where the bot drives; a budget from the best run failed its own re-check. Use `--write-budget` only after a change meant to cost more or less, and say why. `--uncapped` lifts the display's frame limit, which on a headless GPU only lets the main thread run ahead, so frame times mean nothing then.
 
-Budgets (`scripts/perf-budget.json`, from two runs on the box above): the count budgets are the ones that matter. Measured, per profile, the worst phase:
+Budgets (`scripts/perf-budget.json`, written 2026-10-14 from two runs each on the box above, with the road-markings tile): the count budgets are the ones that matter. The worst phase of each profile, budget now (before the markings tile in brackets):
 
 | Profile | Draws | Triangles | CPU mean ms | Heap MB |
 |---|---|---|---|---|
-| desktop-high | 484 | 200k | 0.9 | 29.6 |
-| desktop-medium | 402 | 163k | 0.9 | 29.5 |
-| desktop-low | 339 | 126k | 0.6 | 29.0 |
-| phone-low (4x CPU) | 167 | 82k | 1.0 | 29.0 |
+| Profile | Draws | Triangles | CPU mean ms | Heap MB |
+|---|---|---|---|---|
+| desktop-high | 620 (640) | 300k (270k) | 2.1 (2.7) | 56 (52) |
+| desktop-medium | 590 (630) | 260k (240k) | 3.0 (2.7) | 56 (52) |
+| desktop-low | 430 (450) | 190k (170k) | 1.9 (2.3) | 56 (51) |
+| phone-low (4x CPU) | 330 (340) | 140k (120k) | 2.3 (2.9) | 55 (51) |
+
+Frame-time budgets stay at 25 ms (16.7 ms measured on every profile). Geometry budgets are now 660, 649, 631 and 548 (were 705, 700, 692 and 601): the raw count follows the route (see "Road markings" below).
 
 ### `npm run soak` (5 minutes; `--minutes 30` for a long one)
 
-The bot loops (in, drive 45 s, park, out, walk out and back, look round) while a sample is taken every 15 s after a forced GC. Fails on a crash, a page error, **frame cost drifting up** (the best window's main-thread cost per draw call in the last third of the run against the best window of the first third, after the warm-up: at most 1.3x plus 1.5 us; best windows, because other programs on the machine only ever add to a window), **heap growth** (the median heap of the last third against the first third: 30 MB, or 6 MB/min), **geometries or textures growing** (more than 8), or a bot that barely moved (see below). Limits are in the `soak` section of `scripts/perf-budget.json`.
+The bot loops (in, drive 45 s, park, out, walk out and back, look round) while a sample is taken every 15 s after a forced GC. Fails on a crash, a page error, **frame cost drifting up** (the best window's main-thread cost per draw call in the last third of the run against the best window of the first third, after the warm-up: at most 1.3x plus 1.5 us; best windows, because other programs on the machine only ever add to a window), **heap growth** (the median heap of the last third against the first third: 30 MB, or 6 MB/min), **GPU objects growing** (more than 8: the geometries the renderer holds that the scene no longer draws, and textures; the raw geometry count is reported but not judged, see "Road markings" below), or a bot that barely moved (see below). Limits are in the `soak` section of `scripts/perf-budget.json`.
 
 ### `npm run leaks`
 
@@ -134,9 +150,10 @@ Touch devices start on Medium and the governor steps down after 3 s above 24 ms;
 
 ## Results (2026-10-14, this box)
 
-- `npm run perf-budget`: PASS on desktop-high, medium, low and phone-low (budgets written from them).
-- `npm run soak` (5 min, desktop-medium): PASS. Heap 29.4 -> 29.6 MB (0.1 MB/min), geometries +6, textures +0, CPU per draw call 2.8 -> 3.5 us (limit 5.2), 0 slow frames in 20 windows, sim step at most 1.3 ms, 5 enter/exit cycles, 957 m driven, 228 m walked.
-- `npm run leaks`: PASS, all four phases flat.
+- `npm run perf-budget`: PASS on desktop-high, medium, low (budgets re-baselined: the markings tile, two runs each).
+- `npm run perf-budget:phone`: PASS (re-baselined, two runs).
+- `npm run soak` (5 min, desktop-medium): PASS. Heap 32.3 -> 32.3 MB (0.0 MB/min), raw geometries +25 (first views, judged: unused +0), textures +0, CPU per draw call 2.8 -> 2.5 us (limit 5.2), 0 slow frames, 449 m/min driven.
+- `npm run leaks`: PASS, all four phases flat (heap 31.5 -> 32.4 MB over reload, 24 cycles; geometries flat in reload at 196).
 - `npm run check:controls`: all pass in Chromium (worker, shared0 and loopback transports) and in WebKit (worker transport).
 
 ## Next

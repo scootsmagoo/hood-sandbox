@@ -17,7 +17,9 @@
  *                 programs on the machine only ever add to a window's cost.
  *   heap growth   the same medians of the JS heap grew by at most `heapGrowthMB` (and less than
  *                 `heapSlopeMBPerMin` a minute, over the whole run after the warm-up)
- *   GPU objects   geometries and textures grew by at most `gpuObjectGrowth`
+ *   GPU objects   geometries the renderer holds that the scene no longer draws (uploaded, then removed without
+ *                 dispose) and textures grew by at most `gpuObjectGrowth`. The raw geometry count is not judged: it
+ *                 rises once for every chunk the camera first sees (see page.mjs, memory()).
  *   progress      the bot drove at least `minDriveMetresPerMin` metres a minute
  * Chromium only (performance.memory). It plays at the display's rate; the CPU ms per frame is the number
  * that shows drift (frame time stays at 16.7 until the frame cost reaches it).
@@ -81,7 +83,7 @@ for (let w = 1; w <= total; w++) {
   }
   r.cpuPerDraw = +((r.cpuMean / Math.max(1, r.drawsMean)) * 1000).toFixed(2);
   rows.push({ w, t: (w * interval) / 60, ...r });
-  console.log(`${(rows.at(-1).t).toFixed(2).padStart(5)} min: frame p50 ${r.frameP50} p95 ${r.frameP95} ms (${r.frames} frames, ${r.slowFrames} slow) · cpu ${r.cpuMean}/${r.cpuP95} ms (${r.cpuPerDraw} us/draw) · draws ${r.drawsMean}/${r.draws} · heap ${r.heapMB} MB · geo ${r.geometries} tex ${r.textures} obj ${r.objects} ent ${r.entities} · sim step max ${r.simStepMax} ms · driven ${Math.round(r.bot.driven)} m walked ${Math.round(r.bot.walked)} m cycles ${r.bot.cycles} stuck ${r.bot.stuckEvents}`);
+  console.log(`${(rows.at(-1).t).toFixed(2).padStart(5)} min: frame p50 ${r.frameP50} p95 ${r.frameP95} ms (${r.frames} frames, ${r.slowFrames} slow) · cpu ${r.cpuMean}/${r.cpuP95} ms (${r.cpuPerDraw} us/draw) · draws ${r.drawsMean}/${r.draws} · heap ${r.heapMB} MB · geo ${r.geometries} (unused ${r.unusedGeometries}) tex ${r.textures} obj ${r.objects} ent ${r.entities} · sim step max ${r.simStepMax} ms · driven ${Math.round(r.bot.driven)} m walked ${Math.round(r.bot.walked)} m cycles ${r.bot.cycles} stuck ${r.bot.stuckEvents}`);
 }
 const botError = await page.evaluate(() => window.__soak.error).catch(() => null);
 const crashed = isCrashed();
@@ -109,12 +111,13 @@ if (after.length >= 6) {
   const minsSpan = Math.max(1 / 60, after.at(-1).t - after[0].t);
   const slope = (heap1 - heap0) / minsSpan;
   const geo = last.at(-1).geometries - first[0].geometries;
+  const unused = last.at(-1).unusedGeometries - first[0].unusedGeometries;
   const tex = last.at(-1).textures - first[0].textures;
   const driven = rows.at(-1).bot.driven / (rows.at(-1).t || 1);
-  summary = `cpu ${cpu0} -> ${cpu1} us/draw (limit ${(cpu0 * budget.cpuDriftRatio + budget.cpuDriftSlackUs).toFixed(2)}), frame p50 ${m(first, 'frameP50')} -> ${m(last, 'frameP50')} ms, heap ${heap0} -> ${heap1} MB (${slope.toFixed(1)} MB/min, limits ${budget.heapGrowthMB} MB and ${budget.heapSlopeMBPerMin}/min), geometries ${geo >= 0 ? '+' : ''}${geo}, textures ${tex >= 0 ? '+' : ''}${tex}, driven ${driven.toFixed(0)} m/min`;
+  summary = `cpu ${cpu0} -> ${cpu1} us/draw (limit ${(cpu0 * budget.cpuDriftRatio + budget.cpuDriftSlackUs).toFixed(2)}), frame p50 ${m(first, 'frameP50')} -> ${m(last, 'frameP50')} ms, heap ${heap0} -> ${heap1} MB (${slope.toFixed(1)} MB/min, limits ${budget.heapGrowthMB} MB and ${budget.heapSlopeMBPerMin}/min), geometries ${geo >= 0 ? '+' : ''}${geo} (${unused >= 0 ? '+' : ''}${unused} unused), textures ${tex >= 0 ? '+' : ''}${tex}, driven ${driven.toFixed(0)} m/min`;
   if (cpu1 > cpu0 * budget.cpuDriftRatio + budget.cpuDriftSlackUs) fails.push(`frame cost drifted up (${cpu0} -> ${cpu1} us per draw call)`);
   if (heap1 - heap0 > budget.heapGrowthMB || slope > budget.heapSlopeMBPerMin) fails.push(`heap grew ${(heap1 - heap0).toFixed(1)} MB (${slope.toFixed(1)} MB/min)`);
-  if (geo > budget.gpuObjectGrowth) fails.push(`geometries grew by ${geo}`);
+  if (unused > budget.gpuObjectGrowth) fails.push(`${unused} geometries uploaded and left out of the scene (not disposed)`);
   if (tex > budget.gpuObjectGrowth) fails.push(`textures grew by ${tex}`);
   if (minutes >= 2 && driven < budget.minDriveMetresPerMin) fails.push(`the bot drove only ${driven.toFixed(0)} m/min (stuck?)`);
 } else {

@@ -13,7 +13,8 @@
  *           spin(s)            stand and turn the camera round once
  *   rec   a frame recorder: begin(name) ... end() gives the summary of a phase: animation-frame times, main-thread
  *         CPU ms per frame, GPU ms per frame (timer queries), draws, triangles, heap
- *   memory()  counts the harnesses watch (renderer geometries and textures, programs, scene objects)
+ *   memory()  counts the harnesses watch: renderer geometries (and `unusedGeometries`, the uploaded ones the scene
+ *             no longer draws: the leak signal), textures, programs, scene objects
  */
 export function installHarness(cfg) {
   const hood = window.__hood;
@@ -404,19 +405,37 @@ export function installHarness(cfg) {
   };
 
   // ---------------------------------------------------------------- memory counts
+  // three.js uploads a geometry the first time it draws it, and frees it only on dispose(). So the raw
+  // count grows whenever the camera first sees a chunk (expected, once) and only a geometry that is
+  // uploaded and then left out of the scene without dispose() is a leak. `drawn` is every geometry that
+  // has gone through renderBufferDirect (every draw, shadow passes included) since the harness was
+  // installed; `unusedGeometries` = the geometries the renderer holds minus the drawn ones still in the
+  // scene. Its growth is the leak signal. (Geometries drawn only before the install are a constant offset.)
+  const drawn = new Set();
+  const realDraw = game.renderer.renderBufferDirect;
+  game.renderer.renderBufferDirect = function (camera, scene, geometry, material, object, group) {
+    drawn.add(geometry.uuid);
+    return realDraw.call(this, camera, scene, geometry, material, object, group);
+  };
   const memory = () => {
     const g = game;
     let objects = 0;
     const mats = new Set();
+    const sceneGeos = new Set();
     g.scene.traverse((o) => {
       objects++;
+      if (o.geometry) sceneGeos.add(o.geometry.uuid);
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) mats.add(m.uuid);
     });
+    let usedGeos = 0;
+    for (const u of sceneGeos) if (drawn.has(u)) usedGeos++;
     const info = g.renderer.info;
     const mem = performance.memory;
     return {
       heapMB: mem ? +(mem.usedJSHeapSize / 1048576).toFixed(1) : null,
       geometries: info.memory.geometries,
+      unusedGeometries: info.memory.geometries - usedGeos,
+      sceneGeometries: sceneGeos.size,
       textures: info.memory.textures,
       programs: info.programs ? info.programs.length : 0,
       materials: mats.size,
