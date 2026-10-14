@@ -1,0 +1,45 @@
+:root { color-scheme: dark; --ink: #f2f1ec; --dim: rgba(242, 241, 236, 0.62); --panel: rgba(12, 14, 17, 0.62); --accent: #e9a23b; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0b0d10; color: var(--ink); font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; overflow: hidden; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+#boot { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0d10; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; z-index: 20; transition: opacity 0.4s; white-space: pre-wrap; padding: 24px; text-align: center; }
+#boot.done { opacity: 0; pointer-events: none; }
+#boot.error { color: #ff8b78; text-transform: none; letter-spacing: 0; font: 13px/1.4 ui-monospace, monospace; }
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.hud-fps { position: absolute; top: 10px; left: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.hud-speed { position: absolute; right: 20px; bottom: 54px; text-align: right; }
+.hud-speed .num { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.hud-speed .unit { margin-left: 6px; color: var(--dim); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; }
+.hud-state { position: absolute; right: 22px; bottom: 30px; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
+.hud-prompt { position: absolute; left: 50%; bottom: 17%; transform: translateX(-50%); padding: 6px 14px; border-radius: 6px; background: var(--panel); opacity: 0; transition: opacity 0.15s; font-weight: 600; }
+.hud-prompt.on { opacity: 1; }
+.hud-toast { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); padding: 6px 14px; border-radius: 6px; background: var(--panel); opacity: 0; transition: opacity 0.2s; }
+.hud-toast.on { opacity: 1; }
+.hud-help { position: absolute; left: 12px; bottom: 12px; padding: 10px 14px; border-radius: 8px; background: var(--panel); opacity: 0; transition: opacity 0.25s; max-width: min(420px, 70vw); }
+.hud-help.on { opacity: 1; }
+.hud-help .row { display: flex; gap: 12px; padding: 1px 0; }
+.hud-help b { min-width: 130px; color: var(--accent); font-weight: 600; }
+.hud-help span { color: var(--ink); }
+.hud-attrib { position: absolute; left: 12px; top: 32px; font-size: 11px; color: var(--dim); max-width: 60vw; }
+.hud-debug { position: absolute; top: 56px; left: 12px; margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--panel); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #cfe3d4; white-space: pre; max-width: 94vw; overflow: hidden; }
+.hud-debug[hidden] { display: none; }
+
+.touch { position: fixed; inset: 0; z-index: 6; touch-action: none; }
+.touch[hidden] { display: none; }
+.touch-zone { position: absolute; top: 0; bottom: 0; touch-action: none; }
+.touch-move { left: 0; width: 45%; }
+.touch-look { right: 0; width: 55%; }
+.touch-stick { position: fixed; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); pointer-events: none; }
+.touch-stick[hidden] { display: none; }
+.touch-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%; background: rgba(255, 255, 255, 0.4); transform: translate(-50%, -50%); }
+.touch-buttons { position: absolute; right: calc(12px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 220px; height: 170px; pointer-events: none; }
+.touch-btn { position: absolute; width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.4); background: rgba(20, 24, 28, 0.55); color: var(--ink); font: 600 13px system-ui; pointer-events: auto; touch-action: none; }
+.touch-btn.on { background: rgba(233, 162, 59, 0.6); }
+.b-jump { right: 0; bottom: 0; }
+.b-run { right: 82px; bottom: 6px; }
+.b-use { right: 8px; bottom: 86px; }
+.b-reset { right: 96px; bottom: 96px; width: 52px; height: 52px; font-size: 11px; }
+.has-touch .hud-speed { bottom: auto; top: 10px; right: 14px; }
+.has-touch .hud-speed .num { font-size: 34px; }
+.has-touch .hud-state { bottom: auto; top: 54px; }
+.has-touch .hud-help { display: none; }

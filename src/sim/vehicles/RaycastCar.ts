@@ -1,0 +1,415 @@
+/**
+ * A raycast car on a Rapier rigid body. The chassis is a dynamic body with a box (and a cabin box
+ * for rolling over); the wheels are not bodies at all, only rays cast down from the suspension
+ * hardpoints. Each tick the car turns what the rays see into spring, tyre and drag impulses on the
+ * chassis (the maths is in dynamics.ts), and Rapier integrates the result with the world.
+ */
+import type RAPIER from '@dimforge/rapier3d-simd-compat';
+import { DEG, clamp, wrapAngle, rotateVec, yawOfQuat, type Quat } from '../../shared/math';
+import type { HandlingData } from '../../shared/handling';
+import { GROUPS } from '../physics/rapier';
+import {
+  counterSteer,
+  engineAccel,
+  lowSpeedGrip,
+  newTireOutput,
+  resolvePedals,
+  slewSteer,
+  steerLock,
+  suspensionAccel,
+  tireForce,
+  driftAssistAccel,
+  type DriveRequest,
+  type TireInput,
+} from './dynamics';
+
+export interface VehicleInput {
+  throttle: number;
+  brake: number;
+  /** -1 left to +1 right. */
+  steer: number;
+  handbrake: boolean;
+}
+
+export const IDLE_INPUT: Readonly<VehicleInput> = { throttle: 0, brake: 0, steer: 0, handbrake: true };
+
+export interface WheelState {
+  /** Steering angle, positive turns left. */
+  steer: number;
+  /** Rolling angle, radians. */
+  roll: number;
+  /** Suspension length (m): 0 fully compressed. */
+  length: number;
+  grounded: boolean;
+  slip: number;
+}
+
+interface Wheel extends WheelState {
+  front: boolean;
+  /** Mount point in the body's frame. */
+  mx: number;
+  my: number;
+  mz: number;
+  prevLength: number;
+  /** Mass share carried, kg. */
+  share: number;
+  // scratch
+  accel: number;
+  hitDist: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  ox: number;
+  oy: number;
+  oz: number;
+}
+
+export interface CarSpawn {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+
+const tmpTire: TireInput = {
+  vLong: 0, vLat: 0, load: 0, mass: 0, dt: 0, driveForce: 0, brakeForce: 0, gripMult: 1, lateralMult: 1,
+};
+const tireOut = newTireOutput();
+const pedals: DriveRequest = { drive: 0, brake: 0, reversing: false };
+
+export class RaycastCar {
+  readonly body: RAPIER.RigidBody;
+  readonly wheels: Wheel[] = [];
+  readonly h: HandlingData;
+  /** Velocity along the car's forward axis, m/s. */
+  speedForward = 0;
+  speed = 0;
+  steerAngle = 0;
+  throttleApplied = 0;
+  braking = false;
+  handbraking = false;
+  reversing = false;
+  skidding = false;
+  airborne = false;
+  private yawInertia: number;
+  private ray: RAPIER.Ray;
+  private prevVel = { x: 0, y: 0, z: 0 };
+  private prevTravelYaw = 0;
+  /** How fast the direction of travel turns, rad/s (smoothed). */
+  private travelTurn = 0;
+  /** Largest sudden speed change in the last step, m/s. Used to report impacts. */
+  impactSpeedLoss = 0;
+
+  constructor(
+    private readonly R: typeof RAPIER,
+    private readonly world: RAPIER.World,
+    handling: HandlingData,
+    spawn: CarSpawn,
+  ) {
+    const h = (this.h = handling);
+    const q = { x: 0, y: Math.sin(spawn.yaw / 2), z: 0, w: Math.cos(spawn.yaw / 2) };
+    const body = world.createRigidBody(
+      R.RigidBodyDesc.dynamic()
+        .setTranslation(spawn.x, spawn.y, spawn.z)
+        .setRotation(q)
+        .setCcdEnabled(true)
+        .setAngularDamping(0.25)
+        .setLinearDamping(0)
+        .setCanSleep(false),
+    );
+    this.body = body;
+
+    const c = h.chassis;
+    const mk = (half: number[], off: number[]) =>
+      R.ColliderDesc.cuboid(half[0], half[1], half[2])
+        .setTranslation(off[0], off[1], off[2])
+        .setDensity(0)
+        .setFriction(0.2)
+        .setRestitution(0.05)
+        .setCollisionGroups(GROUPS.vehicle);
+    world.createCollider(mk(c.halfExtents, c.offset), body);
+    world.createCollider(mk(c.cabin.halfExtents, c.cabin.offset), body);
+
+    const w = c.halfExtents[0] * 2;
+    const hh = (c.cabin.offset[1] + c.cabin.halfExtents[1] - (c.offset[1] - c.halfExtents[1]));
+    const l = c.halfExtents[2] * 2;
+    const m = h.mass / 12;
+    const s = h.inertiaScale;
+    this.yawInertia = m * (w * w + l * l) * s[1];
+    body.setAdditionalMassProperties(
+      h.mass,
+      { x: h.centreOfMass[0], y: h.centreOfMass[1], z: h.centreOfMass[2] },
+      { x: m * (hh * hh + l * l) * s[0], y: this.yawInertia, z: m * (w * w + hh * hh) * s[2] },
+      { x: 0, y: 0, z: 0, w: 1 },
+      true,
+    );
+
+    const wb = h.wheels;
+    const L = wb.frontZ - wb.rearZ;
+    const frontMass = (h.mass * (h.centreOfMass[2] - wb.rearZ)) / L;
+    const rearMass = h.mass - frontMass;
+    for (let i = 0; i < 4; i++) {
+      const front = i < 2;
+      const left = i % 2 === 0;
+      const track = front ? wb.trackFront : wb.trackRear;
+      this.wheels.push({
+        front,
+        mx: (left ? 1 : -1) * track * 0.5,
+        my: wb.mountY,
+        mz: front ? wb.frontZ : wb.rearZ,
+        steer: 0, roll: 0, length: h.suspension.travel, grounded: false, slip: 0,
+        prevLength: h.suspension.travel,
+        share: (front ? frontMass : rearMass) / 2,
+        accel: 0, hitDist: 0, nx: 0, ny: 1, nz: 0, ox: 0, oy: 0, oz: 0,
+      });
+    }
+    this.ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+  }
+
+  get yaw(): number {
+    return yawOfQuat(this.body.rotation());
+  }
+
+  /** The car's pose as a plain object (a copy). */
+  pose(): { x: number; y: number; z: number; q: Quat } {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    return { x: t.x, y: t.y, z: t.z, q: { x: r.x, y: r.y, z: r.z, w: r.w } };
+  }
+
+  /** Stands the car upright where it is, a little above the ground, and stops it. */
+  reset() {
+    const t = this.body.translation();
+    const yaw = this.yaw;
+    this.body.setTranslation({ x: t.x, y: t.y + 1.2, z: t.z }, true);
+    this.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  teleport(x: number, y: number, z: number, yaw: number) {
+    this.body.setTranslation({ x, y, z }, true);
+    this.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  /** Applies one tick of forces. Call before the world steps. */
+  step(dt: number, input: VehicleInput) {
+    const h = this.h;
+    const body = this.body;
+    const tr = body.translation();
+    const rq = body.rotation();
+    const q: Quat = rq;
+    const lv = body.linvel();
+    const av = body.angvel();
+    const com = body.worldCom();
+
+    const fwd = rotateVec(q, 0, 0, 1);
+    const up = rotateVec(q, 0, 1, 0);
+    const left = rotateVec(q, 1, 0, 0);
+    const vF = lv.x * fwd.x + lv.y * fwd.y + lv.z * fwd.z;
+    const vL = lv.x * left.x + lv.y * left.y + lv.z * left.z;
+    const speed = Math.hypot(lv.x, lv.y, lv.z);
+    this.speed = speed;
+    this.speedForward = vF;
+
+    // Impact detector: a sudden loss of speed that the tyres cannot explain.
+    const dvx = lv.x - this.prevVel.x;
+    const dvy = lv.y - this.prevVel.y;
+    const dvz = lv.z - this.prevVel.z;
+    this.impactSpeedLoss = Math.hypot(dvx, dvy, dvz);
+    this.prevVel.x = lv.x;
+    this.prevVel.y = lv.y;
+    this.prevVel.z = lv.z;
+    if (speed > 3) {
+      const ty = Math.atan2(lv.x, lv.z);
+      this.travelTurn += (wrapAngle(ty - this.prevTravelYaw) / dt - this.travelTurn) * 0.3;
+      this.prevTravelYaw = ty;
+    } else {
+      this.travelTurn = 0;
+      this.prevTravelYaw = Math.atan2(lv.x, lv.z);
+    }
+
+    resolvePedals(clamp(input.throttle, 0, 1), clamp(input.brake, 0, 1), vF, pedals);
+    this.reversing = pedals.reversing;
+    this.throttleApplied = pedals.drive;
+    this.braking = pedals.brake > 0.05;
+    this.handbraking = input.handbrake;
+
+    // Steering. The assist adds to the driver's input, and only in a slide.
+    const lock = steerLock(speed, h.steering);
+    const assist = counterSteer(vL, vF, h.assists.counterSteer, h.steering.lockDeg * DEG);
+    const target = clamp(-clamp(input.steer, -1, 1) * lock + assist, -h.steering.lockDeg * DEG, h.steering.lockDeg * DEG);
+    this.steerAngle = slewSteer(this.steerAngle, target, dt, h.steering);
+    const cosS = Math.cos(this.steerAngle);
+    const sinS = Math.sin(this.steerAngle);
+
+    // Pass 1: rays and suspension.
+    const sus = h.suspension;
+    const omega = 2 * Math.PI * sus.frequencyHz;
+    const rest = sus.travel * sus.restRatio;
+    const reach = sus.travel + h.wheels.radius;
+    let grounded = 0;
+    for (const w of this.wheels) {
+      const m = rotateVec(q, w.mx, w.my, w.mz);
+      w.ox = tr.x + m.x;
+      w.oy = tr.y + m.y;
+      w.oz = tr.z + m.z;
+      this.ray.origin.x = w.ox;
+      this.ray.origin.y = w.oy;
+      this.ray.origin.z = w.oz;
+      this.ray.dir.x = -up.x;
+      this.ray.dir.y = -up.y;
+      this.ray.dir.z = -up.z;
+      const hit = this.world.castRayAndGetNormal(this.ray, reach, true, undefined, GROUPS.actorQuery, undefined, body);
+      w.prevLength = w.length;
+      if (hit) {
+        w.grounded = true;
+        grounded++;
+        w.hitDist = hit.timeOfImpact;
+        w.length = clamp(hit.timeOfImpact - h.wheels.radius, 0, sus.travel);
+        const n = hit.normal;
+        const nl = Math.hypot(n.x, n.y, n.z);
+        if (nl > 0.5) {
+          w.nx = n.x / nl; w.ny = n.y / nl; w.nz = n.z / nl;
+        } else {
+          w.nx = up.x; w.ny = up.y; w.nz = up.z;
+        }
+        w.accel = suspensionAccel(w.length, w.prevLength, dt, rest, omega, sus.dampingRatio, 0.04);
+      } else {
+        w.grounded = false;
+        w.length = sus.travel;
+        w.accel = 0;
+      }
+    }
+    this.airborne = grounded === 0;
+
+    // Anti-roll bars act between the wheels of an axle when both touch.
+    for (let a = 0; a < 4; a += 2) {
+      const l = this.wheels[a];
+      const r = this.wheels[a + 1];
+      if (l.grounded && r.grounded) {
+        const ar = sus.antiRoll * ((rest - l.length) - (rest - r.length));
+        l.accel = Math.max(0, l.accel + ar);
+        r.accel = Math.max(0, r.accel - ar);
+      }
+    }
+
+    // Pass 2: forces.
+    const d = h.drive;
+    const accel = engineAccel(pedals.drive, vF, d);
+    const throttleOff = Math.abs(pedals.drive) < 0.05;
+    const hb = input.handbrake;
+    const wantSpin = hb && pedals.drive > 0.6 && speed < 12;
+    this.skidding = false;
+    const driveBias = [d.driveBiasFront, 1 - d.driveBiasFront];
+    for (const w of this.wheels) {
+      // Roll the wheel even in the air.
+      if (!w.grounded) {
+        w.slip = 0;
+        w.steer = w.front ? this.steerAngle : 0;
+        continue;
+      }
+      const wheelSteer = w.front ? this.steerAngle : 0;
+      w.steer = wheelSteer;
+      // Wheel axes on the ground plane.
+      const c = w.front ? cosS : 1;
+      const s = w.front ? sinS : 0;
+      let fx = fwd.x * c + left.x * s;
+      let fy = fwd.y * c + left.y * s;
+      let fz = fwd.z * c + left.z * s;
+      const fn = fx * w.nx + fy * w.ny + fz * w.nz;
+      fx -= w.nx * fn;
+      fy -= w.ny * fn;
+      fz -= w.nz * fn;
+      const fl = Math.hypot(fx, fy, fz) || 1;
+      fx /= fl; fy /= fl; fz /= fl;
+      // lateral = n x f (points left)
+      const lx = w.ny * fz - w.nz * fy;
+      const ly = w.nz * fx - w.nx * fz;
+      const lz = w.nx * fy - w.ny * fx;
+
+      // Contact point and its velocity.
+      const px = w.ox - up.x * w.hitDist;
+      const py = w.oy - up.y * w.hitDist;
+      const pz = w.oz - up.z * w.hitDist;
+      const rx = px - com.x;
+      const ry = py - com.y;
+      const rz = pz - com.z;
+      const cvx = lv.x + (av.y * rz - av.z * ry);
+      const cvy = lv.y + (av.z * rx - av.x * rz);
+      const cvz = lv.z + (av.x * ry - av.y * rx);
+
+      // Suspension: push the chassis up at the hub.
+      const sj = w.accel * w.share * dt;
+      body.applyImpulseAtPoint(
+        { x: up.x * sj, y: up.y * sj, z: up.z * sj },
+        { x: w.ox - up.x * w.length, y: w.oy - up.y * w.length, z: w.oz - up.z * w.length },
+        true,
+      );
+      const load = w.accel * w.share;
+
+      const driven = driveBias[w.front ? 0 : 1] > 0;
+      const axleDrive = driveBias[w.front ? 0 : 1];
+      tmpTire.vLong = cvx * fx + cvy * fy + cvz * fz;
+      tmpTire.vLat = cvx * lx + cvy * ly + cvz * lz;
+      tmpTire.load = load;
+      tmpTire.mass = w.share;
+      tmpTire.dt = dt;
+      tmpTire.driveForce = driven ? (accel * h.mass * axleDrive) / 2 : 0;
+      let brake = pedals.brake * d.brakeForce * h.mass * (w.front ? 0.6 : 0.4) * 0.5;
+      if (throttleOff) brake += (d.engineBrake * h.mass) / 4;
+      tmpTire.lateralMult = 1;
+      if (hb && !w.front) {
+        // A burnout lets the rear wheels spin against the handbrake instead of being held by it.
+        if (!wantSpin) brake += (d.handbrakeForce * h.mass) / 2;
+        tmpTire.lateralMult = h.traction.handbrakeGripMult;
+      }
+      tmpTire.brakeForce = brake;
+      tmpTire.gripMult = 1;
+      tireForce(tmpTire, h.traction, tireOut);
+      if (driven && (tireOut.spinning || wantSpin)) {
+        tmpTire.lateralMult *= lowSpeedGrip(speed, true, h.traction);
+        if (wantSpin && !tireOut.spinning) tmpTire.driveForce = Math.sign(tmpTire.driveForce || 1) * load * h.traction.curveMax * 1.2;
+        tireForce(tmpTire, h.traction, tireOut);
+      }
+      w.slip = tireOut.slip;
+      if (tireOut.slip > 0.6) this.skidding = true;
+
+      // Apply at the contact point lifted toward the centre of mass height (less body roll).
+      const lift = ((com.x - px) * up.x + (com.y - py) * up.y + (com.z - pz) * up.z) * h.traction.forceHeight;
+      const ix = (tireOut.fLong * fx + tireOut.fLat * lx) * dt;
+      const iy = (tireOut.fLong * fy + tireOut.fLat * ly) * dt;
+      const iz = (tireOut.fLong * fz + tireOut.fLat * lz) * dt;
+      body.applyImpulseAtPoint({ x: ix, y: iy, z: iz }, { x: px + up.x * lift, y: py + up.y * lift, z: pz + up.z * lift }, true);
+
+      // Wheel rolling angle: locked by the handbrake, spinning when the tyre lets go.
+      let wv = tmpTire.vLong;
+      if (hb && !w.front) wv = 0;
+      else if (tireOut.spinning) wv += Math.sign(tmpTire.driveForce) * 14;
+      w.roll = (w.roll + (wv / h.wheels.radius) * dt) % (Math.PI * 2);
+    }
+
+    // Air drag and downforce.
+    const dragK = d.drag * speed * dt * h.mass;
+    const dfK = h.assists.downforce * speed * speed * dt * h.mass;
+    body.applyImpulse({ x: -lv.x * dragK - up.x * dfK, y: -lv.y * dragK - up.y * dfK, z: -lv.z * dragK - up.z * dfK }, true);
+
+    // Yaw assist while sliding.
+    if (grounded > 0) {
+      const yawRate = av.x * up.x + av.y * up.y + av.z * up.z;
+      const slide = vF > 1 ? Math.atan2(vL, vF) : 0;
+      const aa = driftAssistAccel(input.steer, yawRate, this.travelTurn, slide, speed, hb, h.assists);
+      if (aa !== 0) {
+        const ti = this.yawInertia * aa * dt;
+        body.applyTorqueImpulse({ x: up.x * ti, y: up.y * ti, z: up.z * ti }, true);
+      }
+    }
+  }
+
+  /** Per-wheel state for the snapshot. */
+  wheelState(i: number): WheelState {
+    return this.wheels[i];
+  }
+}

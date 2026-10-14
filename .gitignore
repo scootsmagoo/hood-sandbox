@@ -6,3 +6,5 @@ dist/
 .DS_Store
 # pipeline downloads and intermediates (large)
 tools/pipeline/cache/
+# baked map tiles (regenerate with: cd tools/pipeline && npm run bake)
+public/tiles/

@@ -1,0 +1,40 @@
+{
+  "_comment": "Handling per vehicle type. Speeds in m/s, forces as accelerations in m/s^2, angles in degrees. Entries other than sedan only list what they change. Axes: +Z forward, +Y up, +X left.",
+  "sedan": {
+    "name": "Sedan (stand-in)",
+    "mass": 1500,
+    "centreOfMass": [0, -0.2, 0.05],
+    "inertiaScale": [1.0, 0.8, 1.0],
+    "chassis": {
+      "halfExtents": [0.92, 0.32, 2.2],
+      "offset": [0, 0.16, 0],
+      "cabin": { "halfExtents": [0.78, 0.26, 1.05], "offset": [0, 0.72, -0.15] }
+    },
+    "wheels": {
+      "radius": 0.34, "width": 0.24,
+      "frontZ": 1.35, "rearZ": -1.3,
+      "trackFront": 1.62, "trackRear": 1.62,
+      "mountY": 0.12
+    },
+    "suspension": { "travel": 0.32, "restRatio": 0.6, "frequencyHz": 1.9, "dampingRatio": 0.7, "antiRoll": 9 },
+    "drive": {
+      "driveForce": 7.5, "maxFlatVel": 58, "driveBiasFront": 0.0, "reverseMaxVel": 12,
+      "brakeForce": 13, "handbrakeForce": 9, "engineBrake": 1.4, "drag": 0.0011
+    },
+    "steering": { "lockDeg": 34, "lockHighSpeedDeg": 7, "lockRefSpeed": 42, "rateDeg": 150, "returnRateDeg": 220 },
+    "traction": {
+      "curveMax": 1.55, "curveMin": 1.15, "curveLateralDeg": 9, "lateralStiffness": 0.45,
+      "longitudinalMult": 1.0, "lowSpeedLossMult": 0.75, "lowSpeedLossSpeed": 9,
+      "handbrakeGripMult": 0.32, "forceHeight": 0.7
+    },
+    "assists": { "counterSteer": 0.75, "yawAssist": 0.8, "maxSlideDeg": 40, "yawRateMax": 2.2, "downforce": 0.004 }
+  },
+  "coupe": {
+    "name": "Coupe (stand-in)",
+    "mass": 1350,
+    "inertiaScale": [1.0, 0.7, 1.0],
+    "drive": { "driveForce": 9.5, "maxFlatVel": 68, "driveBiasFront": 0.0 },
+    "steering": { "lockDeg": 36, "rateDeg": 190 },
+    "traction": { "curveMax": 1.7, "curveMin": 1.2, "curveLateralDeg": 8 }
+  }
+}

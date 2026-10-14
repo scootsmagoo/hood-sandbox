@@ -1,0 +1,10 @@
+# Cloudflare Workers static assets / Pages. Cross-origin isolation enables SharedArrayBuffer.
+# Tiles served from another origin (R2) will need Cross-Origin-Resource-Policy: cross-origin
+# (or CORS) on that bucket as well.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

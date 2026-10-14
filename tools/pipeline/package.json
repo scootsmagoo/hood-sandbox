@@ -1,0 +1,32 @@
+{
+  "name": "hood-pipeline",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "bake": "tsx src/bake.ts",
+    "preview": "tsx src/preview.ts",
+    "verify": "tsx src/verify.ts && tsx src/preview.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "^1.5.6-r.1",
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "@napi-rs/canvas": "^1.0.11",
+    "earcut": "^3.2.4",
+    "geotiff": "^3.0.5",
+    "meshoptimizer": "^1.3.0",
+    "proj4": "^2.22.0"
+  },
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/node": "^26.6.5",
+    "@types/proj4": "^2.5.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "id": "atlanta",
+  "name": "Atlanta",
+  "region": "Georgia, USA",
+  "projection": "+proj=tmerc +lat_0=33.85 +lon_0=-84.3 +k=1 +x_0=0 +y_0=0 +ellps=WGS84 +units=m",
+  "tiles": [
+    {
+      "id": "m1-five-points",
+      "name": "M1: Downtown, centred on Five Points",
+      "origin": { "lat": 33.7539, "lon": -84.3916 },
+      "halfSizeM": 1000,
+      "scale": 1,
+      "queryMarginM": 120,
+      "heightmapCellSizeM": 4,
+      "groundMeshStep": 1
+    }
+  ],
+  "sources": {
+    "osm": {
+      "name": "OpenStreetMap",
+      "via": "Overpass API",
+      "endpoints": ["https://overpass-api.de/api/interpreter", "https://overpass.openstreetmap.fr/api/interpreter", "https://overpass.kumi.systems/api/interpreter"],
+      "license": "ODbL 1.0",
+      "attribution": "© OpenStreetMap contributors"
+    },
+    "overture": {
+      "name": "Overture Maps buildings",
+      "via": "GeoParquet on S3, read with DuckDB",
+      "release": "latest",
+      "bucket": "overturemaps-us-west-2",
+      "license": "ODbL 1.0 (buildings)",
+      "attribution": "Overture Maps Foundation"
+    },
+    "elevation": {
+      "name": "USGS 3DEP",
+      "via": "3DEPElevation ImageServer exportImage",
+      "endpoint": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+      "pixelSizeM": 2,
+      "license": "Public domain",
+      "attribution": "USGS 3DEP"
+    }
+  }
+}
