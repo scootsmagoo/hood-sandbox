@@ -1,4 +1,4 @@
-# Hood Sandbox
+# Hood Sandbox *(working title)*
 
 **A GTA-style open-world crime sandbox set in metro Atlanta (Intown, Cobb, Gwinnett and the suburbs between them). It runs in the web browser.**
 
@@ -20,7 +20,7 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 - [Architecture](#architecture)
 - [The world pipeline](#the-world-pipeline)
 - [Performance and devices](#performance-and-devices)
-- [Multiplayer (later)](#multiplayer-later)
+- [Multiplayer (later)](#multiplayer-later) (and [Hosting on Cloudflare](#hosting-on-cloudflare))
 - [Names, brands and data licenses](#names-brands-and-data-licenses)
 - [Roadmap](#roadmap)
 - [Open questions](#open-questions)
@@ -43,14 +43,22 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 
 | Topic | Decision |
 |---|---|
-| Map scale | **Compressed, faithful layout.** Real geography is warped into a game map of roughly 90–130 km², about 1.2–1.6× GTA V. Intown is squeezed less than the suburbs. See [The map](#the-map). |
+| Map scale | **Compressed, faithful layout.** Real geography is warped into a game map of roughly 100–150 km², about 1.3–1.9× GTA V. Intown is squeezed less than the suburbs. See [The map](#the-map). |
+| Map edges | **Hartsfield-Jackson** (south), **Stone Mountain** (east), **Lake Lanier** (northeast) and **Lake Allatoona** (northwest) are all on the map. |
+| First playable area | **Downtown, Midtown, the Connector, Little Five Points, Candler Park, Buckhead and Vinings** (the [M2 slice](#roadmap)). |
+| Era | **Present day (2026).** GA-400's express lanes under construction, Centennial Yards rising over the Gulch, the BeltLine, the city just past the World Cup. |
+| Protagonist | **One fixed protagonist** for now (to be designed; a draft goes to the owner before it's built). A character creator comes later. The world comes first. |
+| Shooting vs driving | **Equal priority.** The M2 slice needs both to feel good. |
+| Gangs | **Fictional gangs with turf.** See [Gangs](#gangs-fictional). |
+| Sensitive sites | **On the map and treated respectfully**, never played for laughs. |
+| Music | **No licensed music.** The radio plays the player's own music. See [Radio](#radio-bring-your-own-music). |
 | Names | **Real places, parody brands.** Atlanta, Marietta, Peachtree St and I-285 keep their real names. Companies, stadium sponsors, teams and transit brands get GTA-style parodies. Police and other agencies get fictional names that clearly echo the real ones. |
 | Look | **Stylized-realistic.** GTA-like proportions, procedural and CC0 textures, simplified detail. |
 | Rating | **M (GTA-level).** Violence, blood, swearing and crime as the core loop. Sexual content stays off-screen. Gore and language get settings toggles. |
 | Devices | **Desktop browsers, gamepads and phones/tablets.** |
 | Multiplayer | **Single-player first, with multiplayer-ready code.** |
 | Client tech | **TypeScript + Vite + three.js (WebGL2 renderer, WebGPU later) + Rapier (WASM physics)**, with the simulation in a Web Worker. Rust compiled to WASM only for hot paths that profiling identifies. See [Tech stack](#tech-stack). |
-| Hosting | **Cloudflare Pages.** It can send the cross-origin isolation headers that SharedArrayBuffer needs. |
+| Hosting | **Cloudflare**: the game as Workers static assets (with COOP/COEP headers), map tiles in **R2** (no egress fees), and later one **Durable Object per multiplayer room**. See [Hosting on Cloudflare](#hosting-on-cloudflare). |
 | License | **MIT** for the code. The map data keeps its own licenses ([details](#names-brands-and-data-licenses)). |
 
 ---
@@ -66,9 +74,10 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 | Gwinnett County | ~1,116 km² (431 mi²) |
 | North Fulton (Sandy Springs, Roswell, Alpharetta, Johns Creek) | ~450 km² |
 | North DeKalb (Brookhaven, Dunwoody, Chamblee, Doraville, Tucker) | ~125 km² |
-| **Total** | **~2,900 km²** (bounding box ~55 × 87 km) |
+| Edges: south Fulton to the airport (East Point, College Park, Hapeville), Stone Mountain Park, the near shores of Lake Lanier and Lake Allatoona | ~400 km² more |
+| **Total** | **~3,300 km²** (bounding box ~67 × 89 km, from about 33.62°N to 34.22°N and 84.78°W to 83.82°W) |
 
-That's about 35–40 times GTA V's map (~80 km²). Built 1:1, driving from Austell to Buford would take most of an hour and pass through thousands of identical cul-de-sacs. So we compress the map.
+That's about 40 times GTA V's map (~80 km²). Built 1:1, driving from Austell to Buford would take most of an hour and pass through thousands of identical cul-de-sacs. So we compress the map.
 
 ### Compression
 
@@ -79,10 +88,11 @@ We don't scale the map down uniformly. Shrinking it would make lanes, buildings 
    - **Intown core** (Downtown, Midtown, Buckhead, Old Fourth Ward, West End, East Atlanta): about **1:2**. Dense, walkable, where most of the play happens.
    - **Suburban centers** (Marietta Square, Cumberland/The Battery, Perimeter, Duluth, Lawrenceville, Buford): about **1:4–1:5**. Recognizable town centers.
    - **Suburban fill and exurbs**: about **1:7–1:8**. Representative subdivisions, strip malls and woods.
+   - **The edges** (the airport, Stone Mountain Park, Lake Lanier and Lake Allatoona): the setting around them is compressed hard, but the place itself stays near real size. A runway, the granite dome or a lake you can race boats on only works at full size. The lakes keep their nearest arms and shores, and their far reaches fade into the map edge.
 3. **Thin the street network by class.** Interstates, highways and arterials are always kept. Local streets are kept in the core and sampled in the suburbs, chosen so blocks still read as real.
 4. **Set travel-time targets** (to tune later): Downtown to Midtown in about 1 minute of city driving, Downtown to Marietta Square in about 2–3 minutes on I-75, a full lap of I-285 in about 6–8 minutes.
 
-With these factors the game world comes out at about 15 × 20 km. At that size float32 precision is fine (about 2 mm at worst). We'll still render camera-relative and keep physics around a local origin, so the map can grow later.
+With these factors the game world comes out at about 18 × 22 km. At that size float32 precision is fine (about 2 mm at worst). We'll still render camera-relative and keep physics around a local origin, so the map can grow later.
 
 ### Districts (first pass)
 
@@ -135,10 +145,11 @@ With these factors the game world comes out at about 15 × 20 km. At that size f
 | Buckhead | Lenox and Phipps, the Governor's Mansion |
 | Southside | Grady-style trauma hospital, the county jail on Rice St, a film studio on the old Fort McPherson |
 | Cobb | The ballpark and The Battery, the Big Chicken, Marietta Square, Kennesaw Mountain, the theme park, Lake Allatoona |
-| Gwinnett | The arena, Mall of Georgia, Lawrenceville square, Stone Mountain (at the edge of the map), Lake Lanier (northeast edge) |
+| Gwinnett | The arena, Mall of Georgia, Lawrenceville square |
+| Edges | **Hartsfield-Jackson** (terminals, runways, cargo ramps, the rental-car center; flying comes later), **Stone Mountain** (the dome, the walk-up trail, the laser show lawn), **Lake Lanier** (marinas, houseboats, Buford Dam), **Lake Allatoona** (coves, boat ramps) |
 | Everywhere | Spaghetti Junction, the Chattahoochee River (tubing, the river parks) |
 
-**Sensitive sites** need deliberate treatment, not set dressing: the MLK historic sites, Stone Mountain's Confederate carving, the police training center ("Cop City"), Lake Lanier and the flooded town of Oscarville. We also avoid real gangs and real crimes.
+**Sensitive sites are on the map and treated with respect**: the MLK historic sites, Stone Mountain's Confederate carving, the police training center ("Cop City"), Lake Lanier and the flooded town of Oscarville. They're built carefully and never played for laughs, and no missions or gags happen at them. Real gangs, real crimes and real people stay out entirely.
 
 ---
 
@@ -183,6 +194,18 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 - **Cheap damage**: dent morph targets blended by impact, detachable bumpers and panels, and smoke and fire driven by engine health.
 - Vehicle types (later): motorcycles, boats on the Hooch and the lakes, helicopters.
 
+### Gangs (fictional)
+
+- **Five or six invented crews**, each with turf in particular districts, its own colors, cars, music taste and graffiti tags, and a different kind of business. The roster is drafted for the owner before anything is built.
+- **No real gang names, symbols or hand signs**, and no real rappers or cases.
+- **Turf reacts to you.** Each crew has a reputation meter for the player, like Saints Row's notoriety. Wear their rival's colors on their block, rob their corner or crash their car meet and they come for you. Help them and you get work, discounts and backup.
+- **Turf is a living layer.** It sets who hangs out on the corners, which cars park on the street, the graffiti, and random events (a drive-by, a dice game, a car meet, a crew war spilling into traffic).
+- **Gangs and police share one world.** A shootout between crews draws police heat to the block whether you're there or not, and you can use a gang war to cover a getaway.
+
+### The protagonist
+
+One fixed character for now (look, voice and a short backstory to be drafted for the owner). A character creator comes later, after the world is built out.
+
 ### On foot
 
 - A third-person controller (Skyrome's capsule, step-up, climb and camera code is a starting point), with cover, hitscan shooting with soft lock-on (gamepad and touch need it), and melee.
@@ -199,6 +222,19 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 | Highway-assist truck: clear Connector wrecks | Express-lane time trials | Game-day ticket scalping and lot parking | Film-set runner and stunt driver |
 | Tow and repo man | Custom shop and car meets | Airport cargo smuggling | Trap-music career: beats, mixtapes, the club DJ |
 | Traffic-chopper reporter | Boat and jet-ski races on Lanier and Allatoona | Storm-cleanup insurance scams | Hooch tubing, Dragon Con scavenger hunt |
+
+### Radio: bring your own music
+
+Licensed music is out, and so is streaming from Spotify or Apple Music:
+
+- **Spotify's Developer Policy forbids it outright** ("Do not create a game"). It also forbids syncing music with visuals or mixing it with other audio, and since 2026 an unapproved app is limited to 5 users.
+- **Apple Music (MusicKit JS)** has no explicit ban on games, but its terms forbid syncing or modifying the music, and ducking it under game sound counts as modifying. Each player would also need an Apple Music subscription. It could come later as a plain player with play, pause and skip, but it's a legal grey area and low priority.
+
+The radio instead has three kinds of station:
+
+1. **Self Radio**, as in GTA V. Players load their own music files (the file picker works in every browser, including iPhone Safari), and the tracks are kept in the browser's own storage between visits. Because the files are the player's own, the game can do everything a real station does: crossfades, ducking under sirens, procedural DJ chatter and ads between tracks. In multiplayer this audio **never leaves the player's machine**.
+2. **House stations.** Procedural and CC0 music (the same approach as Skyrome's audio), plus parody talk radio and ads that mock the parody brands.
+3. **Radio off / External**, which mutes the in-game music so players can run Spotify, Apple Music or anything else in another tab or app. The game never touches those services.
 
 ### Economy and progression
 
@@ -221,9 +257,9 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 | Threads | **Web Workers + SharedArrayBuffer** | The simulation runs in a worker and the main thread renders. Needs cross-origin isolation (COOP/COEP headers). Falls back to `postMessage` with transferable buffers when the page isn't isolated. |
 | Assets | **glTF + meshopt** (`EXT_meshopt_compression`), **KTX2/Basis** textures, **3D Tiles-style** tile hierarchy | Compressed on the wire and on the GPU, and streamable. `3d-tiles-renderer` (NASA-AMMOS) is a reference for tile LOD. |
 | World pipeline | **Node + DuckDB + GDAL + PDAL + osmium** (offline) | Turns OpenStreetMap, Overture, USGS 3DEP elevation and lidar, NLCD land cover and MARTA GTFS into baked tiles. |
-| Audio | Web Audio, procedural and CC0 | Same approach as Skyrome. |
+| Audio | Web Audio, procedural and CC0, plus the player's own files for the radio | Same approach as Skyrome. See [Radio](#radio-bring-your-own-music). |
 | Tests | **Vitest** for pure logic; **Playwright** for real-browser checks (controls, perf budgets, soak) | Skyrome's `check:controls`, `perf-budget`, `soak` and `leaks` harnesses get ported early. |
-| Hosting | **Cloudflare Pages** (`_headers` for COOP/COEP, CDN for big tiles) | GitHub Pages can't set headers (the `coi-serviceworker` workaround forces a reload on first visit). |
+| Hosting | **Cloudflare Workers static assets + R2** (`_headers` for COOP/COEP; tiles in R2 with free egress) | Can send the cross-origin isolation headers that GitHub Pages can't. Pages is limited to 25 MiB per file and 20k–100k files; R2 holds the map. Durable Objects give us multiplayer rooms on the same account. |
 
 ### Why not…
 
@@ -306,14 +342,29 @@ Reference projects: Streets GL (MIT, a browser OSM renderer), OSM2World, TerraDr
 
 The target is GTA Online-style **sessions of 8–32 players**, joined from a link.
 
-- **Authoritative server** running the same simulation code headless in **Node or Bun**, using the Rapier compat build.
+- **Authoritative server** running the same simulation code headless. That means **the sim must be runtime-agnostic**: no DOM, no Node-only APIs, so it can run in a browser worker, a Cloudflare Durable Object or Node.
 - **Own vehicle is client-authoritative with server sanity checks** (speed envelope, teleport distance, collision plausibility). The server owns damage, money, heat and rewards. Remote cars are dead-reckoned and interpolated about 100 ms behind. Full rollback of rigid-body cars isn't worth it in a city.
 - **Interest management**: a 64–128 m cell grid, with update rates by distance (20 Hz near, 5 Hz mid, minimap-only far).
-- **Transport**: **WebTransport** (Baseline since Safari 26.4, March 2026), using datagrams for state and streams for reliable events, with a **WebSocket fallback**.
-- **Frameworks**: Colyseus (TypeScript rooms) for the game server is the front-runner, versus a custom uWebSockets.js + WebTransport server. Nakama or Supabase handle accounts, friends and storage. Postgres holds profiles, the money ledger and garages.
-- **Hosting**: a plain container on bundled-bandwidth hosts (Hetzner, OVH, Colyseus Cloud). Avoid lock-in to a hosting vendor: Hathora shut down game hosting in May 2026 and Unity Multiplay was deprecated in April 2026.
+- **Transport**: **WebSocket first**, with binary delta snapshots; it's fine for 8–32 players and it's what Cloudflare supports. **WebTransport** (Baseline since Safari 26.4, March 2026; datagrams for state) stays behind the transport interface for later. It would need a non-Cloudflare host or a container.
+- **Accounts and saves**: Cloudflare D1 (SQLite) for profiles, the money ledger and garages, with Turnstile on signup.
+
+### Hosting on Cloudflare
+
+The owner already pays for Cloudflare. Multiplayer needs **Workers Paid ($5/mo)**; the current plan can be checked in the dashboard under *Workers & Pages → Plans*.
+
+| Piece | Cloudflare product | Notes |
+|---|---|---|
+| The game (HTML, JS, WASM) | Workers static assets (or Pages) | Free and unlimited requests. `_headers` sets COOP/COEP. 25 MiB per file. |
+| Map tiles | **R2** | $0.015/GB-month, **free egress**, 10 GB free |
+| Multiplayer rooms | **Durable Objects**, one per session | Run the TS + Rapier sim with a 20–30 Hz tick while players are connected, and stop the loop when the room empties so it can hibernate. WebSockets only. Watch the 128 MB memory limit. |
+| Fallback game server | **Cloudflare Containers** (GA since April 2026) | Only if a room outgrows a Durable Object's CPU or memory. Has egress fees. |
+| Accounts and saves | **D1** | Free tier is generous; Paid includes 50M writes a month |
+| Staging and admin | Access (free for 50 users) | |
+
+**Rough cost** for 10 rooms of 16 players running 24/7: **about $100 a month** (about $70 with input batched at 10 Hz). At a realistic few hours a day, it's **about $25–30 a month**. These are estimates from Cloudflare's published prices.
+
+**Avoid lock-in**: the room code sits behind the same transport interface as single player, so it can move to a plain Node container (Hetzner, Colyseus Cloud) if Cloudflare stops fitting. Hathora shut down game hosting in May 2026, and Unity Multiplay was deprecated in April 2026.
 - **Anti-cheat**: a browser client can't be trusted, so the server decides anything that matters. Add plausibility checks and rate limits, don't send what a player can't see, and make sessions private or invite-only by default.
-- **Rough cost**: a few dollars per vCPU per month, about 30–60 concurrent players per vCPU, and bandwidth around 10–30 kB/s per player.
 
 ---
 
@@ -346,9 +397,9 @@ The target is GTA Online-style **sessions of 8–32 players**, joined from a lin
 | Milestone | Goal | Done when |
 |---|---|---|
 | **M0: Research** | This README and the research notes | ✅ 14 Oct 2026 |
-| **M1: Spike: drive a real block** | The pipeline bakes one 2 × 2 km tile of Midtown (OSM + 3DEP + Overture), with one drivable raycast car, a chase camera, sim in a worker and a loopback transport | 60 fps on the Mac, runs on the iPhone, controls check passes |
-| **M2: Vertical slice: Downtown + Midtown + the Connector** | Streaming tiles, lane-graph traffic with signals, pedestrians with scenario points, on-foot movement, carjacking, a first weapon, heat 1–3 with the city police, one side activity (rideshare) | A 10-minute session of "steal a car, get chased, lose them" is fun |
-| **M3: The metro** | The compression warp across the whole area, the interstates and hand-built interchanges, Cobb and Gwinnett districts, jurisdictions (State Patrol PITs on interstates), time of day and weather | Drive Marietta Square → Downtown → Duluth with no seams |
+| **M1: Spike: drive a real block** | The pipeline bakes one 2 × 2 km tile of **Downtown centered on Five Points** (OSM + 3DEP + Overture; it takes in a stretch of the Connector and Centennial Park), with one drivable raycast car, the protagonist on foot, a chase camera, the sim in a worker and a loopback transport | 60 fps on the Mac, runs on the iPhone, controls check passes |
+| **M2: Vertical slice: Intown and the river** | **Downtown, Midtown, the Connector, Old Fourth Ward and Inman Park on the way to Little Five Points and Candler Park, Buckhead, and west over the Chattahoochee to Vinings** (via West Paces Ferry and I-75). Streaming tiles, lane-graph traffic with signals, pedestrians with scenario points, carjacking, **driving and gunplay at equal polish** (cover, two or three weapons), heat 1–3 with the city police (and State Patrol on I-75/85), the first two fictional crews and their turf, one side activity (rideshare) | A 10-minute session of "steal a car, shoot your way out, lose them on the Connector" is fun |
+| **M3: The metro** | The compression warp across the whole area, the interstates and hand-built interchanges, Cobb and Gwinnett districts, the airport, Stone Mountain and the lakes, jurisdictions (State Patrol PITs on interstates), time of day and weather | Drive Marietta Square → Downtown → Duluth with no seams |
 | **M4: Sandbox depth** | Weapons and cover, the full dispatch ladder to 6 stars, side-activity backlog, economy, safehouses, garages, car mods, radio, random events | A player has reasons to stay for hours |
 | **M5: Multiplayer alpha** | Headless server, accounts, 8–16 player sessions, interest management, server-owned police | Friends can cause trouble together from a link |
 
@@ -356,18 +407,34 @@ The target is GTA Online-style **sessions of 8–32 players**, joined from a lin
 
 ## Open questions
 
-These need the owner's answers before or during M1–M2:
+**Answered on 14 Oct 2026**:
+- Working title for now.
+- The airport, Stone Mountain and both lakes are on the map.
+- A fixed protagonist.
+- Shooting and driving get equal priority.
+- Fictional gangs.
+- No licensed music.
+- Present day.
+- Sensitive sites are in, handled respectfully.
+- Downtown and its surroundings come first.
+- Cloudflare for hosting.
 
-1. **Name.** Is "Hood Sandbox" the game's title or a working name?
-2. **Map edges.** Include **Stone Mountain** and **Lake Lanier** at the east and northeast edges, and **Lake Allatoona** in the northwest? **Hartsfield-Jackson airport** is south of the requested area: put it on the map anyway (it's iconic), or make it an edge you can't reach or a fast-travel point?
-3. **Who you play.** One fixed protagonist, or a character creator (Skyrome already has one)?
-4. **Shooting or driving first?** GTA treats them as equals. For M2, which matters more to you if we must choose?
-5. **Gangs.** Fictional gangs with turf (GTA San Andreas style), or crime without organized factions for now?
-6. **Music.** Original or procedural "radio stations", or none for now? Licensed real tracks aren't realistic.
-7. **When.** Present day (2026), or a specific earlier year? It changes the cars, phones and buildings (the Gulch development, the BeltLine, GA-400 under construction).
-8. **Sensitive sites.** OK to handle them as described above (present, respectful, no jokes)?
-9. **First district.** Downtown + Midtown + the Connector is the recommended first slice. Would you rather start where you live or know best?
-10. **Server budget** for M5: free tier only, or about $10–50 a month?
+**Still open:**
+
+1. **Title.** "Hood Sandbox" is the working title. These candidates had no exact match on Steam:
+
+   | Title | Why |
+   |---|---|
+   | **Resurgens** | The city motto ("rising again"), with the phoenix on the city seal. Distinctive and searchable. |
+   | **Spaghetti Junction** | The famous interchange. Very GTA in tone, and a board game is the only other use found. |
+   | **Southern Crescent** | Named after the old train. |
+   | **Cabbagetown** | Named after the neighborhood. |
+
+   Already taken by other games: *Perimeter*, *Zone 6* and *Kudzu*. *Peachtree* is close to a well-known accounting-software brand. Nobody has run a trademark (USPTO) search yet.
+2. **The protagonist.** Who are they? A local, or someone just arrived? What's their angle? A draft comes to you before anything is built.
+3. **The crews.** A draft roster of five or six fictional gangs (turf, colors, cars, business) comes to you before anything is built.
+4. **Apple Music.** Worth doing later as a plain player, or skip it? Self Radio and the house stations cover the need.
+5. **Cloudflare plan.** Which plan is the account on? Free is enough until multiplayer, which needs Workers Paid ($5/mo).
 
 ## Planned repo layout
 
@@ -396,6 +463,7 @@ Full notes, with sources, from the research pass on 14 Oct 2026:
 - [Map data: sources, licenses, scale, pipeline](docs/research/map-data.md)
 - [Atlanta: districts, landmarks, police, culture, naming](docs/research/atlanta.md)
 - [Gameplay systems and browser multiplayer](docs/research/systems-and-multiplayer.md)
+- [Music, Cloudflare hosting and title check](docs/research/music-hosting-names.md)
 
 ## License
 
