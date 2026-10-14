@@ -1,12 +1,14 @@
-# Hood Sandbox *(working title)*
+# Hood Sandbox
 
-**A GTA-style open-world crime sandbox set in metro Atlanta (Intown, Cobb, Gwinnett and the suburbs between them). It runs in the web browser.**
+**A GTA-style open-world crime sandbox built from real cities, running in the web browser. The first city is metro Atlanta: Intown, Cobb, Gwinnett and the suburbs between them.**
+
+The engine is city-agnostic. Everything that makes the game *Atlanta* (the map data, districts, police agencies, crews, parody brands and landmarks) lives in a **city pack**, so other cities can be added later with the same rules. See [City packs](#city-packs).
 
 There is no story yet, and that's deliberate. The game is the city: real streets and highways, real neighborhoods, pedestrians and traffic going about their day, side hustles on every corner, and a police response that feels like Atlanta's. A minor offense on a city street won't start a chase. Do the same on I-285 and the State Patrol will PIT you at 110 mph.
 
 > **Status: research and planning (14 October 2026).** Nothing is playable yet.
 >
-> This README is the plan: what we're building, what it's built with, and the order we'll build it in. The research behind it is in [`docs/research/`](docs/research/). The [open questions](#open-questions) at the bottom still need the owner's answers.
+> This README is the plan: what we're building, what it's built with, and the order we'll build it in. The research behind it is in [`docs/research/`](docs/research/). The cast (the protagonist, the crews and the police agencies) is drafted in [`docs/CAST.md`](docs/CAST.md) and waiting for review.
 
 ---
 
@@ -18,6 +20,7 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 - [Gameplay](#gameplay)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
+- [City packs](#city-packs)
 - [The world pipeline](#the-world-pipeline)
 - [Performance and devices](#performance-and-devices)
 - [Multiplayer (later)](#multiplayer-later) (and [Hosting on Cloudflare](#hosting-on-cloudflare))
@@ -38,6 +41,7 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 4. **Side activities instead of a story.** Rideshare runs, tow and repo jobs, street takeovers, I-285 night races, EMS shifts, chop-shop export lists, and so on.
 5. **It runs in a browser.** That means desktop, gamepad and phone, with one click to play and no install. It should hold 60 fps on an M-series MacBook and stay playable on an iPhone.
 6. **Multiplayer-ready, single-player first.** The simulation is built so a server can run it later (GTA Online-style sessions), but single-player comes first.
+7. **One engine, many cities.** Nothing in the engine names Atlanta. A city is data plus hand-built hero assets.
 
 ## Decisions so far
 
@@ -47,18 +51,19 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 | Map edges | **Hartsfield-Jackson** (south), **Stone Mountain** (east), **Lake Lanier** (northeast) and **Lake Allatoona** (northwest) are all on the map. |
 | First playable area | **Downtown, Midtown, the Connector, Little Five Points, Candler Park, Buckhead and Vinings** (the [M2 slice](#roadmap)). |
 | Era | **Present day (2026).** GA-400's express lanes under construction, Centennial Yards rising over the Gulch, the BeltLine, the city just past the World Cup. |
-| Protagonist | **One fixed protagonist** for now (to be designed; a draft goes to the owner before it's built). A character creator comes later. The world comes first. |
+| Protagonist | **One fixed protagonist** for now. The draft is Keon "Kudzu" Mabry, a laid-off tow-truck driver ([CAST.md](docs/CAST.md)). A character creator comes later. The world comes first. |
 | Shooting vs driving | **Equal priority.** The M2 slice needs both to feel good. |
-| Gangs | **Fictional gangs with turf.** See [Gangs](#gangs-fictional). |
+| Gangs | **Fictional gangs with turf.** Six crews are drafted in [CAST.md](docs/CAST.md). See [Gangs](#gangs-fictional). |
 | Sensitive sites | **On the map and treated respectfully**, never played for laughs. |
-| Music | **No licensed music.** The radio plays the player's own music. See [Radio](#radio-bring-your-own-music). |
+| Music | **No licensed music, and no Spotify or Apple Music.** The radio plays the player's own files plus house stations. Low priority (M4). See [Radio](#radio-bring-your-own-music). |
 | Names | **Real places, parody brands.** Atlanta, Marietta, Peachtree St and I-285 keep their real names. Companies, stadium sponsors, teams and transit brands get GTA-style parodies. Police and other agencies get fictional names that clearly echo the real ones. |
 | Look | **Stylized-realistic.** GTA-like proportions, procedural and CC0 textures, simplified detail. |
 | Rating | **M (GTA-level).** Violence, blood, swearing and crime as the core loop. Sexual content stays off-screen. Gore and language get settings toggles. |
 | Devices | **Desktop browsers, gamepads and phones/tablets.** |
 | Multiplayer | **Single-player first, with multiplayer-ready code.** |
 | Client tech | **TypeScript + Vite + three.js (WebGL2 renderer, WebGPU later) + Rapier (WASM physics)**, with the simulation in a Web Worker. Rust compiled to WASM only for hot paths that profiling identifies. See [Tech stack](#tech-stack). |
-| Hosting | **Cloudflare**: the game as Workers static assets (with COOP/COEP headers), map tiles in **R2** (no egress fees), and later one **Durable Object per multiplayer room**. See [Hosting on Cloudflare](#hosting-on-cloudflare). |
+| Title | **Hood Sandbox.** It names the engine, so it works for any city. Each city gets its own subtitle later. |
+| Hosting | **Cloudflare** (the account already has **Workers Paid + R2 Paid**): the game as Workers static assets (with COOP/COEP headers), map tiles in **R2** (no egress fees), and later one **Durable Object per multiplayer room**. See [Hosting on Cloudflare](#hosting-on-cloudflare). |
 | License | **MIT** for the code. The map data keeps its own licenses ([details](#names-brands-and-data-licenses)). |
 
 ---
@@ -196,7 +201,13 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 
 ### Gangs (fictional)
 
-- **Five or six invented crews**, each with turf in particular districts, its own colors, cars, music taste and graffiti tags, and a different kind of business. The roster is drafted for the owner before anything is built.
+- **Six invented crews** ([draft in CAST.md](docs/CAST.md#the-crews)), each with turf in particular districts, its own colors, cars, music taste and graffiti tags, and a different kind of business:
+  - **The Ashes**: East intown chop shops.
+  - **The Paces Ferry Boys**: Buckhead trust-fund party drugs.
+  - **Gulch Holdings**: Downtown crime through real estate, and the big fish.
+  - **The Hollowell Royals**: the Westside.
+  - **Night Market**: Buford Hwy racing and takeovers.
+  - **Kennesaw Iron**: north Cobb bikers.
 - **No real gang names, symbols or hand signs**, and no real rappers or cases.
 - **Turf reacts to you.** Each crew has a reputation meter for the player, like Saints Row's notoriety. Wear their rival's colors on their block, rob their corner or crash their car meet and they come for you. Help them and you get work, discounts and backup.
 - **Turf is a living layer.** It sets who hangs out on the corners, which cars park on the street, the graffiti, and random events (a drive-by, a dice game, a car meet, a crew war spilling into traffic).
@@ -204,7 +215,10 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 
 ### The protagonist
 
-One fixed character for now (look, voice and a short backstory to be drafted for the owner). A character creator comes later, after the world is built out.
+**Keon "Kudzu" Mabry** (draft; [CAST.md](docs/CAST.md#the-protagonist-keon-kudzu-mabry)): a 29-year-old laid-off tow-truck driver from Reynoldstown, living in a weekly-rate motel off the Connector.
+- **What he brings:** he knows every lot, impound yard and back road, which explains the car theft, and his first side work is tow and repo jobs.
+- **The long-term goal:** buying back his late grandmother's flipped house, the most expensive property in the game. It gives money a point without a scripted story.
+- **Later:** a character creator, once the world is built out.
 
 ### On foot
 
@@ -228,7 +242,7 @@ One fixed character for now (look, voice and a short backstory to be drafted for
 Licensed music is out, and so is streaming from Spotify or Apple Music:
 
 - **Spotify's Developer Policy forbids it outright** ("Do not create a game"). It also forbids syncing music with visuals or mixing it with other audio, and since 2026 an unapproved app is limited to 5 users.
-- **Apple Music (MusicKit JS)** has no explicit ban on games, but its terms forbid syncing or modifying the music, and ducking it under game sound counts as modifying. Each player would also need an Apple Music subscription. It could come later as a plain player with play, pause and skip, but it's a legal grey area and low priority.
+- **Apple Music (MusicKit JS)** has no explicit ban on games, but its terms forbid syncing or modifying the music, and ducking it under game sound counts as modifying. Each player would also need an Apple Music subscription. **Decision: skipped.** It could be revisited as a plain player (play, pause, skip, no ducking), but it's a legal grey area and Self Radio covers the need.
 
 The radio instead has three kinds of station:
 
@@ -258,6 +272,7 @@ The radio instead has three kinds of station:
 | Assets | **glTF + meshopt** (`EXT_meshopt_compression`), **KTX2/Basis** textures, **3D Tiles-style** tile hierarchy | Compressed on the wire and on the GPU, and streamable. `3d-tiles-renderer` (NASA-AMMOS) is a reference for tile LOD. |
 | World pipeline | **Node + DuckDB + GDAL + PDAL + osmium** (offline) | Turns OpenStreetMap, Overture, USGS 3DEP elevation and lidar, NLCD land cover and MARTA GTFS into baked tiles. |
 | Audio | Web Audio, procedural and CC0, plus the player's own files for the radio | Same approach as Skyrome. See [Radio](#radio-bring-your-own-music). |
+| Hand-built assets | **Blender 5.2** (installed on the dev box), driven headless by Python scripts (`blender -b --python`), exporting glTF | For hero landmarks, vehicles, the protagonist and props that procedural generation can't do well. Scripts live in the repo, so assets can be regenerated and reviewed. |
 | Tests | **Vitest** for pure logic; **Playwright** for real-browser checks (controls, perf budgets, soak) | Skyrome's `check:controls`, `perf-budget`, `soak` and `leaks` harnesses get ported early. |
 | Hosting | **Cloudflare Workers static assets + R2** (`_headers` for COOP/COEP; tiles in R2 with free egress) | Can send the cross-origin isolation headers that GitHub Pages can't. Pages is limited to 25 MiB per file and 20k–100k files; R2 holds the map. Durable Objects give us multiplayer rooms on the same account. |
 
@@ -296,6 +311,28 @@ The single rule that makes multiplayer possible later is to **keep the simulatio
 - **Skyrome conventions carried over** where they fit: Systems with priorities, `Game` services added through declaration merging, actions rather than raw keys (trackpad-first bindings, gamepad, touch), graphics tiers with `lodScale`, and freezing static matrices.
 
 ---
+
+## City packs
+
+Atlanta is the first city, not the only one. The engine knows about *districts*, *jurisdictions*, *crews* and *brands*, never about Peachtree Street. A city pack is a folder of data plus a few hand-built assets:
+
+```
+data/cities/atlanta/
+  city.json          name, bounding polygon, projection, real-world data sources
+  warp.json          control points and compression zones (real coordinates → game coordinates)
+  districts.json     district polygons, popzone types, time-of-day population cycles, vehicle groups
+  jurisdictions.json police agencies, their polygons, pursuit style, dispatch tables
+  crews.json         gangs: turf polygons, colors, cars, business, reputation rules
+  brands.json        parody brands, mapped to the real ones and placed by POI category
+  landmarks.json     hero landmarks: position, footprint, the Blender script or glTF that builds each one
+  overrides/         hand-built interchanges, road fixes, map edges
+  radio/             talk-radio and ad scripts for the house stations
+  CAST.md            the protagonist, crews and agencies, in words (Atlanta: docs/CAST.md for now)
+```
+
+**Adding a city** means running the same pipeline over a new area, then writing its pack: districts, agencies, crews, brands and landmarks. The pursuit styles, the heat ladder, traffic, population cycles and side activities are shared rules that each pack only parameterizes. The protagonist stays the same across cities until there is a character creator, and later cities may bring their own.
+
+What makes a city a good candidate: open map data (OpenStreetMap plus elevation data), distinct districts, a real difference in policing between jurisdictions, and a highway network worth chasing on.
 
 ## The world pipeline
 
@@ -350,7 +387,7 @@ The target is GTA Online-style **sessions of 8–32 players**, joined from a lin
 
 ### Hosting on Cloudflare
 
-The owner already pays for Cloudflare. Multiplayer needs **Workers Paid ($5/mo)**; the current plan can be checked in the dashboard under *Workers & Pages → Plans*.
+The account already has **Workers Paid** and **R2 Paid** (both renew on 24 Oct). That covers everything in this table, including Durable Objects, D1 and Containers, with no new subscription needed.
 
 | Piece | Cloudflare product | Notes |
 |---|---|---|
@@ -382,7 +419,7 @@ The owner already pays for Cloudflare. Multiplayer needs **Workers Paid ($5/mo)*
 - The word "Olympic" (protected by US law)
 - Real people and likenesses
 
-**Police and other agencies** get fictional names and badges that echo the real ones. No state seals.
+**Police and other agencies** get fictional names and badges that echo the real ones ([draft list in CAST.md](docs/CAST.md#the-law-fictional-agencies-atlanta), e.g. Atlanta City Police, Georgia Highway Patrol). No state seals.
 
 **Map data:**
 - OpenStreetMap and Overture buildings and roads are **ODbL**. The game will show "© OpenStreetMap contributors" and the Overture, Microsoft, Esri and USGS credits on the map screen and in the credits.
@@ -408,33 +445,21 @@ The owner already pays for Cloudflare. Multiplayer needs **Workers Paid ($5/mo)*
 ## Open questions
 
 **Answered on 14 Oct 2026**:
-- Working title for now.
-- The airport, Stone Mountain and both lakes are on the map.
+- The title is Hood Sandbox, and the engine is built for many cities.
+- The map edges: the airport, Stone Mountain and both lakes.
 - A fixed protagonist.
 - Shooting and driving get equal priority.
 - Fictional gangs.
-- No licensed music.
+- No licensed music, and no Apple Music for now.
 - Present day.
-- Sensitive sites are in, handled respectfully.
-- Downtown and its surroundings come first.
-- Cloudflare for hosting.
+- The sensitive sites are on the map, handled with respect.
+- The first slice is Downtown and the area around it.
+- Cloudflare Workers Paid and R2 Paid are already on the account.
 
 **Still open:**
 
-1. **Title.** "Hood Sandbox" is the working title. These candidates had no exact match on Steam:
-
-   | Title | Why |
-   |---|---|
-   | **Resurgens** | The city motto ("rising again"), with the phoenix on the city seal. Distinctive and searchable. |
-   | **Spaghetti Junction** | The famous interchange. Very GTA in tone, and a board game is the only other use found. |
-   | **Southern Crescent** | Named after the old train. |
-   | **Cabbagetown** | Named after the neighborhood. |
-
-   Already taken by other games: *Perimeter*, *Zone 6* and *Kudzu*. *Peachtree* is close to a well-known accounting-software brand. Nobody has run a trademark (USPTO) search yet.
-2. **The protagonist.** Who are they? A local, or someone just arrived? What's their angle? A draft comes to you before anything is built.
-3. **The crews.** A draft roster of five or six fictional gangs (turf, colors, cars, business) comes to you before anything is built.
-4. **Apple Music.** Worth doing later as a plain player, or skip it? Self Radio and the house stations cover the need.
-5. **Cloudflare plan.** Which plan is the account on? Free is enough until multiplayer, which needs Workers Paid ($5/mo).
+1. **The cast.** Review the drafts in [docs/CAST.md](docs/CAST.md): Kudzu as the protagonist, the six crews, and the agency names.
+2. **Go for M1?** M1 is the first technical spike: bake one Downtown tile from real data, drive a car, and walk the protagonist (a stand-in model at first).
 
 ## Planned repo layout
 
@@ -450,7 +475,9 @@ src/
   world/        tile streaming, LOD, culling
   shared/       data tables (JSON), protocol, math, entity registry, transport interface
 tools/pipeline/ OSM/Overture/3DEP → baked tiles (Node + DuckDB + GDAL + PDAL)
-data/           control points, hand-built interchange overrides, landmark list, district/jurisdiction polygons
+data/cities/
+  atlanta/      the Atlanta city pack (see "City packs")
+tools/blender/  Python scripts that build hero assets headless (blender -b --python)
 server/         (M5) headless sim host
 docs/           design docs and research
 ```
@@ -464,6 +491,8 @@ Full notes, with sources, from the research pass on 14 Oct 2026:
 - [Atlanta: districts, landmarks, police, culture, naming](docs/research/atlanta.md)
 - [Gameplay systems and browser multiplayer](docs/research/systems-and-multiplayer.md)
 - [Music, Cloudflare hosting and title check](docs/research/music-hosting-names.md)
+
+Design drafts: [the cast: protagonist, crews and police agencies](docs/CAST.md).
 
 ## License
 
