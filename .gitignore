@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.shots/
+.env*
+*.log
+.DS_Store
+# pipeline downloads and intermediates (large)
+tools/pipeline/cache/
