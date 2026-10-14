@@ -16,7 +16,8 @@ export function flatTile(): TileData {
 }
 
 export async function makeSim(tile: TileData = flatTile(), vehicleType = 'sedan') {
-  return Simulation.create({ seed: 1, tile, vehicleType });
+  // The physics tests want the old bare world: an empty car, nobody else about.
+  return Simulation.create({ seed: 1, tile, vehicleType, driver: false, parkedCars: 0 });
 }
 
 let cmdTick = 0;

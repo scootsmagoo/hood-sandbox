@@ -1,3 +1,5 @@
+import { doorGeometry, type DoorGeometry } from './shared/doors';
+import { HANDLING } from './shared/handling';
 import { SIM_HZ } from './shared/protocol';
 import { CameraRig } from './client/camera/CameraRig';
 import { Game } from './client/Game';
@@ -8,12 +10,12 @@ import { Atmosphere } from './client/render/Atmosphere';
 import { EntityViews } from './client/render/EntityViews';
 import { createTransport } from './client/transport/createTransport';
 import { Hud } from './client/ui/Hud';
-import { createWorldView } from './world/WorldView';
+import { createWorldView, type WorldView } from './world/WorldView';
 
 declare global {
   interface Window {
     /** Test and debugging hooks. */
-    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ };
+    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ; world?: WorldView; reloadWorld?: () => Promise<void>; doors: (typeId: string) => DoorGeometry };
   }
 }
 
@@ -23,7 +25,12 @@ async function main() {
   const params = new URLSearchParams(location.search);
   const boot = document.getElementById('boot')!;
   const canvas = document.getElementById('view') as HTMLCanvasElement;
-  const hooks: NonNullable<Window['__hood']> = { game: undefined as unknown as Game, ready: false, sim: SIM_HZ };
+  const hooks: NonNullable<Window['__hood']> = {
+    game: undefined as unknown as Game,
+    ready: false,
+    sim: SIM_HZ,
+    doors: (typeId) => doorGeometry(HANDLING[typeId] ?? HANDLING.sedan),
+  };
   window.__hood = hooks;
   try {
     const game = new Game(canvas, params);
@@ -41,12 +48,24 @@ async function main() {
       seed,
       tileBaseUrl: tileBase,
       vehicleType: params.get('car') ?? undefined,
-      startAtVehicle: params.get('start') === 'car',
+      // ?start=car: beside an empty car; ?start=jack: beside the driver's door; default: on the sidewalk.
+      start: ['car', 'jack'].includes(params.get('start') ?? '') ? (params.get('start') as 'car' | 'jack') : undefined,
+      driverMood: ['flee', 'fight'].includes(params.get('driver') ?? '') ? (params.get('driver') as 'flee' | 'fight') : undefined,
+      parkedCars: params.has('parked') ? Math.max(0, Math.min(20, Number(params.get('parked')) || 0)) : undefined,
       autoRun: true,
     });
 
-    const world = await createWorldView(game.ready, tileBase, seed);
+    let world = await createWorldView(game.ready, tileBase, seed);
     game.scene.add(world.root);
+    game.addSystem({ name: 'world', priority: 200, lateUpdate: () => world.update(game.camera, game.tier.lodScale) });
+    hooks.world = world;
+    // The leak harness (scripts/leaks.mjs) drops the drawn world and builds it again from the files.
+    hooks.reloadWorld = async () => {
+      world.dispose();
+      world = await createWorldView(game.ready, tileBase, seed);
+      game.scene.add(world.root);
+      hooks.world = world;
+    };
 
     game.addSystem(new NetSystem(game));
     game.addSystem(new EntityViews(game));

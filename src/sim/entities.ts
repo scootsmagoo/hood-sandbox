@@ -1,5 +1,6 @@
 import { Authority, EntityKind, type EntityBase, type EntityId } from '../shared/entities';
 import type { PedController, PedInput } from './character/PedController';
+import type { PedBrain } from './npc/brain';
 import type { RaycastCar, VehicleInput } from './vehicles/RaycastCar';
 
 export class PedEntity implements EntityBase {
@@ -10,6 +11,12 @@ export class PedEntity implements EntityBase {
   /** The vehicle this ped sits in, or 0. */
   vehicleId: EntityId = 0;
   input: PedInput = { moveX: 0, moveY: 0, camYaw: 0, sprint: false, jump: false };
+  /** Non-player peds think with a brain; the player's character has none. */
+  brain: PedBrain | null = null;
+  /** Index into the client's outfit table. */
+  outfit = 0;
+  /** Under the sim's control for a scripted moment (a carjack): commands are ignored and the body is moved by hand. */
+  busy = false;
 
   constructor(
     readonly id: EntityId,
@@ -25,11 +32,17 @@ export class VehicleEntity implements EntityBase {
   /** The ped driving, or 0. */
   occupantId: EntityId = 0;
   input: VehicleInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
+  /** The driver's door is open (a carjack in progress). */
+  doorOpen = false;
+  /** Where it was parked; it goes back there if it leaves the world. */
+  home = { x: 0, y: 0, z: 0, yaw: 0 };
 
   constructor(
     readonly id: EntityId,
     readonly typeId: string,
     readonly car: RaycastCar,
+    /** Paint, 0xRRGGBB. */
+    readonly color: number,
   ) {}
 }
 

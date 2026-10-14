@@ -38,7 +38,15 @@ export class SimHost {
   async init(init: SimInit) {
     try {
       const tile = await loadTileOrFallback(init.tileBaseUrl, init.seed);
-      const sim = await Simulation.create({ seed: init.seed, tile, vehicleType: init.vehicleType, startAtVehicle: init.startAtVehicle });
+      const sim = await Simulation.create({
+        seed: init.seed,
+        tile,
+        vehicleType: init.vehicleType,
+        start: init.start,
+        startAtVehicle: init.startAtVehicle,
+        driverMood: init.driverMood,
+        parkedCars: init.parkedCars,
+      });
       this.sim = sim;
       if (init.snapshotBuffer) this.ring = new SnapshotRing(init.snapshotBuffer, SNAPSHOT_BYTES);
       this.sink.message({
@@ -50,6 +58,7 @@ export class SimHost {
           playerId: sim.playerPedId,
           vehicleId: sim.vehicleId,
           vehicleType: sim.vehicleType,
+          entities: sim.entityDefs(),
           sharedSnapshots: this.ring !== null,
         },
       });

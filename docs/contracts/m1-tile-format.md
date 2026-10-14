@@ -38,6 +38,10 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
     "roads": "roads.glb",
     "buildings": "buildings.glb"
   },
+  "chunks": {                                // optional; how the .glb meshes are split (see "Chunks")
+    "size": 256, "minX": -1000, "minZ": -1000, "cols": 8, "rows": 8,
+    "groundLevels": [ { "lod": 0, "step": 1 }, { "lod": 1, "step": 4, "lower": 0.5, "skirt": 3 } ]
+  },
   "collision": {                             // static world collision, excluding the heightmap
     "file": "collision.bin",                 // little-endian: Float32 positions [x,y,z]*, then Uint32 indices
     "vertexCount": 0, "indexCount": 0
@@ -62,16 +66,34 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 
 ### Spawns
 
-- `player`: `y` is the surface height at that spot (sidewalk top), so the client may drop the capsule a little above it.
+- `player`: `y` is the surface height at that spot (sidewalk top), so the client may drop the capsule a little above it. The player starts on foot here.
 - `vehicle`: `y` is the road surface height. `heading` is the three.js `rotation.y` of an object that faces −Z at 0, so the forward vector is `(−sin h, −cos h)` in (x, z). Positive turns toward west.
+- The two are meant to be a few metres apart: the vehicle parked at the right-hand curb of a street, the player on the nearest sidewalk. The sim puts a stand-in driver in that car (the player carjacks it), and parks more empty cars along nearby curbs using `roads.json`.
 
 ### Mesh details (client-facing)
 
 - The `.glb` files use `EXT_meshopt_compression` and `KHR_mesh_quantization` (16-bit positions). Positions are quantized per mesh, so each mesh node carries a scale and translation. three's `GLTFLoader` needs `setMeshoptDecoder(MeshoptDecoder)`.
 - All meshes carry `COLOR_0` (RGBA, normalized uint8, linear). Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_crosswalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers); `bld_wall`, `bld_roof`, `bld_glass` (towers of 55 m and up, metallic).
-- `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell. Sampling the heightmap bilinearly differs from the mesh by a few centimetres at most.
+- `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell, split into chunks with two levels of detail (see "Chunks"). Sampling the heightmap bilinearly differs from the level 0 mesh by a few centimetres at most.
 - At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, crosswalks 14 cm, motorways 10 cm, residential streets 6 cm), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance.
 - Tunnels (`tunnel=*`, negative `layer`) are not in the tile.
+
+### Chunks
+
+Each `.glb` holds one node (with one mesh and one primitive) per chunk and material, so the renderer can frustum-cull them: a view draws a few dozen chunks instead of the whole tile. The chunks are the squares of a grid over `bounds`: chunk `(cx, cz)` covers `x` from `minX + cx * size` and `z` from `minZ + cz * size`, `size` metres each (256 m by default, `chunkSizeM` in `city.json`; the last row and column are cut short by the bounds). `tile.json.chunks` describes the grid, and every node says which chunk it belongs to in its glTF `extras` (three.js puts them in `userData`):
+
+```jsonc
+{ "kind": "ground" | "asphalt" | "sidewalk" | "crosswalk" | "rail" | "concrete" | "walls" | "roofs" | "glass_walls",
+  "chunk": [cx, cz],
+  "lod": 0 }                  // ground only
+```
+
+Node names are `<kind>_<cx>_<cz>` (ground: `ground_<cx>_<cz>_L<lod>`). A chunk with nothing of a material has no node for it.
+
+- **Roads and buildings**: a triangle belongs to the chunk that holds its centroid, and is never cut, so a chunk's geometry can reach a few metres past its square. Use each mesh's own bounding sphere for culling (three.js computes it from the geometry), never the chunk square.
+- **Ground levels of detail**: every chunk has two ground nodes, both covering the chunk's square. Level 0 is the full-resolution ground (`groundMeshStep`). Level 1 is every 4th sample of it (`step` in `groundLevels` counts heightmap cells): it is for far chunks. Show exactly one of the two per chunk. The client switches to level 1 when the camera is more than 400 m (times the tier's `lodScale`) from the chunk's square, with a little hysteresis. Level 1 differs from level 0 in two ways, so it never hides the roads that lie on the ground or shows cracks against a level 0 neighbour: its interior vertices are `lower` metres (0.5) below the terrain (the vertices on the chunk's border are not), and it has a vertical `skirt` of 3 m round its border (double-sided).
+- Chunk edges are seamless within a level: normals come from the whole heightmap, and border vertices sit at the same positions in neighbouring chunks.
+- A tile without `chunks` (an older bake) is one node per material; the client treats every node as a plain mesh.
 
 ### `collision.bin` contents
 
@@ -83,7 +105,7 @@ Building walls and roofs (footprints simplified to 0.4 m), plus elevated road de
 
 ## Rules
 
-- The sim worker reads only `tile.json`, `height.bin` and `collision.bin`. It never parses glTF and never imports three.js.
+- The sim worker reads `tile.json`, `height.bin` and `collision.bin`, and `roads.json` when `tile.json` names one (optional: without it no cars are parked at the curb). It never parses glTF and never imports three.js.
 - The client renders the `.glb` meshes and may also show the heightmap.
-- Until a baked tile exists, the client falls back to a procedural test ground that has the same shape (a flat heightmap, some boxes, a spawn).
+- Until a baked tile exists, the client falls back to a procedural test ground that has the same shape (a flat heightmap, some boxes, a spawn laid out like the real one, and a few street centrelines in `roads`).
 - Baked tiles are build output. `public/tiles/` is gitignored and regenerated with `npm run bake` in `tools/pipeline/`.

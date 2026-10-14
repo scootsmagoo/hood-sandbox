@@ -6,7 +6,7 @@ import { generateProceduralTile, propsToMesh } from './proceduralTile';
 import { Rng } from './rng';
 import { SnapshotRing } from './ring';
 import { SNAPSHOT_BYTES, SnapshotView, E, H } from './snapshot';
-import { decodeTile, heightAt, loadBakedTile, loadTileOrFallback, parseTileManifest } from './tile';
+import { decodeTile, heightAt, loadBakedTile, loadTileOrFallback, parseRoads, parseTileManifest } from './tile';
 
 describe('Rng', () => {
   it('repeats for the same seed and differs for another', () => {
@@ -208,6 +208,29 @@ describe('tile data', () => {
     expect((await loadTileOrFallback(null, 1)).source).toBe('procedural');
   });
 
+  it('reads the roads when the manifest names them, and carries on without them when it cannot', async () => {
+    const { t, height, col } = files();
+    const manifest = { ...t.manifest, roads: 'roads.json' };
+    const roads = { roads: [
+      { id: 'a', class: 'residential', width: 8, lanes: 2, oneway: false, bridge: false, layer: 0, points: [[0, 0, 0], [10, 0, 0]] },
+      { id: 'bad', class: 'residential', width: 8, points: [[0, 0, 0]] },
+      { id: 'worse', width: 'wide', points: [[0, 0, 0], [1, 0, 1]] },
+    ] };
+    const store: Record<string, unknown> = { '/t/tile.json': manifest, '/t/height.bin': height, '/t/collision.bin': col, '/t/roads.json': roads };
+    const fetchFn = async (url: string) => {
+      const v = store[url];
+      return { ok: v !== undefined, status: v !== undefined ? 200 : 404, json: async () => v, arrayBuffer: async () => v as ArrayBuffer };
+    };
+    const tile = await loadBakedTile('/t', fetchFn);
+    expect(tile.roads?.map((r) => r.id)).toEqual(['a']);
+    expect(parseRoads({}).length).toBe(0);
+    expect(parseRoads(null).length).toBe(0);
+    delete store['/t/roads.json'];
+    const without = await loadBakedTile('/t', fetchFn);
+    expect(without.roads).toBeUndefined();
+    expect(without.manifest.id).toBe(t.manifest.id);
+  });
+
   it('reads heights bilinearly and clamps at the edges', () => {
     const t = generateProceduralTile(1);
     const { cols, rows } = t.manifest.heightmap;
@@ -268,7 +291,7 @@ describe('procedural tile', () => {
 
 describe('handling table', () => {
   it('loads the shipped vehicles with sedan as the base', () => {
-    expect(Object.keys(HANDLING)).toEqual(['sedan', 'coupe']);
+    expect(Object.keys(HANDLING)).toEqual(['sedan', 'coupe', 'pickup']);
     expect(HANDLING.coupe.drive.driveForce).toBeGreaterThan(HANDLING.sedan.drive.driveForce);
     expect(HANDLING.coupe.wheels.radius).toBe(HANDLING.sedan.wheels.radius);
     expect(HANDLING.coupe.id).toBe('coupe');

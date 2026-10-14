@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { DEG } from '../../shared/math';
 import { HANDLING } from '../../shared/handling';
 import {
+  burnoutHold,
   counterSteer,
+  donutAccel,
+  donutRamp,
+  donutTargetSpeed,
+  donutTurnRate,
+  donutWanted,
+  donutYawAccel,
+  donutYawTarget,
   driftAssistAccel,
   engineAccel,
   lowSpeedGrip,
@@ -232,5 +240,82 @@ describe('drift assist', () => {
   it('is quiet at the balance point', () => {
     const wanted = 0.5 * a.maxSlideDeg * DEG;
     expect(Math.abs(driftAssistAccel(0.5, 0.4, 0.4, wanted, 25, true, a))).toBeLessThan(1e-9);
+  });
+});
+
+describe('donut', () => {
+  const a = h.assists;
+
+  it('wants one with throttle and full lock, on a handbrake or a launch, and not at speed', () => {
+    expect(donutWanted(1, 1, 0, false, false, a)).toBe(true); // launch from rest, wheel flat to the stop
+    expect(donutWanted(1, 0.6, 0, false, false, a)).toBe(false); // not enough wheel to start without the handbrake
+    expect(donutWanted(1, 0.6, 8, true, false, a)).toBe(true); // handbrake turn
+    expect(donutWanted(1, 1, 20, true, false, a)).toBe(false); // too fast: that is a drift
+    expect(donutWanted(0.3, 1, 0, true, false, a)).toBe(false); // needs throttle
+    expect(donutWanted(1, 0.4, 0, true, false, a)).toBe(false); // and wheel
+  });
+
+  it('holds on through a wobble of the inputs, and gives up when they are eased off or the car is too fast', () => {
+    expect(donutWanted(0.5, 0.4, 8, false, true, a)).toBe(true);
+    expect(donutWanted(0.2, 1, 8, false, true, a)).toBe(false);
+    expect(donutWanted(1, 0.2, 8, false, true, a)).toBe(false);
+    expect(donutWanted(1, 1, a.donutMaxSpeed + 4, false, true, a)).toBe(false);
+  });
+
+  it('is off for a car without donut assist', () => {
+    expect(donutWanted(1, 1, 0, true, false, { ...a, donutYawRate: 0 })).toBe(false);
+  });
+
+  it('ramps in quickly and out slowly, within 0 to 1', () => {
+    expect(donutRamp(0, true, 1 / 60)).toBeCloseTo(1 / 60 / 0.15, 6);
+    expect(donutRamp(0.5, false, 1 / 60)).toBeCloseTo(0.5 - 1 / 60 / 0.5, 6);
+    expect(donutRamp(0.99, true, 1)).toBe(1);
+    expect(donutRamp(0.01, false, 1)).toBe(0);
+    expect(donutRamp(0, true, 0.15) * 1).toBeCloseTo(1, 6);
+  });
+
+  it('turns the way the wheel does, harder with more wheel, and builds up with speed', () => {
+    expect(donutYawTarget(1, 8, a)).toBeCloseTo(-a.donutYawRate, 6); // right wheel: a clockwise (negative) yaw
+    expect(donutYawTarget(-1, 8, a)).toBeCloseTo(a.donutYawRate, 6);
+    expect(Math.abs(donutYawTarget(0.6, 8, a))).toBeLessThan(a.donutYawRate);
+    expect(donutYawTarget(0, 8, a)).toBeCloseTo(0, 9);
+    expect(Math.abs(donutYawTarget(1, 0, a))).toBeCloseTo(a.donutYawRate * 0.4, 6);
+    expect(Math.abs(donutYawTarget(1, 1, a))).toBeLessThan(Math.abs(donutYawTarget(1, 4, a)));
+  });
+
+  it('settles at a speed that a tighter wheel lowers, and governs toward it', () => {
+    expect(donutTargetSpeed(1, a)).toBeCloseTo(a.donutSpeed, 6);
+    expect(donutTargetSpeed(0.3, a)).toBeLessThan(a.donutSpeed);
+    expect(donutAccel(0, 1, 9, a)).toBe(9); // from rest: full push (capped by what the engine has)
+    expect(donutAccel(a.donutSpeed, 1, 9, a)).toBeCloseTo(0, 6);
+    expect(donutAccel(a.donutSpeed + 2, 1, 9, a)).toBeLessThan(0); // too fast: brake
+    expect(donutAccel(40, 1, 9, a)).toBe(-a.donutBrake);
+  });
+
+  it('pulls the yaw rate to its target, never harder than the cap', () => {
+    expect(donutYawAccel(0, -1.5)).toBeLessThan(0);
+    expect(donutYawAccel(-1.5, -1.5)).toBe(0);
+    expect(donutYawAccel(0, 10)).toBe(14);
+    expect(donutYawAccel(0, -10)).toBe(-14);
+  });
+
+  it('bends the direction of travel so the slide angle settles at the configured angle, tail out', () => {
+    const target = a.donutSlideDeg * DEG;
+    // turning right (negative yaw): the tail swings left, so the car travels left of its nose (positive slide)
+    expect(donutTurnRate(-1.5, -1.5, target, a)).toBeCloseTo(-1.5, 6); // at the angle: travel turns with the nose
+    expect(donutTurnRate(-1.5, -1.5, 0, a)).toBeGreaterThan(-1.5); // too straight: travel turns slower than the nose, so the slide opens
+    expect(donutTurnRate(-1.5, -1.5, target + 0.3, a)).toBeLessThan(-1.5); // too far out: catch up
+    expect(donutTurnRate(1.5, 1.5, -target, a)).toBeCloseTo(1.5, 6); // mirror image
+    expect(donutTurnRate(0, 0.7, 1, a)).toBe(0.7); // no yaw target, nothing to bend
+  });
+});
+
+describe('burnout hold', () => {
+  const a = h.assists;
+  it('brakes the front axle and harder once the car creeps faster than it should', () => {
+    expect(burnoutHold(0, a)).toBeCloseTo(a.burnoutHold, 6);
+    expect(burnoutHold(a.burnoutCreep, a)).toBeCloseTo(a.burnoutHold, 6);
+    expect(burnoutHold(a.burnoutCreep + 2, a)).toBeGreaterThan(burnoutHold(a.burnoutCreep, a));
+    expect(burnoutHold(100, a)).toBe(12);
   });
 });

@@ -332,12 +332,14 @@ describe('loopback transport', () => {
 
     const axes = new Array(AXIS_COUNT).fill(0);
     axes[Axis.MoveY] = 1;
+    // Look east (yaw -PI/2): the car faces east, so walking alongside it stays in reach.
+    axes[Axis.Yaw] = -Math.PI / 2;
     t.sendInput({ tick: 1, buttons: 0, axes });
     t.advance(30);
     const a = t.drainSnapshots();
-    const z0 = last.f32[last.at(last.indexOf(ready.playerId)) + E.Pz];
-    const z1 = a[a.length - 1].f32[a[a.length - 1].at(a[a.length - 1].indexOf(ready.playerId)) + E.Pz];
-    expect(z1).toBeLessThan(z0 - 1);
+    const x0 = last.f32[last.at(last.indexOf(ready.playerId)) + E.Px];
+    const x1 = a[a.length - 1].f32[a[a.length - 1].at(a[a.length - 1].indexOf(ready.playerId)) + E.Px];
+    expect(x1).toBeGreaterThan(x0 + 1);
 
     t.sendInput({ tick: 2, buttons: Button.Interact, axes });
     t.advance(3);

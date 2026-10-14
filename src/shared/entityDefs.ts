@@ -1,0 +1,32 @@
+/**
+ * Entity definitions: what an entity is, as opposed to where it is. Snapshots carry only the state
+ * that changes every tick (pose, velocity, flags); the definition travels once, in `SimReady.entities`
+ * for what exists at the start and then as `entity:spawn` and `entity:despawn` events (events are
+ * reliable, snapshots are not). The client draws nothing it has no definition for.
+ */
+import { EntityKind, type EntityId } from './entities';
+
+export interface VehicleDef {
+  readonly id: EntityId;
+  readonly kind: typeof EntityKind.Vehicle;
+  /** Key into the handling table. */
+  readonly typeId: string;
+  /** Paint, 0xRRGGBB. */
+  readonly color: number;
+}
+
+export interface PedDef {
+  readonly id: EntityId;
+  readonly kind: typeof EntityKind.Ped;
+  /** Index into the client's outfit table (0 is the protagonist's). */
+  readonly outfit: number;
+  /** The player's own character. */
+  readonly player: boolean;
+}
+
+export type EntityDef = VehicleDef | PedDef;
+
+/** Paint colours the sim picks from for parked cars, 0xRRGGBB. */
+export const PAINTS = [0xb23a2e, 0x2f5d8a, 0xd9d6cf, 0x1f2326, 0x6b7a4a, 0xc79a2a, 0x7a2f55, 0x8d949b] as const;
+/** How many outfits the client has for pedestrians. */
+export const OUTFIT_COUNT = 6;

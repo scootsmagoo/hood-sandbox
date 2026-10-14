@@ -137,7 +137,9 @@ export class PedController {
     this.grounded = false;
   }
 
+  /** Takes the character out of the physics world for good. */
   dispose() {
     this.world.removeCharacterController(this.kcc);
+    this.world.removeRigidBody(this.body);
   }
 }

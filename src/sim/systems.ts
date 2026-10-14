@@ -3,10 +3,14 @@
  * systems do. Each reads and writes the `Simulation`; none touches three.js or the DOM.
  */
 import type RAPIER from '@dimforge/rapier3d-simd-compat';
+import { doorGeometry, SEAT_DROP } from '../shared/doors';
 import { Axis, Button } from '../shared/protocol';
 import { clamp, rotateVec, rotateVecInv } from '../shared/math';
+import { findJackable, startCarjack, stepCarjack } from './carjack';
 import { PED, PED_FEET_OFFSET } from './character/locomotion';
 import { PedEntity, VehicleEntity, type PlayerSlot } from './entities';
+import { BRAIN, newBrainOutput } from './npc/brain';
+import type { ClearProbe } from './npc/flee';
 import { GROUPS } from './physics/rapier';
 import type { Simulation } from './Simulation';
 import { IDLE_INPUT } from './vehicles/RaycastCar';
@@ -34,19 +38,33 @@ export class PlayerControlSystem implements SimSystem {
   private capsule: RAPIER.Capsule | null = null;
 
   fixedUpdate(sim: Simulation) {
+    // Cars nobody is steering (empty, or with a stand-in driver idling) sit with the handbrake on.
     for (const veh of sim.vehicles()) {
-      if (veh.occupantId === 0) Object.assign(veh.input, IDLE_INPUT);
+      if (veh.owner === 0) Object.assign(veh.input, IDLE_INPUT);
     }
     for (const p of sim.players.values()) {
       const ped = sim.registry.get(p.pedId) as PedEntity;
       let veh = ped.vehicleId ? (sim.registry.get(ped.vehicleId) as VehicleEntity) : null;
 
+      if (ped.busy) {
+        // A script has the character (a carjack): the commands wait.
+        p.edges = 0;
+        continue;
+      }
+
       if (p.edges & Button.Interact) {
         if (veh) {
           if (this.tryExit(sim, ped, veh)) veh = null;
         } else {
-          veh = this.tryEnter(sim, ped, p);
+          // At an occupied car's driver door: pull the driver out. Otherwise get into an empty car.
+          const target = findJackable(sim, ped);
+          if (target) startCarjack(sim, ped, target);
+          else veh = this.tryEnter(sim, ped, p);
         }
+      }
+      if (ped.busy) {
+        p.edges = 0;
+        continue;
       }
       if (veh && p.edges & Button.Reset) {
         veh.car.reset();
@@ -76,7 +94,7 @@ export class PlayerControlSystem implements SimSystem {
     let best: VehicleEntity | null = null;
     let bestDist = ENTER_RANGE;
     for (const v of sim.vehicles()) {
-      if (v.occupantId) continue;
+      if (v.occupantId || sim.isReserved(v.id)) continue;
       const pose = v.car.pose();
       const l = rotateVecInv(pose.q, c.x - pose.x, c.y - pose.y, c.z - pose.z);
       const half = v.car.h.chassis.halfExtents;
@@ -160,13 +178,17 @@ export class PedSystem implements SimSystem {
     for (const e of sim.registry.values()) {
       if (!(e instanceof PedEntity)) continue;
       const c = e.controller;
-      if (e.vehicleId) {
-        // A passenger rides with the car; the ped itself is hidden and out of the physics.
+      if (e.busy) {
+        // A carjack is moving this body by hand.
+      } else if (e.vehicleId) {
+        // A driver sits at the wheel, out of the physics; the ped is drawn seated at the seat.
         const v = sim.registry.get(e.vehicleId) as VehicleEntity;
         const p = v.car.pose();
-        c.x = p.x;
-        c.y = p.y;
-        c.z = p.z;
+        const seat = doorGeometry(v.car.h).seat;
+        const w = rotateVec(p.q, seat.x, seat.y - SEAT_DROP, seat.z);
+        c.x = p.x + w.x;
+        c.y = p.y + w.y;
+        c.z = p.z + w.z;
         c.yaw = v.car.yaw;
       } else {
         c.step(dt, e.input);
@@ -221,11 +243,15 @@ export class BoundsSystem implements SimSystem {
           sim.respawnVehicle(e);
           sim.emit({ type: 'entity:respawn', tick: sim.tick, id: e.id, reason: 'out-of-world' });
         }
-      } else if (e instanceof PedEntity && !e.vehicleId) {
+      } else if (e instanceof PedEntity && !e.vehicleId && !e.busy) {
         const c = e.controller;
         if (out(c.x, c.y, c.z)) {
-          sim.respawnPed(e);
-          sim.emit({ type: 'entity:respawn', tick: sim.tick, id: e.id, reason: 'out-of-world' });
+          // A pedestrian who falls out of the world is just gone; the player goes back to the spawn.
+          if (e.brain) sim.despawn(e.id);
+          else {
+            sim.respawnPed(e);
+            sim.emit({ type: 'entity:respawn', tick: sim.tick, id: e.id, reason: 'out-of-world' });
+          }
         }
       }
     }
@@ -275,8 +301,88 @@ export class CameraProbeSystem implements SimSystem {
   }
 }
 
+/** Runs the carjackings in progress. */
+export class CarjackSystem implements SimSystem {
+  readonly name = 'carjack';
+  readonly priority = 12;
+
+  fixedUpdate(sim: Simulation, dt: number) {
+    for (let i = sim.carjacks.length - 1; i >= 0; i--) {
+      const st = sim.carjacks[i];
+      if (stepCarjack(sim, st, dt)) {
+        const j = sim.registry.get(st.jackerId) as PedEntity | undefined;
+        if (j) j.busy = false;
+        sim.carjacks.splice(i, 1);
+      }
+    }
+  }
+}
+
+/**
+ * Thinks for every non-player pedestrian: runs their brain against what they can sense and turns
+ * the answer into a walk or a run, a punch, or leaving the world.
+ */
+export class NpcSystem implements SimSystem {
+  readonly name = 'npc';
+  readonly priority = 15;
+  private readonly out = newBrainOutput();
+  private ball: RAPIER.Ball | null = null;
+
+  fixedUpdate(sim: Simulation, dt: number) {
+    const threat = sim.playerPosition();
+    for (const e of sim.registry.values()) {
+      if (!(e instanceof PedEntity) || !e.brain) continue;
+      const b = e.brain;
+      const i = e.input;
+      i.moveX = i.moveY = 0;
+      i.sprint = i.jump = false;
+      if (b.state === 'seated' || b.state === 'dragged' || e.busy) continue;
+      const c = e.controller;
+      const out = b.update({ dt, x: c.x, z: c.z, threatX: threat.x, threatZ: threat.z, probe: this.probe(sim, c.x, c.y, c.z) }, this.out);
+      if (out.escaped) {
+        sim.despawn(e.id);
+        continue;
+      }
+      if (out.speed !== 'stop') {
+        // Walk in the wanted direction: the camera-relative controller faces (-sin yaw, -cos yaw) forward.
+        i.moveY = 1;
+        i.camYaw = Math.atan2(-out.dirX, -out.dirZ);
+        i.sprint = out.speed === 'sprint';
+      } else if (out.faceThreat) {
+        c.yaw = Math.atan2(threat.x - c.x, threat.z - c.z);
+      }
+      const target = sim.registry.get(sim.players.get(1)!.pedId) as PedEntity;
+      // A punch lands only on someone standing there; a driver behind a closed door is safe.
+      if (out.attack && !target.vehicleId) {
+        target.health = Math.max(1, target.health - BRAIN.damage);
+        sim.emit({ type: 'ped:attack', tick: sim.tick, pedId: e.id, targetId: target.id, damage: BRAIN.damage });
+      }
+    }
+  }
+
+  /** How far a straight run from (x, y, z) is clear: walls and cars at chest height, and drops or climbs in the ground. */
+  private probe(sim: Simulation, x: number, y: number, z: number): ClearProbe {
+    const R = sim.physics.R;
+    this.ball ??= new R.Ball(0.3);
+    const ball = this.ball;
+    return (heading, maxDist) => {
+      const dx = Math.sin(heading);
+      const dz = Math.cos(heading);
+      const hit = sim.physics.world.castShape({ x, y: y + 0.9, z }, { x: 0, y: 0, z: 0, w: 1 }, { x: dx, y: 0, z: dz }, ball, 0, maxDist, true, undefined, GROUPS.actorQuery);
+      let clear = hit ? hit.time_of_impact : maxDist;
+      for (let d = 1.5; d <= clear; d += 1.5) {
+        if (Math.abs(sim.physics.groundHeight(x + dx * d, z + dz * d) - y) > 1.2) {
+          clear = d - 1.5;
+          break;
+        }
+      }
+      return clear;
+    };
+  }
+}
+
 export function defaultSystems(): SimSystem[] {
-  return [new PlayerControlSystem(), new PedSystem(), new VehicleSystem(), new PhysicsSystem(), new BoundsSystem(), new CameraProbeSystem()].sort(
+  return [new PlayerControlSystem(), new CarjackSystem(), new NpcSystem(), new PedSystem(), new VehicleSystem(), new PhysicsSystem(), new BoundsSystem(), new CameraProbeSystem()].sort(
     (a, b) => a.priority - b.priority,
   );
 }

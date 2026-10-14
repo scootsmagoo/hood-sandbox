@@ -5,7 +5,7 @@
  * chassis (the maths is in dynamics.ts), and Rapier integrates the result with the world.
  */
 import type RAPIER from '@dimforge/rapier3d-simd-compat';
-import { DEG, clamp, wrapAngle, rotateVec, yawOfQuat, type Quat } from '../../shared/math';
+import { DEG, clamp, lerp, wrapAngle, rotateVec, yawOfQuat, type Quat } from '../../shared/math';
 import type { HandlingData } from '../../shared/handling';
 import { GROUPS } from '../physics/rapier';
 import {
@@ -19,6 +19,13 @@ import {
   suspensionAccel,
   tireForce,
   driftAssistAccel,
+  burnoutHold,
+  donutAccel,
+  donutTurnRate,
+  donutRamp,
+  donutWanted,
+  donutYawAccel,
+  donutYawTarget,
   type DriveRequest,
   type TireInput,
 } from './dynamics';
@@ -91,6 +98,8 @@ export class RaycastCar {
   reversing = false;
   skidding = false;
   airborne = false;
+  /** 0 to 1: how far into a donut. */
+  donut = 0;
   private yawInertia: number;
   private ray: RAPIER.Ray;
   private prevVel = { x: 0, y: 0, z: 0 };
@@ -194,6 +203,11 @@ export class RaycastCar {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
+  /** Takes the car out of the physics world for good. */
+  dispose() {
+    this.world.removeRigidBody(this.body);
+  }
+
   /** Applies one tick of forces. Call before the world steps. */
   step(dt: number, input: VehicleInput) {
     const h = this.h;
@@ -236,10 +250,12 @@ export class RaycastCar {
     this.throttleApplied = pedals.drive;
     this.braking = pedals.brake > 0.05;
     this.handbraking = input.handbrake;
+    this.donut = donutRamp(this.donut, donutWanted(clamp(input.throttle, 0, 1), input.steer, speed, input.handbrake, this.donut > 0.3, h.assists), dt);
+    const donut = this.donut;
 
     // Steering. The assist adds to the driver's input, and only in a slide.
     const lock = steerLock(speed, h.steering);
-    const assist = counterSteer(vL, vF, h.assists.counterSteer, h.steering.lockDeg * DEG);
+    const assist = counterSteer(vL, vF, h.assists.counterSteer, h.steering.lockDeg * DEG) * (1 - this.donut);
     const target = clamp(-clamp(input.steer, -1, 1) * lock + assist, -h.steering.lockDeg * DEG, h.steering.lockDeg * DEG);
     this.steerAngle = slewSteer(this.steerAngle, target, dt, h.steering);
     const cosS = Math.cos(this.steerAngle);
@@ -298,10 +314,13 @@ export class RaycastCar {
 
     // Pass 2: forces.
     const d = h.drive;
-    const accel = engineAccel(pedals.drive, vF, d);
+    let accel = engineAccel(pedals.drive, vF, d);
+    if (donut > 0) accel = lerp(accel, donutAccel(speed, input.steer, d.driveForce * 1.3, h.assists), donut);
     const throttleOff = Math.abs(pedals.drive) < 0.05;
     const hb = input.handbrake;
-    const wantSpin = hb && pedals.drive > 0.6 && speed < 12;
+    const wantSpin = (hb && pedals.drive > 0.6 && speed < 12) || donut > 0.5;
+    // A burnout (no donut): hold the car with the front brakes while the rear tyres smoke.
+    const holdBrake = wantSpin && donut < 0.5 ? burnoutHold(vF, h.assists) * (1 - donut * 2) : 0;
     this.skidding = false;
     const driveBias = [d.driveBiasFront, 1 - d.driveBiasFront];
     for (const w of this.wheels) {
@@ -360,21 +379,24 @@ export class RaycastCar {
       tmpTire.driveForce = driven ? (accel * h.mass * axleDrive) / 2 : 0;
       let brake = pedals.brake * d.brakeForce * h.mass * (w.front ? 0.6 : 0.4) * 0.5;
       if (throttleOff) brake += (d.engineBrake * h.mass) / 4;
+      if (holdBrake > 0 && w.front) brake += (holdBrake * h.mass) / 2;
       tmpTire.lateralMult = 1;
+      tmpTire.longMult = !w.front && donut > 0 ? lerp(1, 1.6, donut) : 1;
+      if (donut > 0 && !w.front) tmpTire.lateralMult *= lerp(1, h.assists.donutRearGrip, donut);
       if (hb && !w.front) {
         // A burnout lets the rear wheels spin against the handbrake instead of being held by it.
         if (!wantSpin) brake += (d.handbrakeForce * h.mass) / 2;
         tmpTire.lateralMult = h.traction.handbrakeGripMult;
       }
       tmpTire.brakeForce = brake;
-      tmpTire.gripMult = 1;
+      tmpTire.gripMult = w.front ? lerp(1, h.assists.donutFrontGrip, donut) : 1;
       tireForce(tmpTire, h.traction, tireOut);
       if (driven && (tireOut.spinning || wantSpin)) {
         tmpTire.lateralMult *= lowSpeedGrip(speed, true, h.traction);
         if (wantSpin && !tireOut.spinning) tmpTire.driveForce = Math.sign(tmpTire.driveForce || 1) * load * h.traction.curveMax * 1.2;
         tireForce(tmpTire, h.traction, tireOut);
       }
-      w.slip = tireOut.slip;
+      w.slip = !w.front && donut > 0.5 ? 1 : tireOut.slip;
       if (tireOut.slip > 0.6) this.skidding = true;
 
       // Apply at the contact point lifted toward the centre of mass height (less body roll).
@@ -401,8 +423,17 @@ export class RaycastCar {
       const yawRate = av.x * up.x + av.y * up.y + av.z * up.z;
       const slide = vF > 1 ? Math.atan2(vL, vF) : 0;
       const aa = driftAssistAccel(input.steer, yawRate, this.travelTurn, slide, speed, hb, h.assists);
-      if (aa !== 0) {
-        const ti = this.yawInertia * aa * dt;
+      if (donut > 0 && speed > 1) {
+        const wt = donutYawTarget(input.steer, speed, h.assists);
+        const yr = av.x * up.x + av.y * up.y + av.z * up.z;
+        const wc = donutTurnRate(wt, yr, Math.atan2(vL, vF), h.assists);
+        const ca = wc * speed * donut * h.mass * dt;
+        body.applyImpulse({ x: (lv.z / speed) * ca, y: 0, z: (-lv.x / speed) * ca }, true);
+      }
+      let yawAcc = aa * (1 - donut);
+      if (donut > 0) yawAcc += donutYawAccel(yawRate, donutYawTarget(input.steer, speed, h.assists)) * donut;
+      if (yawAcc !== 0) {
+        const ti = this.yawInertia * yawAcc * dt;
         body.applyTorqueImpulse({ x: up.x * ti, y: up.y * ti, z: up.z * ti }, true);
       }
     }

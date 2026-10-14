@@ -3,12 +3,14 @@
  * state and dropped when it is gone.
  */
 import * as THREE from 'three';
-import type { EntityId } from '../../shared/entities';
+import { EntityKind, type EntityId } from '../../shared/entities';
+import type { EntityDef } from '../../shared/entityDefs';
 import { HANDLING } from '../../shared/handling';
 import { PedFlag, VehicleFlag } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
-import { buildPedModel, buildVehicleModel, type PedModel, type VehicleModel } from './models';
+import { OUTFIT_COUNT } from '../../shared/entityDefs';
+import { buildPedModel, buildVehicleModel, OUTFITS, type PedMode, type PedModel, type VehicleModel } from './models';
 import { SmokeSystem } from './Smoke';
 
 declare module '../Game' {
@@ -25,8 +27,10 @@ interface PedView {
 interface VehicleView {
   kind: 'vehicle';
   model: VehicleModel;
-  /** Per wheel suspension lengths, for the smoke emitter. */
+  /** Which handling entry it is (wheel positions for the smoke emitter). */
   handlingId: string;
+  /** How open the driver's door is drawn, 0 to 1 (eased toward the sim's flag). */
+  door: number;
 }
 type View = PedView | VehicleView;
 
@@ -46,26 +50,34 @@ export class EntityViews implements System {
 
   update(dt: number) {
     const { entities } = this.game.view;
+    const { defs } = this.game.view;
     for (const [id, st] of entities) {
       let v = this.views.get(id);
       if (!v) {
-        v = this.make(st);
+        // Draw only what the sim has defined; the definition can trail the first snapshot by a frame or two.
+        const def = defs.get(id);
+        if (!def) continue;
+        v = this.make(def);
         this.views.set(id, v);
         this.group.add(v.model.root);
       }
       v.model.root.position.set(st.x, st.y, st.z);
       v.model.root.quaternion.set(st.q.x, st.q.y, st.q.z, st.q.w);
       if (v.kind === 'ped') {
-        v.model.root.visible = (st.flags & PedFlag.InVehicle) === 0;
+        const f = st.flags;
         v.phase += dt * (3.5 + st.speed * 1.5);
-        v.model.pose(st.speed, (st.flags & PedFlag.Grounded) !== 0, v.phase);
+        const mode: PedMode =
+          f & PedFlag.Dragged ? 'dragged' : f & PedFlag.InVehicle ? 'seated' : f & PedFlag.Fighting ? 'fighting' : f & PedFlag.Fleeing ? 'fleeing' : 'normal';
+        v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1);
       } else {
-        v.model.apply(st.wheels, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0);
+        const want = (st.flags & VehicleFlag.DoorOpen) !== 0 ? 1 : 0;
+        v.door += (want - v.door) * Math.min(1, dt * 9);
+        v.model.apply(st.wheels, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, v.door);
         this.emitSmoke(v, st, dt);
       }
     }
     for (const [id, v] of this.views) {
-      if (!entities.has(id)) {
+      if (!entities.has(id) || !defs.has(id)) {
         this.group.remove(v.model.root);
         if (v.kind === 'vehicle') v.model.dispose();
         this.views.delete(id);
@@ -77,13 +89,12 @@ export class EntityViews implements System {
     this.smoke.update(dt);
   }
 
-  private make(st: EntityState): View {
-    if (st.kind === 1) {
-      const model = buildPedModel();
-      return { kind: 'ped', model, phase: 0 };
+  private make(def: EntityDef): View {
+    if (def.kind === EntityKind.Ped) {
+      return { kind: 'ped', model: buildPedModel(OUTFITS[def.outfit % OUTFIT_COUNT]), phase: 0 };
     }
-    const type = this.game.ready.vehicleType;
-    return { kind: 'vehicle', model: buildVehicleModel(HANDLING[type] ?? HANDLING.sedan), handlingId: type };
+    const h = HANDLING[def.typeId] ?? HANDLING.sedan;
+    return { kind: 'vehicle', model: buildVehicleModel(h, def.color), handlingId: h.id, door: 0 };
   }
 
   private readonly size = new THREE.Vector2();

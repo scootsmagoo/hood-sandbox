@@ -6,10 +6,20 @@
  */
 import * as THREE from 'three';
 import type { HandlingData } from '../../shared/handling';
+import { SEATED_SCALE } from '../../shared/doors';
 import { WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
 
+// Boxes of the same size share one geometry, so building and dropping models does not leak.
+const boxGeos = new Map<string, THREE.BoxGeometry>();
+const boxGeo = (w: number, h: number, d: number) => {
+  const key = `${w.toFixed(3)}x${h.toFixed(3)}x${d.toFixed(3)}`;
+  let g = boxGeos.get(key);
+  if (!g) boxGeos.set(key, (g = new THREE.BoxGeometry(w, h, d)));
+  return g;
+};
+
 const box = (w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) => {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const m = new THREE.Mesh(boxGeo(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
@@ -17,13 +27,14 @@ const box = (w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
 
 export interface VehicleModel {
   root: THREE.Group;
-  /** Sets wheels, lights and body from interpolated sim state. */
-  apply(wheels: Float32Array, braking: boolean, reversing: boolean): void;
+  /** Sets wheels, lights, the driver's door (0 shut to 1 wide open) and body from interpolated sim state. */
+  apply(wheels: Float32Array, braking: boolean, reversing: boolean, door?: number): void;
   dispose(): void;
 }
 
 const shared = {
-  glass: new THREE.MeshStandardMaterial({ color: 0x1b242b, roughness: 0.15, metalness: 0.6 }),
+  // See-through enough to show the driver.
+  glass: new THREE.MeshStandardMaterial({ color: 0x1b242b, roughness: 0.15, metalness: 0.5, transparent: true, opacity: 0.55 }),
   tyre: new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.9 }),
   rim: new THREE.MeshStandardMaterial({ color: 0xb9bcc2, roughness: 0.35, metalness: 0.8 }),
   trim: new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.7 }),
@@ -32,6 +43,7 @@ const shared = {
 
 export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleModel {
   const root = new THREE.Group();
+  const owned: THREE.Material[] = [];
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.45 });
   const tail = new THREE.MeshStandardMaterial({ color: 0x5a0d0d, emissive: 0xff1a1a, emissiveIntensity: 0.25 });
   const c = h.chassis;
@@ -44,6 +56,32 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleMod
   const cab = c.cabin;
   root.add(box(cab.halfExtents[0] * 2, cab.halfExtents[1] * 2, cab.halfExtents[2] * 2, shared.glass, cab.offset[0], cab.offset[1], cab.offset[2]));
   root.add(box(cab.halfExtents[0] * 2 + 0.04, 0.06, cab.halfExtents[2] * 2 - 0.1, paint, cab.offset[0], cab.offset[1] + cab.halfExtents[1] + 0.03, cab.offset[2]));
+  if (h.body === 'pickup') {
+    // An open bed behind the cab: floor rails, side walls and a tailgate.
+    const top = c.offset[1] + hy;
+    const bedFront = cab.offset[2] - cab.halfExtents[2];
+    const bedLen = bedFront - -hz;
+    const bedMid = (bedFront + -hz) / 2;
+    const rail = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.8), roughness: 0.5, metalness: 0.3 });
+    owned.push(rail);
+    for (const sx of [-1, 1]) root.add(box(0.08, 0.34, bedLen, rail, sx * (hx - 0.04), top + 0.17, bedMid));
+    root.add(box(hx * 2, 0.34, 0.08, rail, 0, top + 0.17, -hz + 0.04));
+    root.add(box(hx * 2 - 0.16, 0.34, 0.08, rail, 0, top + 0.17, bedFront + 0.04));
+    root.add(box(hx * 2 - 0.16, 0.04, bedLen, shared.trim, 0, top + 0.02, bedMid));
+    // A tall grille and a bull bar.
+    root.add(box(hx * 1.4, 0.34, 0.1, shared.trim, 0, c.offset[1] + 0.05, hz + 0.04));
+  }
+
+  // The driver's door: a panel on the left side, hinged at its front edge.
+  const doorZ = cab.offset[2] + 0.2;
+  const doorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.92), roughness: 0.38, metalness: 0.45 });
+  owned.push(doorMat);
+  const doorLen = 1.0;
+  const doorHinge = new THREE.Group();
+  doorHinge.position.set(hx + 0.02, c.offset[1] - hy * 0.2, doorZ + doorLen / 2);
+  doorHinge.add(box(0.05, hy * 1.6 + cab.halfExtents[1] * 1.3, doorLen, doorMat, 0, (cab.halfExtents[1] * 1.3) / 2 - 0.03, -doorLen / 2));
+  root.add(doorHinge);
+
   // Lights.
   for (const sx of [-1, 1]) {
     root.add(box(0.34, 0.12, 0.05, shared.head, sx * (hx - 0.28), c.offset[1] + 0.1, hz + 0.02));
@@ -78,7 +116,8 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleMod
 
   return {
     root,
-    apply(wheels, braking, reversing) {
+    apply(wheels, braking, reversing, door = 0) {
+      doorHinge.rotation.y = -door * 1.15;
       for (let i = 0; i < WHEEL_COUNT; i++) {
         const o = i * WHEEL_FLOATS;
         pivots[i].rotation.y = wheels[o];
@@ -93,32 +132,65 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e): VehicleMod
       spokeGeo.dispose();
       paint.dispose();
       tail.dispose();
+      for (const m of owned) m.dispose();
     },
   };
 }
 
+/** What a ped is doing, for the pose. */
+export type PedMode = 'normal' | 'seated' | 'dragged' | 'fleeing' | 'fighting';
+
 export interface PedModel {
   root: THREE.Group;
-  /** `speed` in m/s; `phase` is advanced by the caller. */
-  pose(speed: number, grounded: boolean, phase: number): void;
+  /** `speed` in m/s; `phase` is advanced by the caller; `swing` is a punch's wind-up, 0 to 1. */
+  pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number): void;
 }
 
+export interface PedLook {
+  jacket: number;
+  jeans: number;
+  skin: number;
+  cap: number | null;
+}
+
+/** Outfits by `PedDef.outfit`. 0 is the protagonist. */
+export const OUTFITS: readonly PedLook[] = [
+  { jacket: 0x5b6b3a, jeans: 0x2f4059, skin: 0x6b4430, cap: 0x8a2f1e },
+  { jacket: 0xb8b3a6, jeans: 0x1e2433, skin: 0x8a5d3e, cap: null },
+  { jacket: 0x7a2f3a, jeans: 0x3b3b40, skin: 0xc08a62, cap: 0x222222 },
+  { jacket: 0x2d5e7a, jeans: 0x4a4036, skin: 0x4d3022, cap: null },
+  { jacket: 0xd0a43a, jeans: 0x232a33, skin: 0xa8734f, cap: 0x2d5e7a },
+  { jacket: 0x4a4a52, jeans: 0x5a6a80, skin: 0xd5a784, cap: null },
+];
+
+const pedMaterials = new Map<number, THREE.MeshStandardMaterial>();
+const pedMat = (color: number, rough = 0.8) => {
+  const key = color * 10 + Math.round(rough * 9);
+  let m = pedMaterials.get(key);
+  if (!m) pedMaterials.set(key, (m = new THREE.MeshStandardMaterial({ color, roughness: rough })));
+  return m;
+};
+const headGeo = new THREE.SphereGeometry(0.115, 14, 10);
+
 /**
- * The protagonist stand-in: jeans, an olive work jacket, a cap. About 1.74 m tall, feet at y = 0.
- * Swings its limbs with speed.
+ * A pedestrian stand-in in one of a handful of outfits (the protagonist's is the first): jeans, a
+ * jacket, maybe a cap. About 1.74 m tall, feet at y = 0. Swings its limbs with speed, and can sit
+ * at the wheel, flail while being dragged out, run in a panic, or throw a punch. Geometry and
+ * materials are shared, so nothing needs disposing.
  */
-export function buildPedModel(): PedModel {
+export function buildPedModel(look: PedLook = OUTFITS[0]): PedModel {
   const root = new THREE.Group();
-  const jacket = new THREE.MeshStandardMaterial({ color: 0x5b6b3a, roughness: 0.8 });
-  const jeans = new THREE.MeshStandardMaterial({ color: 0x2f4059, roughness: 0.85 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0x6b4430, roughness: 0.7 });
-  const cap = new THREE.MeshStandardMaterial({ color: 0x8a2f1e, roughness: 0.8 });
-  const boots = new THREE.MeshStandardMaterial({ color: 0x1d1a17, roughness: 0.9 });
+  const inner = new THREE.Group();
+  root.add(inner);
+  const jacket = pedMat(look.jacket);
+  const jeans = pedMat(look.jeans, 0.85);
+  const skin = pedMat(look.skin, 0.7);
+  const boots = pedMat(0x1d1a17, 0.9);
 
   const limb = (w: number, len: number, d: number, mat: THREE.Material, px: number, py: number) => {
     const pivot = new THREE.Group();
     pivot.position.set(px, py, 0);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, d), mat);
+    const m = new THREE.Mesh(boxGeo(w, len, d), mat);
     m.position.y = -len / 2;
     m.castShadow = true;
     pivot.add(m);
@@ -135,32 +207,63 @@ export function buildPedModel(): PedModel {
   const torso = new THREE.Group();
   torso.position.y = 0.9;
   torso.add(box(0.44, 0.6, 0.26, jacket, 0, 0.3, 0));
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 10), skin);
+  const head = new THREE.Mesh(headGeo, skin);
   head.position.set(0, 0.72, 0.01);
   head.castShadow = true;
   torso.add(head);
-  torso.add(box(0.25, 0.06, 0.28, cap, 0, 0.81, 0.04));
-  root.add(legL, legR, torso, armL, armR);
+  if (look.cap !== null) torso.add(box(0.25, 0.06, 0.28, pedMat(look.cap), 0, 0.81, 0.04));
+  inner.add(legL, legR, torso, armL, armR);
 
   return {
     root,
-    pose(speed, grounded, phase) {
-      const amp = Math.min(1, speed / 4.6) * 0.95;
+    pose(speed, grounded, phase, mode = 'normal', swing = 0) {
+      inner.scale.setScalar(mode === 'seated' ? SEATED_SCALE : 1);
+      inner.rotation.x = 0;
+      inner.position.y = 0;
+      if (mode === 'seated') {
+        // Thighs forward under the wheel, hands up on it.
+        legL.rotation.x = legR.rotation.x = -1.45;
+        armL.rotation.x = armR.rotation.x = -1.15;
+        torso.rotation.x = 0.05;
+        torso.position.y = 0.9;
+        return;
+      }
+      if (mode === 'dragged') {
+        // Hauled backwards out of the seat: heels trailing, arms flung up.
+        legL.rotation.x = -0.9 + Math.sin(phase * 3) * 0.35;
+        legR.rotation.x = -0.5 - Math.sin(phase * 3) * 0.35;
+        armL.rotation.x = -2.6 + Math.sin(phase * 4) * 0.3;
+        armR.rotation.x = -2.9 - Math.sin(phase * 4) * 0.3;
+        torso.rotation.x = -0.35;
+        torso.position.y = 0.9;
+        return;
+      }
+      const amp = Math.min(1, speed / 4.6) * (mode === 'fleeing' ? 1.2 : 0.95);
       const s = Math.sin(phase) * amp;
-      if (grounded) {
-        legL.rotation.x = s;
-        legR.rotation.x = -s;
-        armL.rotation.x = -s * 0.9;
-        armR.rotation.x = s * 0.9;
-        torso.rotation.x = Math.min(0.25, speed * 0.03);
-      } else {
+      if (!grounded) {
         legL.rotation.x = -0.5;
         legR.rotation.x = 0.35;
         armL.rotation.x = -2.2;
         armR.rotation.x = -2.0;
         torso.rotation.x = 0.05;
+        torso.position.y = 0.9;
+        return;
       }
-      torso.position.y = 0.9 + (grounded ? Math.abs(Math.sin(phase)) * 0.04 * amp : 0);
+      legL.rotation.x = s;
+      legR.rotation.x = -s;
+      armL.rotation.x = -s * 0.9;
+      armR.rotation.x = s * 0.9;
+      torso.rotation.x = Math.min(0.25, speed * 0.03) + (mode === 'fleeing' ? 0.18 : 0);
+      torso.position.y = 0.9 + Math.abs(Math.sin(phase)) * 0.04 * amp;
+      if (mode === 'fighting') {
+        // Guard up, then the right hand winds back and whips forward.
+        armL.rotation.x = -1.2;
+        armR.rotation.x = swing > 0 ? 0.9 - swing * 2.7 : -1.3;
+        torso.rotation.x = 0.12 + swing * 0.15;
+        torso.rotation.y = -swing * 0.5;
+      } else {
+        torso.rotation.y = 0;
+      }
     },
   };
 }

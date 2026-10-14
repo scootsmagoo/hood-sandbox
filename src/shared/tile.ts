@@ -1,6 +1,7 @@
 /**
  * Baked map tiles, as described in docs/contracts/m1-tile-format.md. This file reads the files the
- * sim needs (`tile.json`, `height.bin`, `collision.bin`) and nothing else; it never parses glTF.
+ * sim needs (`tile.json`, `height.bin`, `collision.bin`, and `roads.json` when there is one) and
+ * nothing else; it never parses glTF.
  * It uses only `fetch` and typed arrays, so it runs in a worker, on the main thread and in Node.
  */
 import { generateProceduralTile } from './proceduralTile';
@@ -14,6 +15,8 @@ export interface TileManifest {
   bounds: { minX: number; minZ: number; maxX: number; maxZ: number };
   heightmap: { file: string; cols: number; rows: number; cellSize: number; minX: number; minZ: number };
   meshes: { ground?: string; roads?: string; buildings?: string };
+  /** The square chunks the .glb meshes are split into (see "Chunks" in the contract). Absent in older bakes. */
+  chunks?: { size: number; minX: number; minZ: number; cols: number; rows: number };
   collision: { file: string; vertexCount: number; indexCount: number };
   roads?: string;
   spawns: {
@@ -24,6 +27,19 @@ export interface TileManifest {
   attribution: string[];
 }
 
+/** One drivable road from `roads.json`: a centreline of [x, y, z] points. */
+export interface RoadData {
+  id: string;
+  class: string;
+  name?: string;
+  lanes: number;
+  oneway: boolean;
+  bridge: boolean;
+  layer: number;
+  width: number;
+  points: [number, number, number][];
+}
+
 export interface TileData {
   manifest: TileManifest;
   /** Row-major, `cols` per row; column index runs along +X and row index along +Z. */
@@ -31,6 +47,8 @@ export interface TileData {
   /** xyz triplets. */
   collisionPositions: Float32Array;
   collisionIndices: Uint32Array;
+  /** Road centrelines, when the tile has them. The sim uses them to park cars at the curb. */
+  roads?: RoadData[];
   source: 'baked' | 'procedural';
   /** Why the baked tile was not used. */
   fallbackReason?: string;
@@ -94,6 +112,40 @@ export function decodeTile(manifest: TileManifest, heightBytes: ArrayBuffer, col
 
 type Fetch = (url: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; arrayBuffer(): Promise<ArrayBuffer> }>;
 
+const isPoint = (p: unknown) => Array.isArray(p) && p.length >= 3 && p.every(isNum);
+
+/** Reads `roads.json` when the manifest names one. Roads are optional: any problem means no roads, not no tile. */
+export function parseRoads(json: unknown): RoadData[] {
+  const list = (json as { roads?: unknown } | null)?.roads;
+  if (!Array.isArray(list)) return [];
+  const out: RoadData[] = [];
+  for (const r of list as Partial<RoadData>[]) {
+    if (!r || typeof r.class !== 'string' || !isNum(r.width) || !Array.isArray(r.points) || r.points.length < 2 || !r.points.every(isPoint)) continue;
+    out.push({
+      id: String(r.id ?? ''),
+      class: r.class,
+      name: r.name,
+      lanes: isNum(r.lanes) ? r.lanes : 2,
+      oneway: !!r.oneway,
+      bridge: !!r.bridge,
+      layer: isNum(r.layer) ? r.layer : 0,
+      width: r.width,
+      points: r.points,
+    });
+  }
+  return out;
+}
+
+async function loadRoads(base: string, manifest: TileManifest, fetchFn: Fetch): Promise<RoadData[] | undefined> {
+  if (!manifest.roads) return undefined;
+  try {
+    const res = await fetchFn(base + manifest.roads);
+    return res.ok ? parseRoads(await res.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Loads a baked tile. Throws when any file is missing or malformed. */
 export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as unknown as Fetch): Promise<TileData> {
   const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
@@ -109,8 +161,10 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     // A dev server answers unknown paths with index.html, which fails here as a JSON error.
     throw new Error(`no usable tile at ${base} (${(e as Error).message})`);
   }
-  const [h, c] = await Promise.all([get(manifest.heightmap.file), get(manifest.collision.file)]);
-  return decodeTile(manifest, await h.arrayBuffer(), await c.arrayBuffer());
+  const [h, c, roads] = await Promise.all([get(manifest.heightmap.file), get(manifest.collision.file), loadRoads(base, manifest, fetchFn)]);
+  const tile = decodeTile(manifest, await h.arrayBuffer(), await c.arrayBuffer());
+  if (roads) tile.roads = roads;
+  return tile;
 }
 
 /** The baked tile when it loads, otherwise the procedural test ground (with the reason). */

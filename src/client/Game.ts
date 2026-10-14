@@ -40,6 +40,8 @@ export class Game {
   /** Smoothed frames per second, and the last frame's wall time in ms. */
   fps = 0;
   frameMs = 16.7;
+  /** CPU time of the last frame's update and render submit, ms (the GPU runs on after this; see docs/perf.md). */
+  cpuMs = 0;
   frame = 0;
   private systems: System[] = [];
   private last = 0;
@@ -52,14 +54,15 @@ export class Game {
     params: URLSearchParams,
   ) {
     this.params = params;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    // Multisampling is the costliest default on a phone's tile-based GPU: off on touch devices and on Low.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && params.get('graphics') !== 'low', powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     const gl = this.renderer.getContext();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpuName = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
-    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     this.tier = pickTier(params, coarse, this.gpuName);
     this.governor.enabled = !params.get('graphics') && params.get('governor') !== '0';
     this.input = new Input(canvas);
@@ -121,11 +124,13 @@ export class Game {
     this.fps += (1000 / Math.max(rawMs, 0.1) - this.fps) * Math.min(1, dt * 4 + 0.02);
     this.frame++;
 
+    const cpu0 = performance.now();
     this.input.beginFrame(dt);
     for (const s of this.systems) s.update?.(dt);
     for (const s of this.systems) s.lateUpdate?.(dt);
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
+    this.cpuMs = performance.now() - cpu0;
 
     if (this.governor.update(rawMs, dt)) {
       const below = tierBelow(this.tier.name);

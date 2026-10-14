@@ -19,6 +19,8 @@ export interface GlbPart {
   /** linear RGB, or omitted for none */
   colors?: ArrayLike<number>;
   indices: ArrayLike<number>;
+  /** glTF node extras (the client reads them from the node's userData) */
+  extras?: Record<string, unknown>;
 }
 
 export function toRgba8(colors: ArrayLike<number>): Uint8Array<ArrayBuffer> {
@@ -57,7 +59,9 @@ export function buildDocument(parts: GlbPart[]): Document {
       prim.setAttribute('COLOR_0', doc.createAccessor().setType('VEC4').setArray(toRgba8(p.colors)).setNormalized(true).setBuffer(buffer));
     }
     const mesh = doc.createMesh(p.name).addPrimitive(prim);
-    scene.addChild(doc.createNode(p.name).setMesh(mesh));
+    const node = doc.createNode(p.name).setMesh(mesh);
+    if (p.extras) node.setExtras(p.extras as Record<string, never>);
+    scene.addChild(node);
   }
   return doc;
 }

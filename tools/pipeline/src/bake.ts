@@ -5,6 +5,7 @@ import { simplifyRing, signedArea, type V2 } from './geo.js';
 import { collisionBytes, heightmapBytes } from './io/binary.js';
 import { encodeGlb, type GlbPart, type MaterialSpec } from './io/glb.js';
 import { MeshBuilder } from './mesh/builder.js';
+import { makeChunkGrid, splitMesh, type ChunkGrid } from './mesh/chunks.js';
 import { extrudeFootprint } from './mesh/extrude.js';
 import { fetchDem, type Dem } from './sources/dem.js';
 import { fetchOsm } from './sources/osm.js';
@@ -30,14 +31,19 @@ const MAT: Record<string, MaterialSpec> = {
   glass: { name: 'bld_glass', baseColor: [1, 1, 1, 1], metallic: 0.35, roughness: 0.25 },
 };
 
-const part = (name: string, mat: MaterialSpec, mb: MeshBuilder): GlbPart => ({
-  name,
-  material: mat,
-  positions: mb.positions,
-  normals: mb.normals,
-  colors: mb.colors,
-  indices: mb.indices,
-});
+/** Ground level of detail 1: every Nth heightmap sample, lowered and skirted (see the contract). */
+export const GROUND_LOD1 = { step: 4, lower: 0.5, skirt: 3 };
+
+/** One glTF node per chunk and material. The chunk is in the node's extras, and the name too. */
+function chunked(kind: string, mat: MaterialSpec, mb: MeshBuilder, grid: ChunkGrid): GlbPart[] {
+  const parts: GlbPart[] = [];
+  for (const [key, m] of [...splitMesh(mb, grid)].sort((a, b) => a[0] - b[0])) {
+    const cx = key % grid.cols;
+    const cz = Math.floor(key / grid.cols);
+    parts.push({ name: `${kind}_${cx}_${cz}`, material: mat, positions: m.positions, normals: m.normals, colors: m.colors, indices: m.indices, extras: { kind, chunk: [cx, cz] } });
+  }
+  return parts;
+}
 
 function write(file: string, data: Uint8Array | string): number {
   mkdirSync(path.dirname(file), { recursive: true });
@@ -92,8 +98,26 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`heightmap ${hm.cols}x${hm.rows}, base ${baseElevation} m, relief ${mm.min.toFixed(1)}..${mm.max.toFixed(1)} m`);
 
   const land = rasterizeAreas(world.areas, hm);
-  const ground = buildGroundMesh(hm, land, cfg.groundMeshStep);
-  log(`ground: ${ground.positions.length / 3} vertices, ${ground.indices.length / 3} triangles`);
+  const grid = makeChunkGrid(b, cfg.chunkSize);
+  const cellsPerChunk = cfg.chunkSize / hm.cellSize;
+  const l1Step = GROUND_LOD1.step * cfg.groundMeshStep;
+  if (!Number.isInteger(cellsPerChunk) || cellsPerChunk % l1Step !== 0) throw new Error(`chunk size ${cfg.chunkSize} m must be a multiple of ${l1Step} heightmap cells`);
+  const groundParts: GlbPart[] = [];
+  const groundTris = [0, 0];
+  for (let cz = 0; cz < grid.rows; cz++) {
+    for (let cx = 0; cx < grid.cols; cx++) {
+      const range = { c0: cx * cellsPerChunk, c1: (cx + 1) * cellsPerChunk, r0: cz * cellsPerChunk, r1: (cz + 1) * cellsPerChunk };
+      const levels = [
+        buildGroundMesh(hm, land, cfg.groundMeshStep, range),
+        buildGroundMesh(hm, land, l1Step, range, { lower: GROUND_LOD1.lower, skirt: GROUND_LOD1.skirt }),
+      ];
+      levels.forEach((g, lod) => {
+        groundTris[lod] += g.indices.length / 3;
+        groundParts.push({ name: `ground_${cx}_${cz}_L${lod}`, material: MAT.ground, positions: g.positions, normals: g.normals, colors: g.colors, indices: g.indices, extras: { kind: 'ground', chunk: [cx, cz], lod } });
+      });
+    }
+  }
+  log(`ground: ${grid.cols}x${grid.rows} chunks, ${groundTris[0]} triangles at full resolution, ${groundTris[1]} at level 1`);
 
   const roads = buildRoads(world.roads, hm, b);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
@@ -148,23 +172,23 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const out = cfg.outDir;
   const sizes: Record<string, number> = {};
   sizes['height.bin'] = write(path.join(out, 'height.bin'), heightmapBytes(hm.data));
-  sizes['ground.glb'] = write(path.join(out, 'ground.glb'), await encodeGlb([{ name: 'ground', material: MAT.ground, positions: ground.positions, normals: ground.normals, colors: ground.colors, indices: ground.indices }]));
+  sizes['ground.glb'] = write(path.join(out, 'ground.glb'), await encodeGlb(groundParts));
   sizes['roads.glb'] = write(
     path.join(out, 'roads.glb'),
     await encodeGlb([
-      part('asphalt', MAT.asphalt, roads.asphalt),
-      part('sidewalk', MAT.sidewalk, roads.sidewalk),
-      part('crosswalk', MAT.crosswalk, roads.crosswalk),
-      part('rail', MAT.rail, roads.rail),
-      part('concrete', MAT.concrete, roads.concrete),
+      ...chunked('asphalt', MAT.asphalt, roads.asphalt, grid),
+      ...chunked('sidewalk', MAT.sidewalk, roads.sidewalk, grid),
+      ...chunked('crosswalk', MAT.crosswalk, roads.crosswalk, grid),
+      ...chunked('rail', MAT.rail, roads.rail, grid),
+      ...chunked('concrete', MAT.concrete, roads.concrete, grid),
     ]),
   );
   sizes['buildings.glb'] = write(
     path.join(out, 'buildings.glb'),
     await encodeGlb([
-      part('walls', MAT.wall, wall),
-      part('roofs', MAT.roof, roof),
-      part('glass_walls', MAT.glass, glassWall),
+      ...chunked('walls', MAT.wall, wall, grid),
+      ...chunked('roofs', MAT.roof, roof, grid),
+      ...chunked('glass_walls', MAT.glass, glassWall, grid),
     ]),
   );
   sizes['collision.bin'] = write(path.join(out, 'collision.bin'), collisionBytes(collision.positions, collision.indices));
@@ -184,6 +208,14 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     bounds: { ...b },
     heightmap: { file: 'height.bin', cols: hm.cols, rows: hm.rows, cellSize: hm.cellSize, minX: hm.minX, minZ: hm.minZ },
     meshes: { ground: 'ground.glb', roads: 'roads.glb', buildings: 'buildings.glb' },
+    chunks: {
+      size: grid.size,
+      minX: grid.minX,
+      minZ: grid.minZ,
+      cols: grid.cols,
+      rows: grid.rows,
+      groundLevels: [{ lod: 0, step: cfg.groundMeshStep }, { lod: 1, step: l1Step, lower: GROUND_LOD1.lower, skirt: GROUND_LOD1.skirt }],
+    },
     collision: { file: 'collision.bin', vertexCount: collision.vertexCount, indexCount: collision.indices.length },
     roads: 'roads.json',
     spawns,
@@ -204,7 +236,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     baseElevation,
     flatHeightmap: flat,
     heightRange: mm,
-    ground: { vertices: ground.positions.length / 3, triangles: ground.indices.length / 3 },
+    ground: { chunks: grid.cols * grid.rows, trianglesLod0: groundTris[0], trianglesLod1: groundTris[1] },
     roads: { ...roads.stats, triangles: roads.asphalt.triangleCount + roads.sidewalk.triangleCount + roads.crosswalk.triangleCount + roads.rail.triangleCount + roads.concrete.triangleCount },
     buildings: { count: kept.length, skipped, sources: bstats, triangles: wall.triangleCount + roof.triangleCount + glassWall.triangleCount },
     collision: { vertices: collision.vertexCount, triangles: collision.triangleCount, buildingTriangles: buildingCollisionTris },

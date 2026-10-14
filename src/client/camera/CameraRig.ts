@@ -68,9 +68,9 @@ export class CameraRig implements System {
     if (!this.initialised) {
       // Start behind the character, looking the way it faces.
       this.yaw = yawOfQuat(st.q) - Math.PI;
-      // On foot with the car far away, look toward it.
+      // On foot with a car some way off, look toward it.
       const car = v.vehicle;
-      if (!v.inVehicle && car && Math.hypot(car.x - st.x, car.z - st.z) > 20) this.yaw = Math.atan2(st.x - car.x, st.z - car.z);
+      if (!v.inVehicle && car && Math.hypot(car.x - st.x, car.z - st.z) > 3) this.yaw = Math.atan2(st.x - car.x, st.z - car.z);
       this.initialised = true;
     }
 

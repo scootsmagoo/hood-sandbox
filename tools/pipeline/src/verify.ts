@@ -44,7 +44,19 @@ for (const key of ['ground', 'roads', 'buildings'] as const) {
   const ext = root.listExtensionsUsed().map((e) => e.extensionName);
   console.log(`     ${key}.glb: ${root.listMeshes().length} meshes, ${root.listMaterials().map((m) => m.getName()).join(', ')}, ${tris} triangles, ${ext.join('+')}`);
   check(tris > 0 && ext.includes('EXT_meshopt_compression'), `${key}.glb loads, has geometry, uses meshopt`);
-  check(root.listMeshes().length <= 5, `${key}.glb draw calls (${root.listMeshes().length}) are few`);
+  // Chunked: one mesh per chunk and material (ground: two levels of detail), each with its chunk in the node extras.
+  const grid = tile.chunks;
+  check(!!grid && grid.cols * grid.rows > 0, 'tile.json describes the chunk grid');
+  const nodes = root.listNodes().filter((n) => n.getMesh());
+  const extras = nodes.map((n) => n.getExtras() as { chunk?: [number, number]; lod?: number });
+  check(extras.every((e) => Array.isArray(e.chunk) && e.chunk[0] >= 0 && e.chunk[0] < grid.cols && e.chunk[1] >= 0 && e.chunk[1] < grid.rows), `${key}.glb nodes all name a chunk inside the grid`);
+  const maxCalls = grid.cols * grid.rows * (key === 'ground' ? 2 : key === 'roads' ? 5 : 3);
+  check(nodes.length <= maxCalls, `${key}.glb meshes (${nodes.length}) are at most chunks x materials`);
+  if (key === 'ground') {
+    const lods = new Set(extras.map((e) => e.lod));
+    check(lods.has(0) && lods.has(1), 'ground.glb has both levels of detail');
+    check(extras.filter((e) => e.lod === 0).length === grid.cols * grid.rows, 'ground.glb has every chunk at level 0');
+  }
 }
 
 const roads = JSON.parse(readFileSync(path.join(dir, tile.roads), 'utf8')).roads as { bridge: boolean; points: number[][]; class: string }[];

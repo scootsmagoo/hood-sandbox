@@ -5,7 +5,7 @@
  * pure function of the seed, so the client can rebuild the visuals from `props` without help.
  */
 import { Rng } from './rng';
-import type { TileData, TileManifest } from './tile';
+import type { RoadData, TileData, TileManifest } from './tile';
 
 export interface PropSpec {
   kind: 'box' | 'wedge';
@@ -107,6 +107,23 @@ export function propsToMesh(props: readonly PropSpec[]): MeshData {
   return mesh;
 }
 
+/**
+ * Streets through the open plaza, for the parked cars and the spawn layout. They are not drawn:
+ * the ground is flat everywhere, and a street is only a line in `roads`.
+ */
+function proceduralRoads(): RoadData[] {
+  const street = (id: string, name: string, a: [number, number], b: [number, number]): RoadData => ({
+    id, class: 'residential', name, lanes: 2, oneway: false, bridge: false, layer: 0, width: 10,
+    points: [[a[0], 0, a[1]], [b[0], 0, b[1]]],
+  });
+  return [
+    street('proc:main', 'Main St', [-110, 14], [110, 14]),
+    street('proc:north', 'North St', [-110, -40], [110, -40]),
+    street('proc:cross', 'Cross St', [60, -110], [60, 110]),
+    street('proc:west', 'West St', [-70, -110], [-70, 110]),
+  ];
+}
+
 const CELL = 4;
 const HALF = 1000;
 
@@ -178,9 +195,12 @@ export function generateProceduralTile(seed = 1): ProceduralTile {
     heightmap: { file: 'height.bin', cols, rows: cols, cellSize: CELL, minX: -HALF, minZ: -HALF },
     meshes: {},
     collision: { file: 'collision.bin', vertexCount: mesh.positions.length / 3, indexCount: mesh.indices.length },
+    // The real tile starts the player on a sidewalk, a few metres from a car parked at the right-hand
+    // curb. Same here: Main St runs east, the car sits at its south curb facing east (driver's door
+    // toward the street), and the player stands on the far side of the kerb line.
     spawns: {
-      player: { x: -3, y: 0, z: 12 },
-      vehicle: { x: 3, y: 0, z: 12, heading: 0 },
+      player: { x: -6, y: 0, z: 21 },
+      vehicle: { x: 0, y: 0, z: 17.7, heading: -Math.PI / 2 },
     },
     attribution: [],
   };
@@ -189,6 +209,7 @@ export function generateProceduralTile(seed = 1): ProceduralTile {
     heights: new Float32Array(cols * cols),
     collisionPositions: new Float32Array(mesh.positions),
     collisionIndices: new Uint32Array(mesh.indices),
+    roads: proceduralRoads(),
     source: 'procedural',
     props,
   };

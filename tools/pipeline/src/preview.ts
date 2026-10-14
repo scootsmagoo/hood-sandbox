@@ -15,6 +15,7 @@ function trianglesOf(doc: Document): Tri[] {
   for (const node of doc.getRoot().listNodes()) {
     const mesh = node.getMesh();
     if (!mesh) continue;
+    if ((node.getExtras() as { lod?: number }).lod) continue; // coarse ground levels sit under the fine ones
     const m = node.getWorldMatrix();
     for (const prim of mesh.listPrimitives()) {
       const pos = prim.getAttribute('POSITION')!;

@@ -31,7 +31,7 @@ export const SnapFlag = {
   InVehicle: 1 << 0,
 } as const;
 
-/** Offsets inside an entity record. */
+/** Offsets inside an entity record. Ped: `Aux1` is a swing/progress 0..1; vehicle: `Aux1` is the throttle. */
 export const E = {
   Id: 0,
   Kind: 1,
@@ -63,8 +63,18 @@ export const WHEEL_COUNT = 4;
 export const PedFlag = {
   Grounded: 1 << 0,
   Sprinting: 1 << 1,
-  /** Inside a vehicle: the model is not drawn. */
+  /** Inside a vehicle (drawn seated at the wheel; the ped's position is the seat). */
   InVehicle: 1 << 2,
+  /** Not the player's character. */
+  Npc: 1 << 3,
+  /** Running away in panic. */
+  Fleeing: 1 << 4,
+  /** Squaring up to the player. `Aux1` is the punch swing, 0 to 1. */
+  Fighting: 1 << 5,
+  /** Being dragged out of a car. */
+  Dragged: 1 << 6,
+  /** The player is mid-way through a carjack and has no control. */
+  Busy: 1 << 7,
 } as const;
 
 export const VehicleFlag = {
@@ -75,6 +85,8 @@ export const VehicleFlag = {
   /** At least one wheel is spinning or sliding hard (smoke, skid marks). */
   Skidding: 1 << 4,
   Airborne: 1 << 5,
+  /** The driver's door is open. `Aux1` of a vehicle stays the throttle; the door is just this bit. */
+  DoorOpen: 1 << 6,
 } as const;
 
 export class SnapshotView {

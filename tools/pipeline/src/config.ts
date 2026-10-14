@@ -22,6 +22,8 @@ export interface CityFile {
     heightmapCellSizeM: number;
     /** ground mesh uses every Nth heightmap sample (1 = full resolution) */
     groundMeshStep?: number;
+    /** side of the square chunks the meshes are split into, m (default 256) */
+    chunkSizeM?: number;
   }[];
   sources: {
     osm: { endpoints: string[]; attribution: string };
@@ -42,6 +44,7 @@ export interface TileConfig {
   queryBox: { south: number; west: number; north: number; east: number };
   cellSize: number;
   groundMeshStep: number;
+  chunkSize: number;
   cols: number;
   rows: number;
   outDir: string;
@@ -78,6 +81,7 @@ export function loadTileConfig(cityId = 'atlanta', tileId = 'm1-five-points'): T
     queryBox: { south: Math.min(...lats), west: Math.min(...lons), north: Math.max(...lats), east: Math.max(...lons) },
     cellSize: t.heightmapCellSizeM,
     groundMeshStep: t.groundMeshStep ?? 1,
+    chunkSize: t.chunkSizeM ?? 256,
     cols,
     rows: cols,
     outDir: path.join(REPO_ROOT, 'public/tiles', city.id, t.id),

@@ -10,8 +10,26 @@ import type { SimReady } from '../shared/protocol';
 
 export interface WorldView {
   root: THREE.Group;
-  /** Meshes that should have shadows cast onto them (for the light's bookkeeping). */
+  /** Picks the ground level of detail for each chunk. Call once a frame, after the camera has moved. */
+  update(camera: THREE.Camera, lodScale: number): void;
+  /** Number of ground chunks and how many currently show the coarse level (diagnostics). */
+  stats(): { chunks: number; coarse: number };
   dispose(): void;
+}
+
+/** Beyond this distance (divided by the tier's lodScale) a ground chunk switches to its coarse mesh. */
+export const GROUND_LOD_DISTANCE = 400;
+const LOD_HYSTERESIS = 0.06;
+
+/** One ground chunk with its fine (level 0) and coarse (level 1) meshes. */
+interface GroundChunk {
+  fine: THREE.Mesh;
+  coarse: THREE.Mesh | null;
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  isCoarse: boolean;
 }
 
 /** Materials of the baked tile (docs/contracts/m1-tile-format.md) and how to treat them. */
@@ -38,7 +56,9 @@ function styleMaterial(mat: THREE.Material) {
   m.needsUpdate = true;
 }
 
-async function loadBaked(base: string, ready: SimReady, root: THREE.Group): Promise<string[]> {
+async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunks: GroundChunk[]): Promise<string[]> {
+  const grid = ready.tile.chunks;
+  const byKey = new Map<number, GroundChunk>();
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   const errors: string[] = [];
@@ -58,6 +78,24 @@ async function loadBaked(base: string, ready: SimReady, root: THREE.Group): Prom
           // Static: compose each matrix once.
           o.updateMatrix();
           o.matrixAutoUpdate = false;
+          // Ground chunks come in two levels of detail (docs/contracts/m1-tile-format.md, "Chunks").
+          const u = o.userData as { kind?: string; chunk?: [number, number]; lod?: number };
+          if (kind === 'ground' && grid && u.chunk) {
+            const key = u.chunk[1] * grid.cols + u.chunk[0];
+            let c = byKey.get(key);
+            if (!c) {
+              const minX = grid.minX + u.chunk[0] * grid.size;
+              const minZ = grid.minZ + u.chunk[1] * grid.size;
+              c = { fine: o, coarse: null, minX, minZ, maxX: minX + grid.size, maxZ: minZ + grid.size, isCoarse: false };
+              byKey.set(key, c);
+              chunks.push(c);
+            }
+            if (u.lod === 1) {
+              c.coarse = o;
+              o.visible = false;
+              o.receiveShadow = false;
+            } else c.fine = o;
+          }
         });
         root.add(gltf.scene);
       } catch (e) {
@@ -128,18 +166,48 @@ function buildProcedural(seed: number, root: THREE.Group) {
 export async function createWorldView(ready: SimReady, tileBase: string | null, seed: number): Promise<WorldView> {
   const root = new THREE.Group();
   root.name = 'world';
+  const chunks: GroundChunk[] = [];
   if (ready.tileSource === 'baked' && tileBase) {
-    const errors = await loadBaked(tileBase, ready, root);
+    const errors = await loadBaked(tileBase, ready, root, chunks);
     for (const e of errors) console.warn('[world]', e);
   } else {
     buildProcedural(seed, root);
   }
   return {
     root,
+    update(camera, lodScale) {
+      const cx = camera.position.x;
+      const cz = camera.position.z;
+      const limit = GROUND_LOD_DISTANCE * lodScale;
+      for (const c of chunks) {
+        if (!c.coarse) continue;
+        // Distance to the chunk's square (zero inside it).
+        const dx = Math.max(c.minX - cx, 0, cx - c.maxX);
+        const dz = Math.max(c.minZ - cz, 0, cz - c.maxZ);
+        const d = Math.hypot(dx, dz);
+        const coarse = c.isCoarse ? d > limit * (1 - LOD_HYSTERESIS) : d > limit * (1 + LOD_HYSTERESIS);
+        if (coarse !== c.isCoarse) {
+          c.isCoarse = coarse;
+          c.fine.visible = !coarse;
+          c.coarse.visible = coarse;
+        }
+      }
+    },
+    stats() {
+      return { chunks: chunks.length, coarse: chunks.filter((c) => c.isCoarse).length };
+    },
     dispose() {
+      root.removeFromParent();
       root.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.geometry.dispose();
+        if (!(o instanceof THREE.Mesh)) return;
+        o.geometry.dispose();
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          // Textures of the procedural ground (the baked materials have none).
+          (m as THREE.MeshStandardMaterial).map?.dispose();
+          m.dispose();
+        }
       });
+      chunks.length = 0;
     },
   };
 }

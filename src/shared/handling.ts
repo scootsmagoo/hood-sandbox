@@ -12,6 +12,8 @@ type V3 = [number, number, number];
 export interface HandlingData {
   id: string;
   name: string;
+  /** Which stand-in body the client draws: `sedan` (also the coupe) or `pickup`. */
+  body: string;
   /** kg. */
   mass: number;
   /** Relative to the body origin (the chassis box's anchor). Lower is steadier. */
@@ -96,6 +98,19 @@ export interface HandlingData {
     yawRateMax: number;
     /** Extra downward force, m/s^2 per (m/s)^2. */
     downforce: number;
+    /** Donut: yaw rate at full lock (rad/s), the speed it settles at (m/s), the fastest it can start (m/s), rear lateral grip left (0 to 1), and the strongest speed-trimming brake (m/s^2). */
+    donutYawRate: number;
+    donutSpeed: number;
+    donutMaxSpeed: number;
+    donutRearGrip: number;
+    donutBrake: number;
+    /** Front lateral grip left in a donut (0 to 1): the front tyres stop scrubbing the car to a halt. */
+    donutFrontGrip: number;
+    /** Burnout (handbrake, throttle, wheel straight): the front brakes' base deceleration (m/s^2, grows with speed past the creep speed) and the creep speed (m/s). */
+    burnoutHold: number;
+    burnoutCreep: number;
+    /** Angle between the nose and the direction of travel a donut settles at, degrees. */
+    donutSlideDeg: number;
   };
 }
 

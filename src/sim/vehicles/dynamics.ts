@@ -121,6 +121,8 @@ export interface TireInput {
   gripMult: number;
   /** Scales only the lateral limit (a spinning wheel, a locked rear). */
   lateralMult: number;
+  /** Scales only the longitudinal limit (a donut lets the rear tyres push harder than they grip). Default 1. */
+  longMult?: number;
 }
 
 export interface TireOutput {
@@ -145,7 +147,7 @@ export function tireForce(s: TireInput, t: HandlingData['traction'], out: TireOu
   const alpha = Math.atan2(Math.abs(s.vLat), Math.abs(s.vLong) + SLIP_SPEED_FLOOR);
   out.slipAngle = alpha;
   const muLat = tractionCoefficient(alpha, t) * s.gripMult * s.lateralMult;
-  const muLong = t.curveMax * t.longitudinalMult * s.gripMult;
+  const muLong = t.curveMax * t.longitudinalMult * s.gripMult * (s.longMult ?? 1);
   const maxLong = muLong * s.load;
 
   // Longitudinal: engine, then brakes (which can stop the wheel but not reverse it within a step).
@@ -210,4 +212,70 @@ export function driftAssistAccel(
   const wanted = clamp(steer, -1, 1) * a.maxSlideDeg * DEG;
   const target = clamp(velTurnRate + 2.5 * (slideAngle - wanted), -a.yawRateMax, a.yawRateMax);
   return clamp((target - yawRate) * 10, -16, 16) * a.yawAssist * active;
+}
+
+/**
+ * Donut: full throttle with the wheel hard over at low speed. The rear tyres break loose and the car
+ * circles on a steady radius instead of spiralling into a spin or crawling to a stop.
+ *
+ * Whether the driver is asking for one. Entering takes the handbrake, or a launch from nearly
+ * standstill with the wheel flat to the stop; once going it holds until throttle or steering is
+ * eased well off, or the car runs out of the speed range where a donut makes sense.
+ */
+export function donutWanted(throttle: number, steer: number, speed: number, handbrake: boolean, active: boolean, a: HandlingData['assists']): boolean {
+  if (a.donutYawRate <= 0) return false;
+  const s = Math.abs(steer);
+  if (active) return throttle > 0.35 && s > 0.3 && speed < a.donutMaxSpeed + 3;
+  const entry = handbrake || (s > 0.75 && speed < 3.5);
+  return entry && throttle > 0.6 && s > 0.5 && speed < a.donutMaxSpeed;
+}
+
+/** Moves the donut blend toward 0 or 1: quick to take hold, slower to let go (so grip returns smoothly). */
+export function donutRamp(current: number, on: boolean, dt: number): number {
+  return clamp(current + (on ? dt / 0.15 : -dt / 0.5), 0, 1);
+}
+
+/** Yaw rate a donut turns at (rad/s, positive turns left). Steering right turns right. Builds up with speed so a launch is not a spin on the spot. */
+export function donutYawTarget(steer: number, speed: number, a: HandlingData['assists']): number {
+  const s = clamp(steer, -1, 1);
+  return -Math.sign(s) * Math.abs(s) ** 1.3 * a.donutYawRate * lerp(0.4, 1, smoothstep(0, 5, speed));
+}
+
+/** Speed the donut settles at: a tighter wheel circles slower. */
+export function donutTargetSpeed(steer: number, a: HandlingData['assists']): number {
+  return a.donutSpeed * lerp(0.7, 1, Math.min(1, Math.abs(steer)));
+}
+
+/**
+ * Engine demand (m/s^2, signed) that holds the donut's speed: the throttle is a request, and the
+ * governor feeds in just what keeps the car on the circle, or brakes the rear tyres when it is too fast.
+ */
+export function donutAccel(speed: number, steer: number, maxAccel: number, a: HandlingData['assists']): number {
+  const err = donutTargetSpeed(steer, a) - speed;
+  return clamp(err * 3, -a.donutBrake, maxAccel);
+}
+
+/** Angular acceleration (rad/s^2) that takes the yaw rate toward the donut's. */
+export function donutYawAccel(yawRate: number, target: number): number {
+  return clamp((target - yawRate) * 9, -14, 14);
+}
+
+/**
+ * How fast the car's direction of travel should turn (rad/s, positive left) in a donut. If it turns
+ * at the nose's rate the slide angle stays where it is; this bends the rate so the slide angle
+ * settles at `donutSlideDeg`, with the tail out on the outside of the circle. `slide` is the
+ * direction of travel relative to the nose (positive when travelling to the left of it).
+ */
+export function donutTurnRate(yawTarget: number, yawRate: number, slide: number, a: HandlingData['assists']): number {
+  const want = -Math.sign(yawTarget) * a.donutSlideDeg * DEG;
+  return yawRate + 3 * (want - slide) * (yawTarget === 0 ? 0 : 1);
+}
+
+/**
+ * Front-axle brake demand (m/s^2, positive slows the car) for a burnout: handbrake and throttle
+ * with the wheel (nearly) straight. The rear tyres spin and smoke; the front brakes hold the car to a
+ * slow creep instead of letting it launch, and letting go of the handbrake releases it.
+ */
+export function burnoutHold(speedForward: number, a: HandlingData['assists']): number {
+  return clamp(a.burnoutHold * (1 + Math.max(0, speedForward - a.burnoutCreep) * 2), 0, 12);
 }

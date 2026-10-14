@@ -130,20 +130,49 @@ export interface GroundMesh {
   indices: Uint32Array;
 }
 
-export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1): GroundMesh {
-  const cs = Math.floor((hm.cols - 1) / step) + 1;
-  const rs = Math.floor((hm.rows - 1) / step) + 1;
-  const positions = new Float32Array(cs * rs * 3);
-  const normals = new Float32Array(cs * rs * 3);
-  const colors = new Float32Array(cs * rs * 3);
+export interface GroundRange {
+  /** inclusive heightmap sample range (columns along +X, rows along +Z) */
+  c0: number;
+  c1: number;
+  r0: number;
+  r1: number;
+}
+
+export interface GroundOptions {
+  /** Lower the interior (not the border) by this many metres, so a coarse ground never pokes through the roads on it. */
+  lower?: number;
+  /** Add a skirt of this depth around the border, to hide cracks against a neighbour of another level of detail. */
+  skirt?: number;
+}
+
+/**
+ * The ground over a range of heightmap samples at every `step`th sample. The range is clipped to
+ * the heightmap and its size should be a multiple of `step`. Normals come from the whole
+ * heightmap, so neighbouring chunks share their edge normals.
+ */
+export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range?: GroundRange, opts: GroundOptions = {}): GroundMesh {
+  const c0 = range?.c0 ?? 0;
+  const r0 = range?.r0 ?? 0;
+  const c1 = Math.min(hm.cols - 1, range?.c1 ?? hm.cols - 1);
+  const r1 = Math.min(hm.rows - 1, range?.r1 ?? hm.rows - 1);
+  const cs = Math.floor((c1 - c0) / step) + 1;
+  const rs = Math.floor((r1 - r0) / step) + 1;
+  const skirt = opts.skirt ?? 0;
+  const lower = opts.lower ?? 0;
+  const loopLen = skirt > 0 ? 2 * (cs + rs) - 4 : 0;
+  const nv = cs * rs + loopLen;
+  const positions = new Float32Array(nv * 3);
+  const normals = new Float32Array(nv * 3);
+  const colors = new Float32Array(nv * 3);
   const h = (c: number, r: number) => hm.data[Math.max(0, Math.min(hm.rows - 1, r)) * hm.cols + Math.max(0, Math.min(hm.cols - 1, c))];
   for (let j = 0; j < rs; j++) {
     for (let i = 0; i < cs; i++) {
-      const c = i * step;
-      const r = j * step;
+      const c = c0 + i * step;
+      const r = r0 + j * step;
       const o = (j * cs + i) * 3;
+      const border = i === 0 || j === 0 || i === cs - 1 || j === rs - 1;
       positions[o] = hm.minX + c * hm.cellSize;
-      positions[o + 1] = h(c, r);
+      positions[o + 1] = h(c, r) - (border ? 0 : lower);
       positions[o + 2] = hm.minZ + r * hm.cellSize;
       const dx = (h(c + step, r) - h(c - step, r)) / (2 * step * hm.cellSize);
       const dz = (h(c, r + step) - h(c, r - step)) / (2 * step * hm.cellSize);
@@ -157,7 +186,7 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1): Grou
       colors[o + 2] = col[2];
     }
   }
-  const indices = new Uint32Array((cs - 1) * (rs - 1) * 6);
+  const indices = new Uint32Array((cs - 1) * (rs - 1) * 6 + loopLen * 12);
   let k = 0;
   for (let j = 0; j < rs - 1; j++) {
     for (let i = 0; i < cs - 1; i++) {
@@ -169,7 +198,33 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1): Grou
       indices[k++] = c; indices[k++] = b; indices[k++] = d;
     }
   }
-  return { positions, normals, colors, indices };
+  if (skirt > 0) {
+    // The border vertices in a loop, each copied `skirt` metres lower. Both windings, so it shows from either side.
+    const loop: number[] = [];
+    for (let i = 0; i < cs; i++) loop.push(i);
+    for (let j = 1; j < rs; j++) loop.push(j * cs + cs - 1);
+    for (let i = cs - 2; i >= 0; i--) loop.push((rs - 1) * cs + i);
+    for (let j = rs - 2; j >= 1; j--) loop.push(j * cs);
+    const low: number[] = [];
+    let v = cs * rs;
+    for (const src of loop) {
+      for (let q = 0; q < 3; q++) {
+        positions[v * 3 + q] = positions[src * 3 + q];
+        normals[v * 3 + q] = normals[src * 3 + q];
+        colors[v * 3 + q] = colors[src * 3 + q];
+      }
+      positions[v * 3 + 1] -= skirt;
+      low.push(v++);
+    }
+    for (let n = 0; n < loop.length; n++) {
+      const m = (n + 1) % loop.length;
+      indices[k++] = loop[n]; indices[k++] = low[n]; indices[k++] = loop[m];
+      indices[k++] = loop[m]; indices[k++] = low[n]; indices[k++] = low[m];
+      indices[k++] = loop[n]; indices[k++] = loop[m]; indices[k++] = low[n];
+      indices[k++] = loop[m]; indices[k++] = low[m]; indices[k++] = low[n];
+    }
+  }
+  return { positions, normals, colors, indices: indices.subarray(0, k) };
 }
 
 export type { V2 };

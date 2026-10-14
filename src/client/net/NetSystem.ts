@@ -3,6 +3,7 @@
  * interpolator, and publishes what the rest of the client needs to know (`game.view`).
  */
 import type { EntityId } from '../../shared/entities';
+import type { EntityDef } from '../../shared/entityDefs';
 import { AXIS_COUNT, Axis, Button, type InputCommand, type SimEvent } from '../../shared/protocol';
 import { PedFlag } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
@@ -16,6 +17,8 @@ export interface ViewState {
   ped: EntityState | null;
   /** The vehicle the player drives, or the nearest one when on foot. */
   vehicle: EntityState | null;
+  /** What each entity is (vehicle type and paint, ped outfit), from the sim's spawn definitions. */
+  defs: Map<EntityId, EntityDef>;
   /** The entity the camera follows. */
   controlled: EntityState | null;
   inVehicle: boolean;
@@ -55,16 +58,24 @@ export class NetSystem implements System {
   constructor(private readonly game: Game) {
     game.net = this;
     game.view = {
-      sample: null, entities: new Map(), ped: null, vehicle: null, controlled: null, inVehicle: false, camClear: 99, tick: 0, ack: 0, lagTicks: 0,
+      sample: null, entities: new Map(), ped: null, vehicle: null, defs: new Map(), controlled: null, inVehicle: false, camClear: 99, tick: 0, ack: 0, lagTicks: 0,
     };
     game.onSimEvent = (fn) => this.listeners.push(fn);
+    for (const d of game.ready.entities ?? []) game.view.defs.set(d.id, d);
   }
 
   update(dt: number) {
     const g = this.game;
     const now = performance.now();
     for (const s of g.transport.drainSnapshots()) this.interpolator.push(s, now);
-    for (const e of g.transport.drainEvents()) for (const fn of this.listeners) fn(e);
+    for (const e of g.transport.drainEvents()) {
+      if (e.type === 'entity:spawn') g.view.defs.set(e.def.id, e.def);
+      else if (e.type === 'entity:despawn') {
+        g.view.defs.delete(e.id);
+        this.pool.delete(e.id);
+      }
+      for (const fn of this.listeners) fn(e);
+    }
 
     const newest = this.interpolator.newest;
     if (!newest) return;
@@ -82,6 +93,7 @@ export class NetSystem implements System {
     if (!sample) return;
     v.entities.clear();
     v.ped = v.vehicle = null;
+    let nearest = Infinity;
     const b = sample.b;
     for (let i = 0; i < b.count; i++) {
       const id = b.u32[b.at(i)];
@@ -90,7 +102,19 @@ export class NetSystem implements System {
       if (!blendEntity(sample, id, st)) continue;
       v.entities.set(id, st);
       if (id === b.playerPed) v.ped = st;
-      else if (st.kind === 2 && (id === b.controlled || !v.vehicle)) v.vehicle = st;
+    }
+    // The car being driven, or else the one nearest the player on foot.
+    for (const st of v.entities.values()) {
+      if (st.kind !== 2) continue;
+      if (st.id === b.controlled) {
+        v.vehicle = st;
+        break;
+      }
+      const d = v.ped ? Math.hypot(st.x - v.ped.x, st.z - v.ped.z) : 0;
+      if (d < nearest) {
+        nearest = d;
+        v.vehicle = st;
+      }
     }
     v.controlled = v.entities.get(b.controlled) ?? v.ped;
     v.inVehicle = !!v.ped && (v.ped.flags & PedFlag.InVehicle) !== 0;

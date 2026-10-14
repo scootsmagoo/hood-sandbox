@@ -3,6 +3,7 @@
  * server). Everything here is plain data and travels through postMessage, a WebSocket or a
  * function call unchanged.
  */
+import type { EntityDef } from './entityDefs';
 import type { EntityId } from './entities';
 import type { TileManifest } from './tile';
 
@@ -13,7 +14,7 @@ export const SIM_DT = 1 / SIM_HZ;
 export const Button = {
   Jump: 1 << 0,
   Sprint: 1 << 1,
-  /** Enter or leave a vehicle (and, later, every other "use"). */
+  /** Enter or leave a vehicle, or carjack at a driver's door (and, later, every other "use"). */
   Interact: 1 << 2,
   Handbrake: 1 << 3,
   /** Stand the vehicle back on its wheels. */
@@ -59,7 +60,17 @@ export type SimEvent =
   | { type: 'vehicle:exit-denied'; tick: number; vehicleId: EntityId; reason: 'too-fast' }
   | { type: 'vehicle:impact'; tick: number; vehicleId: EntityId; strength: number }
   | { type: 'vehicle:reset'; tick: number; vehicleId: EntityId }
-  | { type: 'entity:respawn'; tick: number; id: EntityId; reason: 'out-of-world' };
+  | { type: 'entity:respawn'; tick: number; id: EntityId; reason: 'out-of-world' }
+  /** An entity came to exist. Carries its definition (see shared/entityDefs.ts). */
+  | { type: 'entity:spawn'; tick: number; def: EntityDef }
+  | { type: 'entity:despawn'; tick: number; id: EntityId }
+  /**
+   * A ped started pulling the driver out of a car. This is the crime the law and heat system
+   * listens for; `reaction` is how the victim will respond, rolled from their personality.
+   */
+  | { type: 'carjack'; tick: number; pedId: EntityId; victimId: EntityId; vehicleId: EntityId; x: number; y: number; z: number; reaction: 'flee' | 'fight' }
+  /** A ped landed a blow. */
+  | { type: 'ped:attack'; tick: number; pedId: EntityId; targetId: EntityId; damage: number };
 
 export interface SimInit {
   seed: number;
@@ -67,10 +78,20 @@ export interface SimInit {
   tileBaseUrl: string | null;
   /** When set the sim writes snapshots here (a `SnapshotRing`) instead of posting them. */
   snapshotBuffer?: SharedArrayBuffer;
-  /** Key into the handling table (`sedan` when absent). */
+  /** Key into the handling table for the starting car (`sedan` when absent). */
   vehicleType?: string;
-  /** Start the player beside the vehicle. */
+  /**
+   * Where the player starts. `spawn` (the default): on the sidewalk at the tile's player spawn,
+   * with the parked car occupied. `car`: beside an empty car's driver door. `jack`: beside the
+   * driver's door of the occupied car.
+   */
+  start?: 'spawn' | 'car' | 'jack';
+  /** Legacy alias for `start: 'car'`. */
   startAtVehicle?: boolean;
+  /** Forces how the first carjack victim reacts. Left out, it is a seeded roll. */
+  driverMood?: 'flee' | 'fight';
+  /** How many empty cars to park along nearby curbs (default 6). */
+  parkedCars?: number;
   /** Run the clock by itself. Tests turn this off and call `advance`. */
   autoRun: boolean;
 }
@@ -81,8 +102,11 @@ export interface SimReady {
   /** Why the baked tile was not used, when it was not. */
   fallbackReason?: string;
   playerId: EntityId;
+  /** The car the player starts next to. */
   vehicleId: EntityId;
   vehicleType: string;
+  /** Definitions of every entity that exists now; later ones arrive as `entity:spawn` events. */
+  entities: EntityDef[];
   /** True when snapshots come through the shared ring. */
   sharedSnapshots: boolean;
 }

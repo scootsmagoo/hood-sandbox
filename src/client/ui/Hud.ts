@@ -2,8 +2,10 @@
  * The heads-up display: frames per second, speed, whether the player is on foot or in a car,
  * context prompts, map attribution, and a debug panel.
  */
+import { atDriverDoor } from '../../shared/doors';
 import { HANDLING } from '../../shared/handling';
 import { rotateVecInv } from '../../shared/math';
+import { PedFlag, VehicleFlag } from '../../shared/snapshot';
 import type { SimEvent } from '../../shared/protocol';
 import type { Game, System } from '../Game';
 import { codeLabel } from '../input/bindings';
@@ -112,7 +114,7 @@ export class Hud implements System {
             ['W A S D', 'Move, or throttle, brake and steer'],
             ['Shift', 'Sprint'],
             [`${k('jump')}`, 'Jump, or handbrake'],
-            [k('interact'), 'Get in or out of the car'],
+            [k('interact'), 'Get in or out; at a driver\'s door, carjack'],
             ['Arrow keys / mouse', 'Look (click the game to capture the mouse)'],
             [k('lookBack'), 'Look behind (car)'],
             [`${k('toggleView')} / scroll`, 'Camera distance'],
@@ -134,6 +136,12 @@ export class Hud implements System {
         break;
       case 'vehicle:reset':
         this.toast('Car reset');
+        break;
+      case 'carjack':
+        this.toast('Carjacked', 2200);
+        break;
+      case 'ped:attack':
+        this.toast('Hit by the driver');
         break;
       case 'entity:respawn':
         this.toast('Back to the spawn point');
@@ -173,7 +181,8 @@ export class Hud implements System {
     const speed = String(mph);
     if (speed !== this.cache.speed) this.speedNum.textContent = this.cache.speed = speed;
 
-    const carName = HANDLING[g.ready.vehicleType]?.name.replace(/ \(.*\)/, '') ?? 'car';
+    const drivenType = v.inVehicle ? (v.defs.get(st.id) as { typeId?: string } | undefined)?.typeId : undefined;
+    const carName = HANDLING[drivenType ?? g.ready.vehicleType]?.name.replace(/ \(.*\)/, '') ?? 'car';
     const state = v.inVehicle ? `In car · ${carName}` : 'On foot';
     if (state !== this.cache.state) this.stateEl.textContent = this.cache.state = state;
 
@@ -182,7 +191,7 @@ export class Hud implements System {
       this.promptEl.textContent = this.cache.prompt = prompt;
       this.promptEl.classList.toggle('on', prompt !== '');
     }
-    g.touch?.setUseLabel(v.inVehicle ? 'Get out' : 'Get in');
+    g.touch?.setUseLabel(v.inVehicle ? 'Get out' : prompt.includes('Carjack') ? 'Carjack' : 'Get in');
 
     this.slow += dt;
     if (this.debugOn && this.slow > 0.25) {
@@ -194,18 +203,35 @@ export class Hud implements System {
   private promptText(): string {
     const v = this.game.view;
     const ped = v.ped;
-    const car = v.vehicle;
     const key = this.key('interact');
     const press = key ? `[${key}] ` : '';
     if (v.inVehicle) {
       const speed = Math.hypot(v.controlled!.vx, v.controlled!.vz);
       return speed > EXIT_MAX_SPEED ? '' : `${press}Get out`;
     }
-    if (!ped || !car) return '';
-    const l = rotateVecInv(car.q, ped.x - car.x, ped.y - car.y, ped.z - car.z);
-    const half = HANDLING[this.game.ready.vehicleType]?.chassis.halfExtents ?? [1, 0.5, 2.2];
-    const d = Math.hypot(Math.max(Math.abs(l.x) - half[0], 0), Math.max(Math.abs(l.z) - half[2], 0));
-    if (Math.abs(l.y) < 2.2 && d < ENTER_RANGE) return `${press}Get in`;
+    if (!ped || ped.flags & PedFlag.Busy) return '';
+    // The nearest car in reach: an empty one to get into, or one with a driver whose door is within reach.
+    let jack = false;
+    let enter = false;
+    let nearest = Infinity;
+    for (const car of v.entities.values()) {
+      if (car.kind !== 2) continue;
+      const def = v.defs.get(car.id);
+      const h = HANDLING[(def as { typeId?: string } | undefined)?.typeId ?? ''] ?? HANDLING.sedan;
+      const l = rotateVecInv(car.q, ped.x - car.x, ped.y - car.y, ped.z - car.z);
+      const occupied = (car.flags & VehicleFlag.Occupied) !== 0;
+      if (occupied) {
+        if (atDriverDoor(h, l.x, l.y, l.z)) jack = true;
+        continue;
+      }
+      const half = h.chassis.halfExtents;
+      const d = Math.hypot(Math.max(Math.abs(l.x) - half[0], 0), Math.max(Math.abs(l.z) - half[2], 0));
+      if (Math.abs(l.y) < 2.2 && d < ENTER_RANGE) enter = true;
+    }
+    if (jack) return `${press}Carjack`;
+    if (enter) return `${press}Get in`;
+    const car = v.vehicle;
+    if (!car) return '';
     const dist = Math.hypot(car.x - ped.x, car.z - ped.z);
     return dist > 12 ? `Car ${Math.round(dist)} m ${compassPoint(car.x - ped.x, car.z - ped.z)}` : '';
   }

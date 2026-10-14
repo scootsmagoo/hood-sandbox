@@ -6,7 +6,7 @@ The engine is city-agnostic. Everything that makes the game *Atlanta* (the map d
 
 There is no story yet, and that's deliberate. The game is the city: real streets and highways, real neighborhoods, pedestrians and traffic going about their day, side hustles on every corner, and a police response that feels like Atlanta's. A minor offense on a city street won't start a chase. Do the same on I-285 and the State Patrol will PIT you at 110 mph.
 
-> **Status: research and planning (14 October 2026).** Nothing is playable yet.
+> **Status: M1 spike playable (14 October 2026).** You can walk and drive a real 2 × 2 km tile of Downtown around Five Points, carjack the car at the curb, and steal the parked ones. `npm install && npm run dev`, then open http://127.0.0.1:5180. M1 is done once it has been checked on a real Mac and iPhone ([docs/perf.md](docs/perf.md)).
 >
 > This README is the plan: what we're building, what it's built with, and the order we'll build it in. The research behind it is in [`docs/research/`](docs/research/). The cast (the protagonist, the crews and the police agencies) is drafted in [`docs/CAST.md`](docs/CAST.md) and waiting for review.
 
@@ -195,7 +195,12 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 
 - An arcade **raycast-suspension car** built on Rapier rigid bodies and ray casts (written by us, not Rapier's stock vehicle controller, so we can tune grip, drift and assists).
 - Tunables follow GTA V's `handling.meta` (mass, drive force, traction curve min/max and lateral, low-speed traction loss for burnouts, suspension, anti-roll, damage multipliers), stored as JSON per vehicle.
-- A handbrake drift with steering assist, burnouts and donuts (takeovers need them).
+- A handbrake drift with steering assist, burnouts and donuts (takeovers need them). All of it lives in `src/sim/vehicles/dynamics.ts` as pure functions with unit tests, and `tests/handling.test.ts` holds the feel as numbers (yaw-rate and slide-angle envelopes):
+  - **Planted at speed**: the wheel narrows with speed and the tyres hold; at 40 m/s full lock slides under 4 degrees.
+  - **Handbrake drift**: a tap kicks the tail out, the steering sets the slide angle (about 20 to 45 degrees), and letting go straightens the car in about half a second without a swing back.
+  - **Burnout**: handbrake and throttle with the wheel straight smokes the rear tyres while the front brakes hold the car to a creep.
+  - **Donut**: full throttle with the wheel hard over from rest, or after a handbrake turn, holds a steady circle (sedan about 5 m radius at 8.4 m/s, pickup about 5.8 m at 8 m/s) with the tail out and the rear tyres smoking, and lets go cleanly.
+  - Two stand-in vehicle types besides the coupe: the sedan and the **pickup** (heavier, softer, leans several times as far). Add more in `src/shared/data/handling.json`; `?car=<id>` picks the starting car.
 - **Cheap damage**: dent morph targets blended by impact, detachable bumpers and panels, and smoke and fire driven by engine health.
 - Vehicle types (later): motorcycles, boats on the Hooch and the lakes, helicopters.
 
@@ -224,6 +229,8 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 
 - A third-person controller (Skyrome's capsule, step-up, climb and camera code is a starting point), with cover, hitscan shooting with soft lock-on (gamepad and touch need it), and melee.
 - **Carjacking** follows the door sockets: walk up, open, pull the driver out, get in. Drivers flee, fight back or chase you, depending on personality.
+  - **Built (stand-in timing):** you start on the sidewalk a few metres from a car parked at the curb with a driver in it. Walk to the driver's door and press the use button: the door opens, the driver is dragged out (about 1.4 s in all, `src/sim/carjack.ts`), and you take the wheel. The driver rolls a personality from the seed, then flees along open ground (`src/sim/npc/flee.ts`) or squares up and throws punches for a few seconds before running. The sim emits a `carjack` event for the later law and heat system. Empty cars, including the one you just left, are entered with the same button; a few empty parked cars of mixed types sit along nearby curbs.
+  - Quick-test URL parameters: `?start=car` (beside an empty car), `?start=jack` (at the driver's door of the occupied car), `?driver=flee|fight` (force the reaction), `?car=pickup`, `?parked=N`.
 - Ragdolls on hits, falls and vehicle impacts, then blend back to standing.
 
 ### Side activities (backlog)
