@@ -16,6 +16,8 @@ export interface RoadWay {
   width: number;
   layer: number;
   bridge: boolean;
+  /** junction=roundabout */
+  roundabout?: boolean;
   nodeIds: number[];
   pts: V2[];
 }
@@ -121,6 +123,7 @@ export function classifyWay(el: OsmElement): Omit<RoadWay, 'pts' | 'nodeIds' | '
     width,
     layer: isDeck ? Math.max(layer, 1) : 0,
     bridge: isDeck,
+    roundabout,
   };
 }
 

@@ -5,7 +5,9 @@ import type { TileConfig } from '../config.js';
 
 export interface OsmGeomNode { lat: number; lon: number }
 export interface OsmElement {
-  type: 'way' | 'relation';
+  type: 'way' | 'relation' | 'node';
+  lat?: number;
+  lon?: number;
   id: number;
   tags?: Record<string, string>;
   nodes?: number[];
@@ -34,10 +36,30 @@ export function overpassQuery(box: TileConfig['queryBox']): string {
 out geom;`;
 }
 
+/** Tagged points that matter to traffic: signals, stop and give-way signs, marked crossings. Ways do not carry the tags of their nodes, so these need their own query. */
+export function overpassNodeQuery(box: TileConfig['queryBox']): string {
+  const b = `${box.south.toFixed(6)},${box.west.toFixed(6)},${box.north.toFixed(6)},${box.east.toFixed(6)}`;
+  return `[out:json][timeout:120];
+(
+  node["highway"~"^(traffic_signals|stop|give_way|crossing|mini_roundabout|turning_circle|turning_loop)$"](${b});
+  node["crossing"](${b});
+  node["railway"="level_crossing"](${b});
+);
+out;`;
+}
+
 export async function fetchOsm(cfg: TileConfig): Promise<OsmData> {
-  const query = overpassQuery(cfg.queryBox);
+  return fetchOverpass(cfg, overpassQuery(cfg.queryBox));
+}
+
+/** Tagged nodes of the tile (cached next to the main extract, so a re-bake stays offline). */
+export async function fetchOsmNodes(cfg: TileConfig): Promise<OsmData> {
+  return fetchOverpass(cfg, overpassNodeQuery(cfg.queryBox), 'osm-nodes');
+}
+
+async function fetchOverpass(cfg: TileConfig, query: string, prefix = 'osm-overpass'): Promise<OsmData> {
   const hash = createHash('sha1').update(query).digest('hex').slice(0, 8);
-  const file = path.join(cfg.cacheDir, `osm-overpass-${hash}.json`);
+  const file = path.join(cfg.cacheDir, `${prefix}-${hash}.json`);
   const buf = await cachedFile(file, async () => {
     let lastErr: unknown;
     for (const url of cfg.city.sources.osm.endpoints) {

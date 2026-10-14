@@ -8,11 +8,13 @@ import { MeshBuilder } from './mesh/builder.js';
 import { makeChunkGrid, splitMesh, type ChunkGrid } from './mesh/chunks.js';
 import { extrudeFootprint } from './mesh/extrude.js';
 import { fetchDem, type Dem } from './sources/dem.js';
-import { fetchOsm } from './sources/osm.js';
+import { fetchOsm, fetchOsmNodes } from './sources/osm.js';
 import { fetchOvertureBuildings, type OvertureBuilding } from './sources/overture.js';
 import { buildBuildings, styleBuilding } from './world/buildings.js';
+import { clipBuildingsToRoads } from './world/clip.js';
+import { parseNodeTags } from './world/nodes.js';
 import { parseOsm } from './world/osm.js';
-import { buildRoads } from './world/roads.js';
+import { buildRoads, planRoads } from './world/roads.js';
 import { pickSpawns } from './world/spawns.js';
 import { buildGroundMesh, heightmapFromDem, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
 
@@ -24,6 +26,7 @@ const MAT: Record<string, MaterialSpec> = {
   asphalt: { name: 'road_asphalt', baseColor: [1, 1, 1, 1], roughness: 0.95 },
   sidewalk: { name: 'road_sidewalk', baseColor: gray(0.62), roughness: 0.95 },
   crosswalk: { name: 'road_crosswalk', baseColor: gray(0.88), roughness: 0.9 },
+  markings: { name: 'road_markings', baseColor: [1, 1, 1, 1], roughness: 0.7 },
   rail: { name: 'road_rail', baseColor: [linear(0.30), linear(0.26), linear(0.22), 1], roughness: 1 },
   concrete: { name: 'road_concrete', baseColor: [1, 1, 1, 1], roughness: 0.9 },
   wall: { name: 'bld_wall', baseColor: [1, 1, 1, 1], roughness: 0.9 },
@@ -90,12 +93,18 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   }
 
   const world = parseOsm(osm, cfg.projector);
+  const nodeTags = parseNodeTags(await fetchOsmNodes(cfg), cfg.projector);
+  log(`osm nodes: ${nodeTags.size} tagged (signals, stops, crossings)`);
   log(`parsed: ${world.roads.length} ways, ${world.areas.length} areas, ${world.buildings.length} osm buildings`);
 
   const b = cfg.bounds;
   const { hm, baseElevation, flat } = heightmapFromDem(dem, cfg.projector, cfg.origin, cfg.cols, cfg.rows, cfg.cellSize, b.minX, b.minZ);
   const mm = minMax(hm);
   log(`heightmap ${hm.cols}x${hm.rows}, base ${baseElevation} m, relief ${mm.min.toFixed(1)}..${mm.max.toFixed(1)} m`);
+
+  // the roads' vertical profiles first: they cut and fill the heightmap, which everything else stands on
+  const plan = planRoads(world.roads, hm);
+  log(`profiles: ${plan.stats.nodes} nodes, ${plan.stats.dipNodes} in dips, ${plan.stats.deckSpans} bridged spans (${Math.round(plan.stats.deckMetres)} m), terrain moved at ${plan.stats.carvedVertices} vertices (cut up to ${plan.stats.maxCut.toFixed(1)} m, fill up to ${plan.stats.maxFill.toFixed(1)} m; ground cut away under decks up to ${plan.stats.underDeckCut.toFixed(1)} m)`);
 
   const land = rasterizeAreas(world.areas, hm);
   const grid = makeChunkGrid(b, cfg.chunkSize);
@@ -119,10 +128,16 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   }
   log(`ground: ${grid.cols}x${grid.rows} chunks, ${groundTris[0]} triangles at full resolution, ${groundTris[1]} at level 1`);
 
-  const roads = buildRoads(world.roads, hm, b);
+  const roads = buildRoads(plan, hm, b, nodeTags);
+  log(`markings: ${roads.markingStats.lines} lines, ${roads.markingStats.crosswalks} crosswalks (${roads.markingStats.bars} bars), ${roads.markingStats.stopBars} stop bars, ${roads.markings.triangleCount} triangles; ${roads.controls.signals.length} signals, ${roads.controls.stops.length} stop signs, ${roads.controls.junctions.filter((c) => c.control === "signals").length} signalised and ${roads.controls.junctions.filter((c) => c.control === "stop").length} stop-controlled junctions`);
+  log(`junctions: ${roads.junctionStats.built} polygons from ${roads.junctionStats.candidates} junction nodes (${roads.junctionStats.clusters} clusters); not built: ${JSON.stringify(roads.junctionStats.rejected)}`);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
 
-  const { buildings, stats: bstats } = buildBuildings(overture, world.buildings, cfg.projector, b);
+  const built = buildBuildings(overture, world.buildings, cfg.projector, b);
+  const bstats = built.stats;
+  const clip = clipBuildingsToRoads(built.buildings, world.roads);
+  const buildings = clip.buildings;
+  log(`buildings on streets: ${clip.stats.clipped} cut by a road (${Math.round(clip.stats.removedAreaM2)} m2 removed, ${clip.stats.pieces} pieces, ${clip.stats.dropped} slivers dropped)`);
   const wall = new MeshBuilder();
   const roof = new MeshBuilder();
   const glassWall = new MeshBuilder();
@@ -179,6 +194,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       ...chunked('asphalt', MAT.asphalt, roads.asphalt, grid),
       ...chunked('sidewalk', MAT.sidewalk, roads.sidewalk, grid),
       ...chunked('crosswalk', MAT.crosswalk, roads.crosswalk, grid),
+      ...chunked('markings', MAT.markings, roads.markings, grid),
       ...chunked('rail', MAT.rail, roads.rail, grid),
       ...chunked('concrete', MAT.concrete, roads.concrete, grid),
     ]),
@@ -193,6 +209,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   );
   sizes['collision.bin'] = write(path.join(out, 'collision.bin'), collisionBytes(collision.positions, collision.indices));
   sizes['roads.json'] = write(path.join(out, 'roads.json'), JSON.stringify({ roads: roads.json }));
+  sizes['junctions.json'] = write(path.join(out, 'junctions.json'), JSON.stringify(roads.exported));
 
   const attribution = [cfg.city.sources.osm.attribution];
   if (used.overture) attribution.push(cfg.city.sources.overture.attribution);
@@ -218,6 +235,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     },
     collision: { file: 'collision.bin', vertexCount: collision.vertexCount, indexCount: collision.indices.length },
     roads: 'roads.json',
+    junctions: 'junctions.json',
     spawns,
     attribution,
     sources: {
@@ -237,7 +255,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     flatHeightmap: flat,
     heightRange: mm,
     ground: { chunks: grid.cols * grid.rows, trianglesLod0: groundTris[0], trianglesLod1: groundTris[1] },
-    roads: { ...roads.stats, triangles: roads.asphalt.triangleCount + roads.sidewalk.triangleCount + roads.crosswalk.triangleCount + roads.rail.triangleCount + roads.concrete.triangleCount },
+    roads: { ...roads.stats, triangles: roads.asphalt.triangleCount + roads.sidewalk.triangleCount + roads.crosswalk.triangleCount + roads.rail.triangleCount + roads.concrete.triangleCount + roads.markings.triangleCount, markings: roads.markingStats, junctions: roads.junctionStats },
     buildings: { count: kept.length, skipped, sources: bstats, triangles: wall.triangleCount + roof.triangleCount + glassWall.triangleCount },
     collision: { vertices: collision.vertexCount, triangles: collision.triangleCount, buildingTriangles: buildingCollisionTris },
     spawns,

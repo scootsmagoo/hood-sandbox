@@ -21,6 +21,18 @@ export interface WorldView {
 export const GROUND_LOD_DISTANCE = 400;
 const LOD_HYSTERESIS = 0.06;
 
+/** Road markings (lane lines, crosswalks, stop bars) are thin: beyond this distance (divided by the tier's lodScale) a chunk's markings are not drawn. */
+export const MARKINGS_DISTANCE = 320;
+
+/** The markings mesh of one chunk. */
+interface MarkingsChunk {
+  mesh: THREE.Mesh;
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
 /** One ground chunk with its fine (level 0) and coarse (level 1) meshes. */
 interface GroundChunk {
   fine: THREE.Mesh;
@@ -43,6 +55,12 @@ function styleMaterial(mat: THREE.Material) {
     m.polygonOffsetFactor = -2;
     m.polygonOffsetUnits = -2;
   }
+  if (name === 'road_markings') {
+    // Lane lines, crosswalks and stop bars lie 3 cm over the asphalt (14 cm over the ground for crosswalks):
+    // pull them further towards the camera than the road itself so they never z-fight with it at distance.
+    m.polygonOffsetFactor = -4;
+    m.polygonOffsetUnits = -4;
+  }
   if (name === 'bld_glass') {
     m.metalness = 0.6;
     m.roughness = 0.2;
@@ -51,12 +69,12 @@ function styleMaterial(mat: THREE.Material) {
     m.roughness = 0.9;
   } else {
     m.metalness = 0;
-    m.roughness = name === 'road_asphalt' ? 0.95 : 0.85;
+    m.roughness = name === 'road_asphalt' ? 0.95 : name === 'road_markings' ? 0.7 : 0.85;
   }
   m.needsUpdate = true;
 }
 
-async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunks: GroundChunk[]): Promise<string[]> {
+async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunks: GroundChunk[], markings: MarkingsChunk[]): Promise<string[]> {
   const grid = ready.tile.chunks;
   const byKey = new Map<number, GroundChunk>();
   const loader = new GLTFLoader();
@@ -80,6 +98,12 @@ async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunk
           o.matrixAutoUpdate = false;
           // Ground chunks come in two levels of detail (docs/contracts/m1-tile-format.md, "Chunks").
           const u = o.userData as { kind?: string; chunk?: [number, number]; lod?: number };
+          if (kind === 'roads' && u.kind === 'markings' && grid && u.chunk) {
+            const minX = grid.minX + u.chunk[0] * grid.size;
+            const minZ = grid.minZ + u.chunk[1] * grid.size;
+            markings.push({ mesh: o, minX, minZ, maxX: minX + grid.size, maxZ: minZ + grid.size });
+            o.castShadow = false;
+          }
           if (kind === 'ground' && grid && u.chunk) {
             const key = u.chunk[1] * grid.cols + u.chunk[0];
             let c = byKey.get(key);
@@ -167,8 +191,9 @@ export async function createWorldView(ready: SimReady, tileBase: string | null, 
   const root = new THREE.Group();
   root.name = 'world';
   const chunks: GroundChunk[] = [];
+  const markings: MarkingsChunk[] = [];
   if (ready.tileSource === 'baked' && tileBase) {
-    const errors = await loadBaked(tileBase, ready, root, chunks);
+    const errors = await loadBaked(tileBase, ready, root, chunks, markings);
     for (const e of errors) console.warn('[world]', e);
   } else {
     buildProcedural(seed, root);
@@ -179,6 +204,13 @@ export async function createWorldView(ready: SimReady, tileBase: string | null, 
       const cx = camera.position.x;
       const cz = camera.position.z;
       const limit = GROUND_LOD_DISTANCE * lodScale;
+      const markLimit = MARKINGS_DISTANCE * lodScale;
+      for (const m of markings) {
+        const dx = Math.max(m.minX - cx, 0, cx - m.maxX);
+        const dz = Math.max(m.minZ - cz, 0, cz - m.maxZ);
+        const d = Math.hypot(dx, dz);
+        m.mesh.visible = m.mesh.visible ? d <= markLimit * (1 + LOD_HYSTERESIS) : d <= markLimit * (1 - LOD_HYSTERESIS);
+      }
       for (const c of chunks) {
         if (!c.coarse) continue;
         // Distance to the chunk's square (zero inside it).
@@ -208,6 +240,7 @@ export async function createWorldView(ready: SimReady, tileBase: string | null, 
         }
       });
       chunks.length = 0;
+      markings.length = 0;
     },
   };
 }

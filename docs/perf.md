@@ -54,6 +54,21 @@ How: `@dimforge/rapier3d-simd-compat` ships the raw `rapier_wasm3d_bg.wasm` next
 
 Splitting costs about 0.8 MB because every chunk-material mesh has its own accessors and meshopt streams. If it matters, bigger chunks for roads and buildings (they are cheap to cull) or merging materials would win it back.
 
+### Roads pass (junction polygons, markings, profiles), 2026-10-14
+
+Same scripted route, before = the tile above, after = the tile with road profiles, junction polygons and markings (one `road_markings` mesh per chunk, drawn only within 320 m x lodScale of the camera; the old crosswalk ribbons are gone). Maximum over each phase:
+
+| Profile, phase | Draws before -> after | Triangles before -> after |
+|---|---|---|
+| desktop-high, idle | 373 -> 361 | 153k -> 173k |
+| desktop-high, walk | 422 -> 383 | 171k -> 192k |
+| desktop-high, drive | 431 -> 427 | 175k -> 195k |
+| desktop-high, look | 494 -> 461 | 207k -> 224k |
+| desktop-low, idle | 211 -> 200 | 95k -> 109k |
+| desktop-low, drive | 272 -> 253 | 112k -> 128k |
+
+Draw calls do not grow (markings add one draw per visible chunk, and take away the crosswalk ribbon draws; the route differs a little from run to run). Triangles grow by 10 to 15%. The tile grows from 5.7 MB to 7.3 MB (`roads.glb` 1.3 -> 2.0 MB for the markings, junction surfaces and the bridges the pipeline made; `junctions.json` 0.9 MB, 0.15 MB gzipped; `collision.bin` 1.40 -> 1.72 MB for the derived bridges).
+
 ## The harnesses
 
 All live in `scripts/`; each starts its own Vite server and Chromium unless you pass `--url <base>` (an already-running server) or `--dist` (a preview of `dist/`, after `npm run build`). They need the baked tile (`cd tools/pipeline && npm run bake`). Shared code: `scripts/lib/harness.mjs` (servers, profiles, boot) and `scripts/lib/page.mjs` (what runs in the page).
@@ -106,7 +121,7 @@ Touch devices start on Medium and the governor steps down after 3 s above 24 ms;
 
 ## Known problems the harnesses surfaced
 
-- **Streets draped into trenches.** Some at-grade streets follow the 3DEP ground into freeway cuts: Auburn Avenue NE (`osm:way/1118731507`) drops from -10.8 to -13.5 m and back within about 10 m near x = 565, z = -139, a grade of about 30%. Cars stop there. The bot avoids streets over 18%; the pipeline should model those spans as bridges or flatten the road profile. The bot also gets wedged elsewhere (near (107, -600) and (206, -680), cause not looked into), so the soak's bot drives 190 m a minute on average although its first drive does 500 m in 40 s; the soak's limit for that is 60 m a minute.
+- **Streets draped into trenches (fixed in the pipeline, 2026-10-14).** The bot's wedges had two causes. Some at-grade streets followed the 3DEP ground into freeway cuts (Auburn Avenue NE dropped 2.7 m and climbed again within 10 m, about 30%): the pipeline now designs smooth road profiles, bridges the dips and cuts and fills the heightmap to them (see "Road profiles" in the tile contract; 8,855 m of drivable road steeper than 12% became 348 m). The wedges near (107, -600) and (206, -680) were **buildings across the street**: an Overture footprint drawn over Andrew Young Intl Boulevard and another over Peachtree Street NE, so the collision mesh had an 80 m wall across the road. Footprints are now cut by the streets they stand on. The bot may drop its 18% rule and the soak its 60 m/min floor can be raised after a fresh measurement.
 - Draw calls doubled with chunking (see above).
 
 ## Only on the real devices

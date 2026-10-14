@@ -128,7 +128,17 @@ export async function renderPreview(tileDir: string, outFile: string, view?: { c
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cfg = loadTileConfig();
   const cache = cfg.cacheDir.replace(/\/atlanta\/m1-five-points$/, '');
-  await renderPreview(cfg.outDir, path.join(cache, 'preview.png'));
-  await renderPreview(cfg.outDir, path.join(cache, 'preview-center.png'), { cx: 0, cz: 0, half: 300, px: 1800 });
-  console.log('wrote', path.join(cache, 'preview.png'));
+  const arg = (name: string) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : undefined; };
+  const at = arg('at');
+  if (at) {
+    // a close-up: --at x,z [--half metres] [--px pixels] [--out file.png]
+    const [cx, cz] = at.split(',').map(Number);
+    const out = arg('out') ?? path.join(cache, 'preview-closeup.png');
+    await renderPreview(cfg.outDir, out, { cx, cz, half: Number(arg('half') ?? 40), px: Number(arg('px') ?? 1600) });
+    console.log('wrote', out);
+  } else {
+    await renderPreview(cfg.outDir, path.join(cache, 'preview.png'));
+    await renderPreview(cfg.outDir, path.join(cache, 'preview-center.png'), { cx: 0, cz: 0, half: 300, px: 1800 });
+    console.log('wrote', path.join(cache, 'preview.png'));
+  }
 }

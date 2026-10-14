@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MeshBuilder } from '../src/mesh/builder';
-import { buildRoads } from '../src/world/roads';
+import { buildRoads, planRoads } from '../src/world/roads';
 import type { RoadWay } from '../src/world/osm';
 import { makeHeightmap } from '../src/world/terrain';
 import type { V2 } from '../src/geo';
@@ -80,5 +80,58 @@ describe('road meshes', () => {
     const r = buildRoads([way(1, 'footway', [[0, 0], [30, 0]], { kind: 'ped', width: 2, sub: 'sidewalk' })], hm, bounds);
     expect(r.json.length).toBe(0);
     expect(r.sidewalk.triangleCount).toBeGreaterThan(0);
+  });
+
+  it('cuts the roads back to a junction polygon, marks it, and keeps the full centrelines in roads.json', () => {
+    const ew = way(1, 'secondary', [[-150, 0], [-75, 0], [0, 0], [75, 0], [150, 0]], { nodeIds: [11, 12, 1, 13, 14], width: 8 });
+    const ns = way(2, 'secondary', [[0, -150], [0, -75], [0, 0], [0, 75], [0, 150]], { nodeIds: [21, 22, 1, 23, 24], width: 8 });
+    const nodes = new Map([[1, { id: 1, pos: [0, 0] as [number, number], signals: true }]]);
+    const r = buildRoads([ew, ns], hm, bounds, nodes);
+    expect(r.junctions.length).toBe(1);
+    expect(r.controls.junctions[0].control).toBe('signals');
+    // no ribbon vertex lies inside the junction square beyond the polygon: ribbons start at the cut (8.5 m)
+    const poly = r.junctions[0].polygon;
+    const inside = Math.max(...poly.map((p) => Math.abs(p.x)));
+    expect(inside).toBeGreaterThan(8);
+    // roads.json still runs through the junction
+    const ewJson = r.json.filter((j) => j.id === 'osm:way/1');
+    expect(ewJson.length).toBe(1);
+    expect(ewJson[0].points[0][0]).toBeCloseTo(-150, 0);
+    expect(ewJson[0].points[ewJson[0].points.length - 1][0]).toBeCloseTo(150, 0);
+    // ribbons were cut: every run starts or ends at the polygon
+    expect(r.runs.filter((x) => x.startJ !== undefined || x.endJ !== undefined).length).toBe(4);
+    for (const run of r.runs) for (const p of run.pts) expect(Math.hypot(p[0], p[1])).toBeGreaterThan(8);
+    // markings: four crosswalks, four stop bars, centre lines
+    expect(r.markingStats.stopBars).toBe(4);
+    expect(r.markingStats.crosswalks).toBe(4);
+    expect(r.markingStats.lines).toBeGreaterThan(0);
+    expect(r.markings.triangleCount).toBeGreaterThan(40);
+    expect(r.exported.junctions[0].legs.length).toBe(4);
+  });
+
+  it('lays crosswalks on OSM crossing ways instead of drawing them as ribbons', () => {
+    const street = way(1, 'secondary', [[-100, 0], [100, 0]], { width: 8 });
+    const crossing = way(5, 'footway', [[0, -9], [0, 9]], { kind: 'ped', width: 3, sub: 'crossing', lanes: 1 });
+    const r = buildRoads([street, crossing], hm, bounds);
+    expect(r.crosswalk.triangleCount).toBe(0);
+    expect(r.markingStats.crosswalks).toBe(1);
+    expect(r.markingStats.bars).toBeGreaterThanOrEqual(7);
+    expect(r.crossings.length).toBe(1);
+  });
+
+  it('cuts a derived bridge where a street crosses a deep cut, and keeps the deck above the cut', () => {
+    // a 5 m deep, 16 m wide cut across the road
+    const cut = makeHeightmap(101, 101, 4, -200, -200);
+    for (let rr = 0; rr < 101; rr++) for (let c = 0; c < 101; c++) cut.data[rr * 101 + c] = Math.abs(c * 4 - 200) < 10 ? -5 : 0;
+    const street = way(1, 'tertiary', [[-190, 0], [190, 0]], { width: 8 });
+    const plan = planRoads([street], cut);
+    expect(plan.spans[0].length).toBe(1);
+    const r = buildRoads(plan, cut, bounds);
+    const bridge = r.json.filter((j) => j.derived);
+    expect(bridge.length).toBe(1);
+    expect(bridge[0].bridge).toBe(true);
+    expect(bridge[0].layer).toBe(1);
+    for (const p of bridge[0].points) expect(p[1]).toBeGreaterThan(-1.5);
+    expect(r.stats.deckWays).toBeGreaterThanOrEqual(1);
   });
 });

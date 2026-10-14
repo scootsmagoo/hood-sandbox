@@ -6,6 +6,7 @@
   "scripts": {
     "bake": "tsx src/bake.ts",
     "preview": "tsx src/preview.ts",
+    "grades": "tsx src/check-grades.ts",
     "verify": "tsx src/verify.ts && tsx src/preview.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -19,6 +20,7 @@
     "earcut": "^3.2.4",
     "geotiff": "^3.0.5",
     "meshoptimizer": "^1.3.0",
+    "polygon-clipping": "^0.15.7",
     "proj4": "^2.22.0"
   },
   "devDependencies": {

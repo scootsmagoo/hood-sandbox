@@ -228,3 +228,130 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range
 }
 
 export type { V2 };
+
+export interface CarveSegment {
+  a: V2;
+  b: V2;
+  /** design (road surface) height at a and b */
+  ha: number;
+  hb: number;
+  halfWidth: number;
+}
+
+export interface CarveOptions {
+  /** Vertices within halfWidth + this are set to the road height. A 4 m grid needs about 2.5 m for a car to drive on the road height across the whole lane. */
+  pin: number;
+  /** Beyond the pinned band the ground blends back to the original over this distance. */
+  blend: number;
+}
+
+export const DEFAULT_CARVE: CarveOptions = { pin: 3, blend: 9 };
+
+/**
+ * Cuts and fills the ground to the road surface: heightmap vertices near a segment take the segment's
+ * height at the nearest point, with a smooth blend into the original ground at the edge. Where several
+ * roads reach a vertex their heights are averaged, each weighted by how close the vertex is to the road's
+ * centreline relative to the road's own width (so a side street next to a boulevard keeps its own
+ * profile on its own lanes). Returns the largest cut and fill in metres.
+ */
+export function carveTerrain(hm: Heightmap, segs: CarveSegment[], user: Partial<CarveOptions> = {}): { cut: number; fill: number; vertices: number } {
+  const o = { ...DEFAULT_CARVE, ...user };
+  const orig = Float32Array.from(hm.data);
+  const sumW = new Float32Array(hm.data.length);
+  const sumWH = new Float32Array(hm.data.length);
+  const fade = new Float32Array(hm.data.length);
+  for (const s of segs) {
+    const pinR = s.halfWidth + o.pin;
+    const reach = pinR + o.blend;
+    const minX = Math.min(s.a[0], s.b[0]) - reach, maxX = Math.max(s.a[0], s.b[0]) + reach;
+    const minZ = Math.min(s.a[1], s.b[1]) - reach, maxZ = Math.max(s.a[1], s.b[1]) + reach;
+    const c0 = Math.max(0, Math.ceil((minX - hm.minX) / hm.cellSize)), c1 = Math.min(hm.cols - 1, Math.floor((maxX - hm.minX) / hm.cellSize));
+    const r0 = Math.max(0, Math.ceil((minZ - hm.minZ) / hm.cellSize)), r1 = Math.min(hm.rows - 1, Math.floor((maxZ - hm.minZ) / hm.cellSize));
+    const dx = s.b[0] - s.a[0], dz = s.b[1] - s.a[1];
+    const l2 = dx * dx + dz * dz;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const x = hm.minX + c * hm.cellSize, z = hm.minZ + r * hm.cellSize;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.a[0]) * dx + (z - s.a[1]) * dz) / l2));
+        const d = Math.hypot(x - (s.a[0] + t * dx), z - (s.a[1] + t * dz));
+        const score = d - pinR;
+        if (score >= o.blend) continue;
+        const i = r * hm.cols + c;
+        const rel = d / pinR + 0.15;
+        const w = 1 / (rel * rel * rel);
+        sumW[i] += w;
+        sumWH[i] += w * (s.ha + (s.hb - s.ha) * t);
+        const u = score <= 0 ? 1 : 1 - score / o.blend;
+        const f = u * u * (3 - 2 * u);
+        if (f > fade[i]) fade[i] = f;
+      }
+    }
+  }
+  let cut = 0, fill = 0, vertices = 0;
+  for (let i = 0; i < hm.data.length; i++) {
+    if (sumW[i] === 0) continue;
+    const v = orig[i] + (sumWH[i] / sumW[i] - orig[i]) * fade[i];
+    hm.data[i] = v;
+    vertices++;
+    cut = Math.max(cut, orig[i] - v);
+    fill = Math.max(fill, v - orig[i]);
+  }
+  return { cut, fill, vertices };
+}
+
+export interface UnderDeckSegment {
+  a: V2;
+  b: V2;
+  /** height of the deck's top surface at a and b */
+  ya: number;
+  yb: number;
+  halfWidth: number;
+}
+
+/**
+ * Lowers the ground where it would stand higher than a deck's surface (the bank at a bridge end, a hill a
+ * deck is threaded under): such ground within the deck's width and `margin` ends up `depth` below the
+ * surface (under the slab), blending out to the original over `blend` metres. Ground at or below the
+ * deck, and ground that meets the deck at its ends, is left alone. Returns the deepest cut.
+ */
+export function lowerTerrainUnder(hm: Heightmap, segs: UnderDeckSegment[], depth = 1.3, margin = 2.5, blend = 6, tolerance = 0.15): { cut: number; vertices: number } {
+  const orig = Float32Array.from(hm.data);
+  const bestLimit = new Float32Array(hm.data.length).fill(Infinity);
+  for (const s of segs) {
+    const pinR = s.halfWidth + margin;
+    const reach = pinR + blend;
+    const minX = Math.min(s.a[0], s.b[0]) - reach, maxX = Math.max(s.a[0], s.b[0]) + reach;
+    const minZ = Math.min(s.a[1], s.b[1]) - reach, maxZ = Math.max(s.a[1], s.b[1]) + reach;
+    const c0 = Math.max(0, Math.ceil((minX - hm.minX) / hm.cellSize)), c1 = Math.min(hm.cols - 1, Math.floor((maxX - hm.minX) / hm.cellSize));
+    const r0 = Math.max(0, Math.ceil((minZ - hm.minZ) / hm.cellSize)), r1 = Math.min(hm.rows - 1, Math.floor((maxZ - hm.minZ) / hm.cellSize));
+    const dx = s.b[0] - s.a[0], dz = s.b[1] - s.a[1];
+    const l2 = dx * dx + dz * dz;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const x = hm.minX + c * hm.cellSize, z = hm.minZ + r * hm.cellSize;
+        const tr = l2 === 0 ? 0 : ((x - s.a[0]) * dx + (z - s.a[1]) * dz) / l2;
+        if (tr < 0 || tr > 1) continue; // beside or past an end of the deck is the ground road's business
+        const t = tr;
+        const d = Math.hypot(x - (s.a[0] + t * dx), z - (s.a[1] + t * dz));
+        const score = d - pinR;
+        if (score >= blend) continue;
+        const i = r * hm.cols + c;
+        const top = s.ya + (s.yb - s.ya) * t;
+        if (orig[i] <= top + tolerance) continue;
+        const u = score <= 0 ? 1 : 1 - score / blend;
+        const w = u * u * (3 - 2 * u);
+        const limit = orig[i] + (top - depth - orig[i]) * w;
+        if (limit < bestLimit[i]) bestLimit[i] = limit;
+      }
+    }
+  }
+  let cut = 0, vertices = 0;
+  for (let i = 0; i < hm.data.length; i++) {
+    if (bestLimit[i] < hm.data[i]) {
+      cut = Math.max(cut, hm.data[i] - bestLimit[i]);
+      hm.data[i] = bestLimit[i];
+      vertices++;
+    }
+  }
+  return { cut, vertices };
+}

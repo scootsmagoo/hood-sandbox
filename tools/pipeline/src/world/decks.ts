@@ -22,6 +22,14 @@ export interface DeckOptions {
   /** OSM node ids that belong to ways lying on the ground; deck ends that touch them are pinned to the ground */
   groundNodeIds: Set<number>;
   groundRefs: RefWay[];
+  /** Surface height of the road on the ground at an OSM node, when its profile was designed (see profile.ts): deck ends that land there take this height rather than the terrain's. */
+  groundNodeY?: Map<number, number>;
+  /**
+   * Ask what the ground would have to look like for the deck to be drivable: ends that land on the ground are not
+   * pinned to it but left free (they are only kept at least a little above the terrain), and the heights they settle
+   * at are written to `demand`, keyed by OSM node id.
+   */
+  demand?: Map<number, number>;
   /** deck slab thickness (top surface to underside) */
   thickness: number;
   maxGrade: number;
@@ -117,17 +125,20 @@ export function solveDecks(decks: DeckWay[], user: Partial<DeckOptions> & Pick<D
     isEnd[wn[0]] = 1;
     isEnd[wn[wn.length - 1]] = 1;
   });
+  const anchorCandidate: number[] = [];
   for (let k = 0; k < n; k++) {
     if (isEnd[k] && ids[k] > 0 && o.groundNodeIds.has(ids[k])) {
-      anchor[k] = 1;
+      anchor[k] = o.demand ? 0 : 1;
+      anchorCandidate.push(k);
       compAnchored.set(uf.find(k), true);
     }
   }
   const baseL = new Float64Array(n);
   for (let k = 0; k < n; k++) {
     baseL[k] = compAnchored.get(uf.find(k)) ? g[k] + o.minAboveGround : g[k] + o.layerHeight * Math.max(1, layerOf[k]);
-    if (anchor[k]) baseL[k] = g[k] + o.anchorLift;
+    if (anchor[k]) baseL[k] = o.groundNodeY?.get(ids[k]) ?? g[k] + o.anchorLift;
   }
+  if (o.demand) for (const k of anchorCandidate) baseL[k] = g[k] + o.anchorLift;
 
   // grade-limited ceiling: the highest a deck can be at each node if it climbs from an anchor at maxGrade
   const ceiling = new Float64Array(n).fill(Infinity);
@@ -153,6 +164,9 @@ export function solveDecks(decks: DeckWay[], user: Partial<DeckOptions> & Pick<D
     }
     for (let k = 0; k < n; k++) if (dist[k] < Infinity) ceiling[k] = hAnchor[k] + o.maxGrade * 1.25 * dist[k];
   }
+  // A deck cannot hug a steep bank near the road it starts from: its floor is the ground, but never higher than a grade-limited climb from the anchor
+  // (where that puts the deck below the ground, the terrain is cut away under it: see lowerTerrainUnder).
+  for (let k = 0; k < n; k++) if (!anchor[k] && compAnchored.get(uf.find(k)) && baseL[k] > ceiling[k]) baseL[k] = ceiling[k];
 
   const h = new Float64Array(n);
   const L = new Float64Array(n);
@@ -209,7 +223,7 @@ export function solveDecks(decks: DeckWay[], user: Partial<DeckOptions> & Pick<D
         const k = sweep % 2 === 0 ? s : n - 1 - s;
         if (anchor[k] || nbr[k].length === 0) continue;
         let v = h[k];
-        if (compAnchored.get(uf.find(k))) {
+        if (compAnchored.get(uf.find(k)) && !o.demand) {
           let sw = 0, sh = 0;
           for (const e of nbr[k]) { sw += 1 / e.len; sh += h[e.j] / e.len; }
           v = h[k] + omega * (sh / sw - h[k]);
@@ -226,7 +240,7 @@ export function solveDecks(decks: DeckWay[], user: Partial<DeckOptions> & Pick<D
       if (delta < 1e-4) break;
     }
     // soften the corners where tents meet plateaus
-    for (let s = 0; s < 3; s++) {
+    for (let s = 0; s < (o.demand ? 0 : 3); s++) {
       const next = Float64Array.from(h);
       for (let k = 0; k < n; k++) {
         if (anchor[k] || nbr[k].length !== 2) continue;
@@ -235,5 +249,6 @@ export function solveDecks(decks: DeckWay[], user: Partial<DeckOptions> & Pick<D
       h.set(next);
     }
   }
+  if (o.demand) for (const k of anchorCandidate) o.demand.set(ids[k], h[k]);
   return wayNodes.map((wn) => wn.map((k) => h[k]));
 }

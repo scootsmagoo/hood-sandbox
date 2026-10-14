@@ -19,6 +19,8 @@ export interface TileManifest {
   chunks?: { size: number; minX: number; minZ: number; cols: number; rows: number };
   collision: { file: string; vertexCount: number; indexCount: number };
   roads?: string;
+  /** `junctions.json`: junction polygons with their legs, signals, stop signs and crossings (see the contract). Not loaded by the sim yet. */
+  junctions?: string;
   spawns: {
     player: { x: number; y: number; z: number };
     /** `heading` is the three.js `rotation.y` of an object that faces -Z at 0: forward is (-sin h, -cos h). */
@@ -37,7 +39,38 @@ export interface RoadData {
   bridge: boolean;
   layer: number;
   width: number;
+  /** true for a bridge the pipeline made over a cut or ravine where OSM has none (then `bridge` is true too) */
+  derived?: boolean;
   points: [number, number, number][];
+}
+
+/** Shape of `junctions.json` (docs/contracts/m1-tile-format.md, "junctions.json"). Ids of roads are `roads.json` ids. */
+export interface JunctionsData {
+  junctions: {
+    id: string;
+    x: number;
+    y: number;
+    z: number;
+    control: 'signals' | 'stop' | 'none';
+    nodes: number[];
+    polygon: [number, number][];
+    legs: {
+      road: string;
+      node: number;
+      /** unit vector (x, z) pointing away from the junction */
+      dir: [number, number];
+      approach: boolean;
+      departure: boolean;
+      /** metres from the node to where the road starts and the junction polygon ends */
+      trim: number;
+      control: 'signals' | 'stop' | 'none';
+      stopLine: [number, number, number] | null;
+      crosswalk: boolean;
+    }[];
+  }[];
+  signals: { node: number; x: number; y: number; z: number; junction: string | null }[];
+  stops: { node: number; x: number; y: number; z: number; direction: 'forward' | 'backward' | 'both'; all: boolean; junction: string | null }[];
+  crossings: { id: number; points: [number, number, number][]; signals: boolean }[];
 }
 
 export interface TileData {
@@ -130,6 +163,7 @@ export function parseRoads(json: unknown): RoadData[] {
       bridge: !!r.bridge,
       layer: isNum(r.layer) ? r.layer : 0,
       width: r.width,
+      ...(r.derived ? { derived: true } : {}),
       points: r.points,
     });
   }

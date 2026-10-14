@@ -47,6 +47,7 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
     "vertexCount": 0, "indexCount": 0
   },
   "roads": "roads.json",                     // centrelines for later traffic and minimap work
+  "junctions": "junctions.json",             // optional: junction polygons, signals, stop signs, crossings (see below)
   "spawns": {
     "player":  { "x": 0, "y": 0, "z": 0 },
     "vehicle": { "x": 0, "y": 0, "z": 0, "heading": 0 }   // radians; see "Spawns" below
@@ -61,7 +62,8 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 ```jsonc
 { "roads": [ { "id": "osm:way/123", "class": "motorway|trunk|primary|secondary|tertiary|residential|service|...",
                "name": "Peachtree St NE", "lanes": 4, "oneway": false, "bridge": false, "layer": 0,
-               "width": 14.0, "points": [[x, y, z], ...] } ] }
+               "width": 14.0, "derived": true,   // `derived` only on bridges the pipeline made (see "Road profiles")
+               "points": [[x, y, z], ...] } ] }
 ```
 
 ### Spawns
@@ -73,17 +75,31 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 ### Mesh details (client-facing)
 
 - The `.glb` files use `EXT_meshopt_compression` and `KHR_mesh_quantization` (16-bit positions). Positions are quantized per mesh, so each mesh node carries a scale and translation. three's `GLTFLoader` needs `setMeshoptDecoder(MeshoptDecoder)`.
-- All meshes carry `COLOR_0` (RGBA, normalized uint8, linear). Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_crosswalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers); `bld_wall`, `bld_roof`, `bld_glass` (towers of 55 m and up, metallic).
+- All meshes carry `COLOR_0` (RGBA, normalized uint8, linear). Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers), `road_markings`; `bld_wall`, `bld_roof`, `bld_glass` (towers of 55 m and up, metallic).
 - `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell, split into chunks with two levels of detail (see "Chunks"). Sampling the heightmap bilinearly differs from the level 0 mesh by a few centimetres at most.
-- At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, crosswalks 14 cm, motorways 10 cm, residential streets 6 cm), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance.
+- `road_markings` holds lane lines, crosswalks and stop bars (white and yellow in the vertex colours). The old `road_crosswalk` material is no longer produced: crossings are zebra stripes in `road_markings`.
+- At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, motorways 10 cm, residential streets 6 cm; junction surfaces take the lift of their biggest road), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance, and a stronger one to `road_markings` (the client uses -2 for the roads and -4 for the markings).
+- **Markings** lie 3 cm over the road they are on (14 cm over the ground for crosswalks, which may also lie on a sidewalk). They are one merged mesh per chunk. Centre lines are double yellow on two-way primary, secondary, tertiary and unclassified roads with an even number of lanes (a pair of solid yellow lines round the middle lane when the number of lanes is odd); white dashed lane dividers come from `lanes`; motorways and trunk roads (and their links) get solid white edge lines. Lines stop 5 m short of a junction. Zebra crosswalks are laid on every OSM crossing way (only where it lies on the road) and across every leg of a signalised junction that has no crossing within about 9 m; stop bars are laid on the approaches of signalised and stop-controlled junctions.
+- **Junctions**: wherever three or more at-grade roads meet (nodes closer than 14 m along a road count as one junction) the surface is one polygon with rounded corners, and the road ribbons stop at its edge (`trim` in `junctions.json`). Roundabouts, motorway merges and junctions with legs less than 17 degrees apart keep the old overlapping ribbons and have no polygon. `roads.json` centrelines still run through junctions untrimmed.
 - Tunnels (`tunnel=*`, negative `layer`) are not in the tile.
+
+### Road profiles (the heightmap under the roads is not the raw 3DEP)
+
+3DEP is a bare-earth model, so a street that crosses a freeway cut or a ravine used to drop into it (Auburn Avenue NE fell 2.7 m and climbed again within 10 m, about 30%). The pipeline now designs a vertical profile for every road on the ground (`tools/pipeline/src/world/profile.ts`) and changes `height.bin` to match it, so `height.bin` is the ground **after** cut and fill, and the sim drives on the designed surface:
+
+1. Dips narrower than about 80 m along the roads are bridged in the design (a morphological closing over the road graph; dead ends are continued so slopes do not read as dips).
+2. The heights are fitted to the terrain with a vertical curvature penalty and projected onto a grade limit per class (motorway 6%, links 8%, trunk 7%, primary and secondary 8%, service 10%, others 9%). Roads that share a node share its height.
+3. Where the design stands more than 3 m over the terrain for at most 80 m the road is a **derived bridge**: a deck with underside, skirts, collision slab and piers like any mapped bridge, listed in `roads.json` with `bridge: true`, `layer: 1` and `derived: true`. Sidewalks beside such a bridge follow it. A longer or lower fill is an embankment.
+4. Everywhere else the heightmap vertices within `halfWidth + 3 m` of a road centreline are set to the road height and blend back to the original ground over 9 m. Mapped bridges whose ends land on the ground take the designed height there (and pull the road they start from towards the height they need); the ground is cut away where it would stand higher than a deck.
+
+The bake fails (`npm run verify`, or `npm run grades` in `tools/pipeline`) when more than 450 m of drivable centreline (about 109 km in the tile; measured on the heightmap and decks over 6 m windows) is steeper than 12%, or the worst grade exceeds 80%. Building footprints that stand on a street (not a service road) are cut by the street.
 
 ### Chunks
 
 Each `.glb` holds one node (with one mesh and one primitive) per chunk and material, so the renderer can frustum-cull them: a view draws a few dozen chunks instead of the whole tile. The chunks are the squares of a grid over `bounds`: chunk `(cx, cz)` covers `x` from `minX + cx * size` and `z` from `minZ + cz * size`, `size` metres each (256 m by default, `chunkSizeM` in `city.json`; the last row and column are cut short by the bounds). `tile.json.chunks` describes the grid, and every node says which chunk it belongs to in its glTF `extras` (three.js puts them in `userData`):
 
 ```jsonc
-{ "kind": "ground" | "asphalt" | "sidewalk" | "crosswalk" | "rail" | "concrete" | "walls" | "roofs" | "glass_walls",
+{ "kind": "ground" | "asphalt" | "sidewalk" | "rail" | "concrete" | "markings" | "walls" | "roofs" | "glass_walls",
   "chunk": [cx, cz],
   "lod": 0 }                  // ground only
 ```
@@ -97,11 +113,40 @@ Node names are `<kind>_<cx>_<cz>` (ground: `ground_<cx>_<cz>_L<lod>`). A chunk w
 
 ### `collision.bin` contents
 
-Building walls and roofs (footprints simplified to 0.4 m), plus elevated road decks (closed 1 m slabs, including footbridges) and bridge piers. At-grade roads are not in it; they are the heightmap.
+Building walls and roofs (footprints simplified to 0.4 m), plus elevated road decks (closed 1 m slabs, including footbridges and derived bridges) and bridge piers. At-grade roads are not in it; they are the heightmap.
 
 ### `roads.json` notes
 
 `bridge` is true for any way on a deck (`bridge=*` or `layer` of 1 or more); `layer` is then at least 1. `y` on bridge points is the deck surface. Points are simplified (0.25 m tolerance in 3D) and ordered along the direction of travel for one-way roads. Only drivable classes are listed (no footways or rail).
+
+### `junctions.json`
+
+For traffic, signals and the minimap. Roads are named by their `roads.json` id (a road that crosses a junction is one `roads.json` entry; `node` says where it meets the junction).
+
+```jsonc
+{
+  "junctions": [ {
+    "id": "j12", "x": 13.2, "y": 0.68, "z": -22.6,          // centre, surface height
+    "control": "signals" | "stop" | "none",                  // signals: a highway=traffic_signals node on it or within 40 m up a leg
+    "nodes": [123, 124],                                     // OSM nodes (several when close nodes were merged)
+    "polygon": [[x, z], ...],                                // the surface, one decimal
+    "legs": [ {
+      "road": "osm:way/123", "node": 123,
+      "dir": [dx, dz],                                       // unit vector pointing away from the junction
+      "approach": true, "departure": true,                   // cars can arrive from / leave along this leg (one-way roads)
+      "trim": 8.5,                                           // metres from the node to where the road starts
+      "control": "signals" | "stop" | "none",                // what an approaching car faces
+      "stopLine": [x, y, z] | null,                          // middle of the stop bar on the approach lanes
+      "crosswalk": true                                      // a crosswalk was laid across this leg at the junction edge
+    } ]
+  } ],
+  "signals": [ { "node": 1, "x": 0, "y": 0, "z": 0, "junction": "j12" | null } ],   // every highway=traffic_signals node on a road; null when no junction is within 40 m
+  "stops":   [ { "node": 1, "x": 0, "y": 0, "z": 0, "direction": "forward" | "backward" | "both", "all": false, "junction": "j12" | null } ],   // highway=stop; direction is along the OSM way, `all` for stop=all
+  "crossings": [ { "id": 123, "points": [[x, y, z], ...], "signals": false } ]      // OSM crossing ways (the zebra stripes follow these); `signals` when a node says crossing=traffic_signals
+}
+```
+
+A stop sign applies to the leg it faces (`direction` along the way, from the sign to the first junction within 40 m) or, for `stop=all`, to every leg. Legs of a signalised junction that cars can arrive from all have `control: "signals"`. Phases are not baked: they are the sim's job, with `dir` and `approach` as input. `src/shared/tile.ts` has the type (`JunctionsData`).
 
 ## Rules
 
