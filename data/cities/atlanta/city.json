@@ -7,7 +7,7 @@
     {
       "id": "m1-five-points",
       "name": "M1: Downtown, centred on Five Points",
-      "origin": { "lat": 33.7539, "lon": -84.3916 },
+      "origin": { "lat": 33.7543, "lon": -84.3898 },
       "halfSizeM": 1000,
       "scale": 1,
       "queryMarginM": 120,

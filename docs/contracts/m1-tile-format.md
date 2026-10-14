@@ -9,7 +9,7 @@ M1 bakes one tile at **real 1:1 scale** (the compression warp arrives in M3).
 - 1 unit = 1 metre.
 - **+X = east, +Y = up, +Z = south** (north is −Z), the three.js convention.
 - Projection: `+proj=tmerc +lat_0=33.85 +lon_0=-84.3 +k=1 +x_0=0 +y_0=0 +ellps=WGS84 +units=m` gives easting E and northing N.
-- The tile origin is **Five Points (33.7539 N, 84.3916 W)**, projected to `(E0, N0)`. Game `x = E − E0`, `z = −(N − N0)`.
+- The tile origin is **Five Points, where Peachtree, Marietta and Decatur streets meet (33.7543 N, 84.3898 W; OSM node 69515924)**, projected to `(E0, N0)`. Game `x = E − E0`, `z = −(N − N0)`.
 - Heights: `y = elevation_m − baseElevation`, where `baseElevation` is the ground elevation at the origin, so the ground near spawn is about y = 0.
 
 ## Files
@@ -24,8 +24,8 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
   "version": 1,
   "id": "atlanta/m1-five-points",
   "projection": "+proj=tmerc ...",          // as above
-  "origin": { "lat": 33.7539, "lon": -84.3916, "E": -8486.774, "N": -10655.529 },   // E0, N0: the origin projected
-  "baseElevation": 300.0,                    // metres above sea level at the origin
+  "origin": { "lat": 33.7543, "lon": -84.3898, "E": -8319.964, "N": -10611.308 },   // E0, N0: the origin projected
+  "baseElevation": 318.59,                   // metres above sea level at the origin
   "bounds": { "minX": -1000, "minZ": -1000, "maxX": 1000, "maxZ": 1000 },
   "heightmap": {
     "file": "height.bin",                    // little-endian Float32, row-major

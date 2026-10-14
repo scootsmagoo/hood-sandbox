@@ -14,7 +14,7 @@ describe('heading', () => {
 });
 
 describe('spawns', () => {
-  it('puts the player off the road and the car on it, facing along it', () => {
+  it('parks the car at the right-hand curb, facing along the road, with the player on the sidewalk beside it', () => {
     const hm = makeHeightmap(11, 11, 20, -100, -100);
     const road: RoadWay = { id: 1, name: '', highway: 'secondary', kind: 'car', lanes: 2, oneway: false, width: 8, layer: 0, bridge: false, nodeIds: [1, 2], pts: [[-80, 30], [80, 30]] };
     const walk: RoadWay = { id: 2, name: '', highway: 'footway', kind: 'ped', sub: 'sidewalk', lanes: 1, oneway: false, width: 2, layer: 0, bridge: false, nodeIds: [3, 4], pts: [[-80, 36], [80, 36]] };
@@ -24,6 +24,7 @@ describe('spawns', () => {
     expect(Math.abs(s.player.x)).toBeLessThan(2);
     expect(s.vehicle.z).toBeGreaterThan(30);
     expect(s.vehicle.z).toBeLessThan(34);
+    expect(Math.hypot(s.player.x - s.vehicle.x, s.player.z - s.vehicle.z)).toBeLessThan(5);
     expect(Math.abs(Math.abs(s.vehicle.heading) - Math.PI / 2)).toBeLessThan(0.01);
   });
 });

@@ -172,7 +172,7 @@ export function generateProceduralTile(seed = 1): ProceduralTile {
     format: 'hood-tile',
     version: 1,
     id: 'procedural/test-ground',
-    origin: { lat: 33.7539, lon: -84.3916, E: 0, N: 0 },
+    origin: { lat: 33.7543, lon: -84.3898, E: 0, N: 0 },
     baseElevation: 0,
     bounds: { minX: -HALF, minZ: -HALF, maxX: HALF, maxZ: HALF },
     heightmap: { file: 'height.bin', cols, rows: cols, cellSize: CELL, minX: -HALF, minZ: -HALF },
