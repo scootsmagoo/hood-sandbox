@@ -19,7 +19,10 @@
     "perf-budget": "node scripts/perf-budget.mjs",
     "perf-budget:phone": "node scripts/perf-budget.mjs --profile phone-low",
     "soak": "node scripts/soak.mjs",
-    "leaks": "node scripts/leaks.mjs"
+    "leaks": "node scripts/leaks.mjs",
+    "deploy:check": "node scripts/deploy-check.mjs",
+    "deploy:dry": "npm run build && npm run deploy:check && wrangler deploy --dry-run",
+    "deploy": "npm run build && npm run deploy:check && wrangler deploy"
   },
   "dependencies": {
     "@dimforge/rapier3d-simd-compat": "^0.21.0",
@@ -31,6 +34,7 @@
     "playwright": "^1.64.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.4",
+    "wrangler": "^4.151.0"
   }
 }

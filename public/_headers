@@ -1,10 +1,30 @@
-# Cloudflare Workers static assets / Pages. Cross-origin isolation enables SharedArrayBuffer.
+# Cloudflare Workers static assets (copied to dist/_headers by the Vite build).
+# Cross-origin isolation enables SharedArrayBuffer for the sim worker. The same pair of headers
+# is set in vite.config.ts for dev and preview.
 # Tiles served from another origin (R2) will need Cross-Origin-Resource-Policy: cross-origin
 # (or CORS) on that bucket as well.
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: same-origin
+  X-Content-Type-Options: nosniff
 
+# The HTML entry points revalidate on every load so a new deploy
+# is picked up at once. Hashed bundles below are immutable.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+
+# Vite's hashed bundles (filenames change with content), so they can be cached for a year.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# Rapier's WASM. Served with the right type so the browser can stream-compile it (cache: /assets/*).
+/*.wasm
+  Content-Type: application/wasm
+
+# Map tiles are NOT hashed, so they revalidate on every load (an unchanged file is a cheap 304),
+# and a re-baked tile shows up on the next reload. Hash or version them before caching them long.
+/tiles/*
+  Cache-Control: no-cache

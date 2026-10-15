@@ -1,0 +1,13 @@
+{
+  // Static-assets-only Worker: no `main` script. Serves dist/ (built by `npm run build`).
+  // Headers (COOP/COEP, wasm type, cache) come from dist/_headers, copied from public/_headers.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hood-sandbox",
+  "compatibility_date": "2026-10-01",
+  // Set this to the Cloudflare account id if wrangler asks which account to use.
+  // "account_id": "<your-account-id>",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+}

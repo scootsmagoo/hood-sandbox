@@ -8,3 +8,5 @@ dist/
 tools/pipeline/cache/
 # baked map tiles (regenerate with: cd tools/pipeline && npm run bake)
 public/tiles/
+# wrangler local state
+.wrangler/
