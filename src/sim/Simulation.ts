@@ -32,6 +32,7 @@ import { defaultSystems, type SimSystem } from './systems';
 import { RaycastCar } from './vehicles/RaycastCar';
 import { planParking } from './streets/parking';
 import { PhysicsWorld } from './World';
+import { GameClock, type ClockOptions } from './clock';
 
 export interface SimOptions {
   seed: number;
@@ -54,6 +55,8 @@ export interface SimOptions {
   armour?: number;
   /** The law tables (a city pack's jurisdictions). Left out, the pack of the tile's city is loaded, or a generic one. */
   law?: LawData;
+  /** Start time and pace of the game clock (default Wednesday 14:00, half a game minute per real second). */
+  clock?: ClockOptions;
 }
 
 /** Where the player is while the WASTED or BUSTED screen runs. */
@@ -78,6 +81,8 @@ function loadedLaw(_opts: SimOptions): LawData {
 export class Simulation {
   tick = 0;
   readonly dt = SIM_DT;
+  /** Time of day and day of the week; population and lighting follow it. */
+  clock!: GameClock;
   readonly registry = new EntityRegistry<SimEntity>();
   readonly players = new Map<number, PlayerSlot>();
   readonly rng: Rng;
@@ -112,6 +117,7 @@ export class Simulation {
     this.systems = defaultSystems();
     this.fireRng = this.rng.fork('fire');
     this.plateRng = this.rng.fork('plates');
+    this.clock = new GameClock(opts.clock);
     this.law = new Law(this, opts.law ?? loadedLaw(opts));
     this.police = new PoliceManager(this);
     this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
@@ -381,6 +387,7 @@ export class Simulation {
   step() {
     this.applyQueuedInput();
     this.tick++;
+    this.clock.step(this.dt);
     for (const s of this.systems) s.fixedUpdate(this, this.dt);
     if (this.toDespawn.size) this.flushDespawns();
   }
@@ -527,6 +534,8 @@ export class Simulation {
     u[H.Overlay] = overlayOf(life.mode);
     f[H.OverlayT] = life.t;
     f[H.Cooldown] = heat.cooldownFrac;
+    f[H.ClockMinutes] = this.clock.minutes;
+    u[H.Day] = this.clock.day;
     let n = 0;
     for (const e of this.registry.values()) {
       if (n >= MAX_ENTITIES) break;

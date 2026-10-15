@@ -14,7 +14,7 @@ import type { EntityId } from './entities';
 
 export const HEADER_WORDS = 16;
 export const ENTITY_WORDS = 36;
-export const MAX_ENTITIES = 64;
+export const MAX_ENTITIES = 256;
 export const SNAPSHOT_BYTES = (HEADER_WORDS + ENTITY_WORDS * MAX_ENTITIES) * 4;
 
 export const H = {
@@ -36,6 +36,9 @@ export const H = {
   OverlayT: 12,
   /** f32: 0 to 1, how far the heat has cooled toward clearing (while out of sight). */
   Cooldown: 13,
+  /** f32: game minutes since midnight; u32: day of the week, 0 = Monday. */
+  ClockMinutes: 14,
+  Day: 15,
 } as const;
 
 export const HeatPhase = { None: 0, Reported: 1, Seen: 2, Lost: 3 } as const;
