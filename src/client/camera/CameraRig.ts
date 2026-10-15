@@ -8,7 +8,8 @@
  * probes the world with it and answers with how much is clear, which comes back as
  * `game.view.camClear`.
  */
-import { clamp, damp, wrapAngle, yawOfQuat } from '../../shared/math';
+import { AIM, viewDirection, viewRight } from '../../shared/aim';
+import { DEG, clamp, damp, wrapAngle, yawOfQuat } from '../../shared/math';
 import type { Game, System } from '../Game';
 import { armDirection, armLength, chaseDistance, chaseFov, chaseYaw, followAngle } from './cameraMath';
 
@@ -42,8 +43,12 @@ export class CameraRig implements System {
   private fov = 62;
   private wasInVehicle = false;
   private lookBack = false;
+  /** The aim camera was up last frame (leaving it hands the car's chase camera the yaw it ended on). */
+  private wasAiming = false;
   private initialised = false;
   private look = { yaw: 0, pitch: 0 };
+  /** Recoil kick not yet recovered, radians. */
+  private recoil = 0;
 
   constructor(private readonly game: Game) {
     game.cameraRig = this;
@@ -52,9 +57,15 @@ export class CameraRig implements System {
   update(dt: number) {
     const { input } = this.game;
     this.look = input.consumeLook(dt);
+    const aiming = this.game.aim?.active ?? false;
+    if (aiming) {
+      // Slower turning while aiming; the wheel changes weapon then, not the camera distance.
+      this.look.yaw *= AIM.lookScale;
+      this.look.pitch *= AIM.lookScale;
+    }
     if (input.pressed('toggleView')) this.preset = (this.preset + 1) % 3;
-    if (input.pressed('zoomIn')) this.preset = Math.max(0, this.preset - 1);
-    if (input.pressed('zoomOut')) this.preset = Math.min(2, this.preset + 1);
+    if (!aiming && input.pressed('zoomIn')) this.preset = Math.max(0, this.preset - 1);
+    if (!aiming && input.pressed('zoomOut')) this.preset = Math.min(2, this.preset + 1);
     this.lookBack = input.down('lookBack');
   }
 
@@ -74,10 +85,19 @@ export class CameraRig implements System {
       this.initialised = true;
     }
 
+    if (g.aim?.active && v.ped) {
+      this.aimCamera(dt);
+      return;
+    }
+
     let pivotY: number;
     let wanted: number;
     if (v.inVehicle) {
-      if (!this.wasInVehicle) this.offYaw = wrapAngle(this.yaw - chaseYaw(yawOfQuat(st.q), st.vx, st.vz, st.speed));
+      if (this.wasAiming) {
+        this.offYaw = wrapAngle(this.yaw - chaseYaw(yawOfQuat(st.q), st.vx, st.vz, st.speed));
+        this.offPitch = 0;
+        this.idle = 0;
+      } else if (!this.wasInVehicle) this.offYaw = wrapAngle(this.yaw - chaseYaw(yawOfQuat(st.q), st.vx, st.vz, st.speed));
       const speed = Math.hypot(st.vx, st.vz);
       if (this.look.yaw || this.look.pitch) {
         this.offYaw += this.look.yaw;
@@ -108,6 +128,7 @@ export class CameraRig implements System {
       if (this.wasInVehicle) this.offYaw = this.offPitch = 0;
     }
     this.wasInVehicle = v.inVehicle;
+    this.wasAiming = false;
 
     // The arm the sim will probe next, and the clear length it reported for the last one.
     g.cameraArm.yaw = this.yaw;
@@ -122,5 +143,52 @@ export class CameraRig implements System {
       camera.fov = this.fov;
       camera.updateProjectionMatrix();
     }
+  }
+
+  /**
+   * Over the shoulder: close behind the character (or the driver), a shoulder to the right, a
+   * tighter field of view. The crosshair is the middle of the screen; the sim rebuilds the same ray
+   * from the yaw and pitch sent with each command (shared/aim.ts), so the bullet goes where it points.
+   */
+  private aimCamera(dt: number) {
+    const g = this.game;
+    const v = g.view;
+    const ped = v.ped!;
+    const aim = g.aim;
+    // Recoil kicks the aim itself; the player pulls it back down on their own, and a share of it comes back by itself.
+    this.yaw += this.look.yaw + aim.kickYaw * DEG;
+    const kick = aim.kickPitch * DEG;
+    this.pitch = clamp(this.pitch + this.look.pitch + kick, AIM.pitchMin, AIM.pitchMax);
+    this.recoil += kick;
+    aim.kickPitch = aim.kickYaw = 0;
+    const back = this.recoil * Math.min(1, dt * 5);
+    this.recoil -= back;
+    this.pitch = clamp(this.pitch - back * 0.55, AIM.pitchMin, AIM.pitchMax);
+
+    const inCar = v.inVehicle;
+    const wanted = inCar ? AIM.armCar : AIM.arm;
+    g.cameraArm.yaw = this.yaw;
+    g.cameraArm.pitch = this.pitch;
+    g.cameraArm.dist = wanted + 0.4;
+    const limit = Math.max(0.3, Math.min(wanted, v.camClear - 0.4));
+    this.arm = limit < this.arm ? limit : this.arm + (limit - this.arm) * damp(10, dt);
+    const f = viewDirection(this.yaw, this.pitch);
+    const r = viewRight(this.yaw);
+    const shoulder = inCar ? AIM.shoulderCar : AIM.shoulder;
+    const camera = g.camera;
+    camera.position.set(
+      ped.x - f.x * this.arm + r.x * shoulder,
+      ped.y + (inCar ? AIM.pivotCar : AIM.pivotFoot) - f.y * this.arm,
+      ped.z - f.z * this.arm + r.z * shoulder,
+    );
+    camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+    this.fov += (AIM.fov - this.fov) * damp(12, dt);
+    if (Math.abs(camera.fov - this.fov) > 0.01) {
+      camera.fov = this.fov;
+      camera.updateProjectionMatrix();
+    }
+    this.wasAiming = true;
+    this.wasInVehicle = inCar;
+    this.idle = 0;
   }
 }

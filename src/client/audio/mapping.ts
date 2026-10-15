@@ -61,6 +61,18 @@ export function distanceGain(distance: number): number {
   return 1 / (1 + Math.max(0, distance) / 10);
 }
 
+/** Level of a gunshot at a distance, 0 to 1: gunfire carries, so it falls off slower than a thud and is gone past about 400 m. */
+export function gunshotGain(distance: number): number {
+  const d = Math.max(0, distance);
+  if (d > 420) return 0;
+  return Math.pow(1 / (1 + d / 28), 1.15);
+}
+
+/** Low-pass cutoff of a gunshot at a distance, Hz: far shots lose their crack and go dull. */
+export function gunshotFilterHz(distance: number): number {
+  return Math.min(16000, Math.max(650, 16000 / (1 + Math.max(0, distance) / 18)));
+}
+
 /**
  * Doppler pitch factor for a source moving at `radialSpeed` (m/s, positive when it is closing on
  * the listener). Clamped, so a sim glitch cannot send the pitch to infinity.

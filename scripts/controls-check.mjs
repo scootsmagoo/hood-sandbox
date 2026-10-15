@@ -51,10 +51,14 @@ async function main() {
   console.log(`browser: ${browserName} ${browser.version()}`);
   let failures = 0;
   if (args.only === 'traffic') failures += await trafficSuite();
+  else if (args.only === 'guns') failures += await gunSuite();
+  else if (args.only === 'police') failures += await policeSuite();
   else {
   for (const t of transports) failures += await suite(t);
   if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/tile.json'))) failures += await realTile();
   else console.log('\n(no baked tile in public/tiles: skipping the real-tile check)');
+  failures += await gunSuite();
+  failures += await policeSuite();
   }
   await browser.close();
   if (server) await server.close();
@@ -1088,6 +1092,662 @@ async function lawSuite(kind) {
         await wait(70);
       }
       expect(seenOpacity.size === 2, `the stars did not flash (${[...seenOpacity]})`);
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+  return fails;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Guns: switch weapon, aim and fire at a ped, reload, a gamepad aim with lock-on, cover, a drive-by, and the touch buttons
+
+async function gunSuite() {
+  console.log('\n=== guns ===');
+  const qs = 'tile=none&graphics=low&transport=loopback&ambient=0&traffic=0&parked=0';
+  const sim = (page, fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  const game = (page, fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game, ${JSON.stringify(arg ?? null)})`);
+  const aim = (page) => game(page, (g) => ({ active: g.aim.active, weapon: g.aim.weapon?.id ?? null, mag: g.aim.mag, reserve: g.aim.reserve, lock: g.aim.lock, reload: g.aim.reload, inCover: g.aim.inCover, crouched: g.aim.crouched, fov: g.camera.fov, owned: g.aim.owned }));
+  const events = (page, type) => page.evaluate((t) => window.__events.filter((e) => e.type === t), type);
+  /** Looks along +Z (a camera at yaw PI) and stands a ped ahead: `dist` metres on, `side` metres to the camera's right. */
+  const look = (page) => game(page, (g) => { g.cameraRig.yaw = Math.PI; g.cameraRig.pitch = 0; });
+  const putNpc = (page, dist, side) => sim(page, (S, a) => {
+    const c = S.registry.get(S.playerPedId).controller;
+    // The camera's right at yaw PI is -X; it looks along +Z.
+    const x = c.x - a.side;
+    const z = c.z + a.dist;
+    const n = S.addPed(x, S.groundAt(x, z), z, Math.PI, 3, true);
+    n.brain.enter('idle');
+    return n.id;
+  }, { dist, side });
+  const healthOf = (page, id) => sim(page, (S, i) => { const n = S.registry.get(i); return n ? { health: n.health, life: n.life } : null; }, id);
+  const SHOULDER = 0.85;
+  let fails = 0;
+
+  // ---- the keyboard
+  {
+    const { page, errors, ctx } = await open(`${qs}&weapons=all&driver=flee`);
+    const c = makeChecker(page, 'guns-keys');
+    const { check, tap, wait, expect, k } = c;
+    await wait(800);
+    await installEventLog(page);
+    await look(page);
+    await page.keyboard.press('KeyH');
+    await check('starts armed: a pistol with a full magazine and spare rounds', async () => {
+      const a = await aim(page);
+      expect(a.weapon === 'pistol', `weapon ${a.weapon}`);
+      expect(a.mag === 12 && a.reserve === 48, `ammo ${a.mag} / ${a.reserve}`);
+      expect(a.owned === 15, `owned mask ${a.owned} (?weapons=all)`);
+      const hud = await page.evaluate(() => document.querySelector('.gun-ammo .mag')?.textContent);
+      expect(hud === '12', `HUD shows ${hud}`);
+    });
+    await check('number keys switch weapon, the brackets and the wheel (aiming) cycle', async () => {
+      for (const [key, id] of [['Digit2', 'smg'], ['Digit3', 'shotgun'], ['Digit4', 'rifle'], ['Digit1', 'pistol']]) {
+        await tap(key);
+        await wait(150);
+        expect((await aim(page)).weapon === id, `${key} gave ${(await aim(page)).weapon}, wanted ${id}`);
+      }
+      await tap('BracketRight');
+      await wait(150);
+      expect((await aim(page)).weapon === 'smg', '] did not go to the next weapon');
+      await tap('BracketLeft');
+      await wait(150);
+      expect((await aim(page)).weapon === 'pistol', '[ did not go back');
+      // The wheel zooms the camera, except while aiming, when it changes weapon.
+      await k.down('KeyZ');
+      await wait(250);
+      await page.mouse.move(500, 300);
+      await page.mouse.wheel(0, 240);
+      await wait(300);
+      const w = (await aim(page)).weapon;
+      await k.up('KeyZ');
+      expect(w === 'smg', `scrolling while aiming gave ${w}`);
+      await tap('Digit1');
+      await wait(700);
+    });
+    await check('Z aims: the camera narrows its view, the crosshair appears, the player raises the gun', async () => {
+      const before = await aim(page);
+      await k.down('KeyZ');
+      await wait(600);
+      const a = await aim(page);
+      const x = await page.evaluate(() => document.querySelector('.xhair')?.classList.contains('on'));
+      const flag = await page.evaluate((id) => !!(window.__hood.game.view.entities.get(id).flags & (1 << 14)), await sim(page, (S) => S.playerPedId));
+      await k.up('KeyZ');
+      expect(a.active && !before.active, 'the aim camera did not come up');
+      expect(a.fov < before.fov - 8, `fov ${before.fov} -> ${a.fov}`);
+      expect(x, 'no crosshair');
+      expect(flag, 'the ped is not aiming in the snapshot');
+      await wait(500);
+      expect(!(await aim(page)).active, 'the camera stayed in aim mode');
+      return `fov ${before.fov.toFixed(0)} -> ${a.fov.toFixed(0)}`;
+    });
+    let npc = 0;
+    await check('aim and fire at a ped: it takes damage from a bullet, the magazine counts down, the ped flinches or falls', async () => {
+      npc = await putNpc(page, 12, SHOULDER);
+      await wait(300);
+      await look(page);
+      await k.down('KeyZ');
+      await wait(700);
+      await tap('KeyG');
+      await wait(300);
+      await k.up('KeyZ');
+      const fires = await events(page, 'weapon:fire');
+      const dmg = (await events(page, 'damage')).filter((d) => d.kind === 'bullet' && d.targetId === npc);
+      const a = await aim(page);
+      expect(fires.length === 1, `${fires.length} shots`);
+      expect(dmg.length >= 1, `no bullet damage on the ped (impacts ${JSON.stringify(fires[0]?.impacts?.map((i) => i.kind))})`);
+      expect(a.mag === 11, `magazine ${a.mag}`);
+      const n = await healthOf(page, npc);
+      expect(n.health < 100, `health ${n.health}`);
+      return `damage ${dmg[0].amount}, ped health ${n.health.toFixed(0)}, ${a.mag} / ${a.reserve}`;
+    });
+    await check('the shot is a crime: the stars come up once someone calls it in', async () => {
+      await page.waitForFunction(() => window.__hood.game.view.heat >= 1, null, { timeout: 15000 });
+    });
+    await check('T reloads: the click, the bar, then a full magazine from the spare rounds', async () => {
+      await wait(700);
+      const before = await aim(page);
+      await tap('KeyT');
+      await wait(400);
+      const mid = await aim(page);
+      await wait(1500);
+      const after = await aim(page);
+      expect(before.mag < 12, `magazine was ${before.mag}`);
+      expect(mid.reload > 0 && mid.reload < 1, `reload progress ${mid.reload}`);
+      expect(after.mag === 12 && after.reload === 0, `after: ${after.mag} reload ${after.reload}`);
+      expect(after.reserve === before.reserve - (12 - before.mag), `reserve ${before.reserve} -> ${after.reserve}`);
+      expect((await events(page, 'weapon:reload')).length >= 1, 'no weapon:reload event');
+    });
+    await check('the SMG fires on while the key is held, and bloom widens the crosshair', async () => {
+      await tap('Digit2');
+      await wait(800);
+      await look(page);
+      await k.down('KeyZ');
+      await wait(500);
+      const gap0 = await page.evaluate(() => parseFloat(document.querySelector('.xhair').style.getPropertyValue('--gap')));
+      const f0 = (await events(page, 'weapon:fire')).length;
+      await k.down('KeyG');
+      await wait(700);
+      const gap1 = await page.evaluate(() => parseFloat(document.querySelector('.xhair').style.getPropertyValue('--gap')));
+      await k.up('KeyG');
+      await k.up('KeyZ');
+      const n = (await events(page, 'weapon:fire')).length - f0;
+      expect(n >= 5, `${n} shots in 0.7 s`);
+      expect(gap1 > gap0, `crosshair gap ${gap0} -> ${gap1}`);
+      return `${n} shots, gap ${gap0}px -> ${gap1}px`;
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- a pad: LT aims and a threat near the crosshair is locked, RT fires and hits it; the mouse gets almost none of that help
+  {
+    const { page, errors, ctx } = await open(`${qs}&driver=flee`, true);
+    const c = makeChecker(page, 'guns-pad');
+    const { check, wait, expect, k } = c;
+    const trigger = (i, v) => page.evaluate(([i, v]) => { window.__pad.buttons[i] = { pressed: v > 0.5, touched: v > 0, value: v }; }, [i, v]);
+    const press = (i, on) => page.evaluate(([i, on]) => { window.__pad.buttons[i] = { pressed: on, touched: on, value: on ? 1 : 0 }; }, [i, on]);
+    await wait(800);
+    await installEventLog(page);
+    await look(page);
+    await page.keyboard.press('KeyH');
+    // A ped about 9 degrees off the crosshair: far outside what a mouse would be pulled to.
+    const npc = await putNpc(page, 20, SHOULDER + 3.2);
+    await wait(500);
+    await check('LT aims; a pad wakes the strong lock-on and marks the target', async () => {
+      await trigger(6, 1);
+      await wait(900);
+      const a = await aim(page);
+      const marker = await page.evaluate(() => document.querySelector('.gun-lock')?.classList.contains('on'));
+      expect(a.active, 'LT did not aim');
+      expect(a.lock === npc, `locked ${a.lock}, wanted ${npc}`);
+      expect(marker, 'no lock-on marker on screen');
+    });
+    await check('RT fires and the lock-on carries the shot to the target', async () => {
+      await trigger(7, 1);
+      await wait(120);
+      await trigger(7, 0);
+      await wait(400);
+      const dmg = (await events(page, 'damage')).filter((d) => d.kind === 'bullet' && d.targetId === npc);
+      expect(dmg.length >= 1, 'the shot missed the locked target');
+    });
+    await check('X while aiming reloads; D-pad right draws the next weapon; LT up lowers the gun', async () => {
+      await wait(500);
+      await press(2, true);
+      await wait(120);
+      await press(2, false);
+      await wait(300);
+      expect((await events(page, 'weapon:reload')).length >= 1, 'X did not reload');
+      await trigger(6, 0);
+      await wait(1800);
+      const owned = (await aim(page)).weapon;
+      await press(15, true);
+      await wait(120);
+      await press(15, false);
+      await wait(300);
+      // Only the pistol is carried (no ?weapons=all here), so the cycle stays put.
+      expect((await aim(page)).weapon === owned, 'the weapon changed with only one carried');
+      expect(!(await aim(page)).active, 'still aiming after LT came up');
+    });
+    await check('with the mouse and keys the same target 9 degrees away is not locked', async () => {
+      await k.down('KeyZ');
+      await wait(700);
+      const a = await aim(page);
+      await k.up('KeyZ');
+      expect(a.lock === 0, `locked ${a.lock} on a keyboard`);
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- cover: X at a wall crouches behind the low one on the test ground, Z stands up over it, X leaves
+  {
+    const { page, errors, ctx } = await open(`${qs}&driver=flee`);
+    const c = makeChecker(page, 'guns-cover');
+    const { check, tap, wait, expect, k } = c;
+    await wait(800);
+    await installEventLog(page);
+    await page.keyboard.press('KeyH');
+    // The test ground has a 1 m wall at (-14, 10), 6 m long, 0.6 m thick: stand 1.5 m south of it.
+    await sim(page, (S) => { S.registry.get(S.playerPedId).controller.teleport(-14, 0.1, 8.2, 0); });
+    await look(page);
+    await wait(500);
+    await check('X at a low wall crouches behind it', async () => {
+      await tap('KeyX');
+      await wait(500);
+      const a = await aim(page);
+      expect(a.crouched && !a.inCover, `crouched ${a.crouched} inCover ${a.inCover}`);
+      expect((await events(page, 'cover:enter')).length === 1, 'no cover:enter');
+      const prompt = await page.evaluate(() => document.querySelector('.gun-cover')?.textContent);
+      expect(/In cover/.test(prompt), `prompt "${prompt}"`);
+    });
+    await check('A and D slide along the wall, and it stops at the end', async () => {
+      const x0 = (await page.evaluate(STATE)).ped.x;
+      await k.down('KeyD');
+      await wait(1200);
+      await k.up('KeyD');
+      const x1 = (await page.evaluate(STATE)).ped.x;
+      const z1 = (await page.evaluate(STATE)).ped.z;
+      expect(Math.abs(x1 - x0) > 0.8, `moved ${(x1 - x0).toFixed(2)} m along the wall`);
+      expect(Math.abs(z1 - 9.28) < 0.3, `drifted off the wall to z ${z1.toFixed(2)} (its face is at 9.7)`);
+      await k.down('KeyD');
+      await wait(5000);
+      await k.up('KeyD');
+      const x2 = (await page.evaluate(STATE)).ped.x;
+      expect(x2 > -17.3 && x2 < -10.7, `walked off the wall's end to x ${x2.toFixed(2)}`);
+    });
+    await check('Z stands up to shoot over the wall (the crouch ends while aiming)', async () => {
+      await look(page);
+      await k.down('KeyZ');
+      await wait(600);
+      const a = await aim(page);
+      await k.up('KeyZ');
+      expect(a.active && !a.crouched && a.inCover === false, `aim ${JSON.stringify(a)}`);
+      await wait(400);
+      expect((await aim(page)).crouched, 'did not crouch again after lowering the gun');
+    });
+    await check('X leaves cover', async () => {
+      await tap('KeyX');
+      await wait(400);
+      const a = await aim(page);
+      expect(!a.crouched && !a.inCover, 'still in cover');
+      expect((await events(page, 'cover:exit')).length === 1, 'no cover:exit');
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- a drive-by: Z from the driver's seat with a pistol; a rifle will not come out
+  {
+    const { page, errors, ctx } = await open(`${qs}&start=car&weapons=all`);
+    const c = makeChecker(page, 'guns-driveby');
+    const { check, tap, wait, expect, k } = c;
+    await wait(800);
+    await installEventLog(page);
+    await page.keyboard.press('KeyH');
+    await tap('KeyE');
+    await wait(500);
+    await check('in the car, aim brings up the camera inside the cabin', async () => {
+      expect((await page.evaluate(STATE)).inCar, 'not in the car');
+      await k.down('KeyZ');
+      await wait(700);
+      const a = await aim(page);
+      await k.up('KeyZ');
+      expect(a.active, 'no aim camera from the car');
+      expect(a.fov < 55, `fov ${a.fov}`);
+    });
+    await check('a drive-by shoots out of the window at a ped beside the car', async () => {
+      // Put a ped 8 m off the car's right and aim along the line to it.
+      const id = await sim(page, (S) => {
+        const v = S.registry.get(S.vehicleId);
+        const q = v.car.pose();
+        const rx = -(1 - 2 * (q.q.y * q.q.y + q.q.z * q.q.z));
+        const rz = -(2 * (q.q.x * q.q.z - q.q.w * q.q.y));
+        const x = q.x + rx * 8;
+        const z = q.z + rz * 8;
+        const n = S.addPed(x, S.groundAt(x, z), z, 0, 3, true);
+        n.brain.enter('idle');
+        return n.id;
+      });
+      await wait(400);
+      await game(page, (g, id) => {
+        const S = g.transport.host.simulation;
+        const n = S.registry.get(id).controller;
+        const p = S.registry.get(S.playerPedId).controller;
+        g.cameraRig.yaw = Math.atan2(-(n.x - p.x), -(n.z - p.z));
+        g.cameraRig.pitch = Math.atan2(n.y + 1.2 - (p.y + 1.35), Math.hypot(n.x - p.x, n.z - p.z));
+      }, id);
+      await k.down('KeyZ');
+      await wait(700);
+      await tap('KeyG');
+      await wait(300);
+      await k.up('KeyZ');
+      const fires = await events(page, 'weapon:fire');
+      const dmg = (await events(page, 'damage')).filter((d) => d.kind === 'bullet' && d.targetId === id);
+      expect(fires.length >= 1, 'no shot from the car');
+      expect(dmg.length >= 1, `the drive-by missed (impacts ${JSON.stringify(fires[0]?.impacts?.map((i) => i.kind))})`);
+    });
+    await check('a rifle will not come out of the window, and a held aim draws the pistol or SMG instead', async () => {
+      await tap('Digit4');
+      await wait(400);
+      expect((await aim(page)).weapon !== 'rifle', 'the rifle was drawn in a car');
+      await tap('Digit3');
+      await wait(400);
+      expect((await aim(page)).weapon !== 'shotgun', 'the shotgun was drawn in a car');
+      await tap('Digit2');
+      await wait(400);
+      expect((await aim(page)).weapon === 'smg', 'the SMG is allowed from a car');
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- a touch screen: the gun buttons, aim as a toggle, fire with a lock-on
+  {
+    const ctx = await browser.newContext({ viewport: { width: 900, height: 480 }, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(`${base}?${qs}&driver=flee`);
+    await page.waitForFunction(() => window.__hood?.ready || window.__hood?.error, null, { timeout: 120000 });
+    const c = makeChecker(page, 'guns-touch');
+    const { check, wait, expect } = c;
+    await wait(800);
+    await installEventLog(page);
+    await look(page);
+    const centre = (sel) => page.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, sel);
+    const tapBtn = async (sel) => { const p = await centre(sel); await page.touchscreen.tap(p.x, p.y); };
+    const npc = await putNpc(page, 14, SHOULDER + 2.4);
+    await wait(500);
+    await check('the touch screen shows the gun buttons', async () => {
+      for (const sel of ['.b-fire', '.b-aim', '.b-reload', '.b-weapon', '.b-cover']) expect(await page.evaluate((s) => !!document.querySelector(s) && document.querySelector(s).offsetWidth > 0, sel), `${sel} is not on screen`);
+    });
+    await check('Aim is a toggle: a tap raises the gun and a tap lowers it', async () => {
+      await tapBtn('.b-aim');
+      await wait(700);
+      expect((await aim(page)).active, 'the aim button did not raise the gun');
+      expect(await page.evaluate(() => document.querySelector('.b-aim').classList.contains('on')), 'the button does not show it is on');
+    });
+    await check('Fire with the finger lock-on hits a ped a few degrees off the crosshair', async () => {
+      await tapBtn('.b-fire');
+      await wait(500);
+      const dmg = (await events(page, 'damage')).filter((d) => d.kind === 'bullet' && d.targetId === npc);
+      expect(dmg.length >= 1, 'the lock-on did not carry the shot');
+      expect((await aim(page)).lock === npc, 'no lock');
+    });
+    await check('Reload works from its button, and a second tap on Aim lowers the gun', async () => {
+      await tapBtn('.b-reload');
+      await wait(300);
+      expect((await events(page, 'weapon:reload')).length >= 1, 'no reload');
+      await tapBtn('.b-aim');
+      await wait(500);
+      expect(!(await aim(page)).active, 'the gun is still up');
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+  return fails;
+}
+
+// ------------------------------------------------------------------------------------------------
+// The police escalation: a roadblock and a helicopter at heat 3, a PIT on the freeway, being shot at
+
+/**
+ * On the baked tile with the sim on the main thread, stepped by hand (`host.advance`) so each scene is exact: the player's car is driven
+ * by commands through the real input path (`host.input`: throttle, brake and steer axes from the police's own route prediction), and what
+ * the client sees (the entities and flags of its interpolated view, the HUD) is read back from the page.
+ */
+async function policeSuite() {
+  console.log('\n=== police escalation ===');
+  if (!existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/tile.json'))) {
+    console.log('(no baked tile in public/tiles: skipping)');
+    return 0;
+  }
+  const qs = 'graphics=low&transport=loopback&ambient=0&traffic=0&parked=0&time=14:00&timescale=0';
+  const sim = (page, fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host, window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  const bot = () => {
+    window.__bot = {
+      speed: 14,
+      n: 100000,
+      step(host, S) {
+        const v = S.registry.get(S.vehicleId);
+        const p = v.car.pose();
+        const sp = v.car.speedForward;
+        const path = S.police.nav.predict(p.x, p.z, v.car.yaw, 0, 60);
+        const a = path[Math.min(path.length - 1, 5)] ?? { x: p.x + Math.sin(v.car.yaw), z: p.z + Math.cos(v.car.yaw) };
+        let err = Math.atan2(a.x - p.x, a.z - p.z) - v.car.yaw;
+        err = Math.atan2(Math.sin(err), Math.cos(err));
+        const steer = Math.max(-1, Math.min(1, -err * 2.2));
+        const thr = Math.max(0, Math.min(1, (this.speed - sp) * 0.5));
+        const brk = Math.max(0, Math.min(1, (sp - this.speed - 1.5) * 0.3));
+        host.input({ tick: ++this.n, buttons: 0, axes: [0, 0, 0, 0, thr, brk, steer, 14, 0] });
+        host.advance(1);
+        S.registry.get(S.playerPedId).armour = 1e9;
+      },
+      run(host, S, ticks, until) {
+        for (let i = 0; i < ticks; i++) {
+          this.step(host, S);
+          if (until && until()) return i;
+        }
+        return -1;
+      },
+      park(host, S, ticks) {
+        for (let i = 0; i < ticks; i++) {
+          host.input({ tick: ++this.n, buttons: 8, axes: [0, 0, 0, 0, 0, 0, 0, 14, 0] });
+          host.advance(1);
+        }
+      },
+    };
+  };
+  const sceneOpen = async (extra = '') => {
+    const o = await open(`${qs}${extra}`);
+    await o.page.evaluate(() => window.__hood.game.transport.host.stop());
+    await o.page.evaluate(bot);
+    await installEventLog(o.page);
+    return o;
+  };
+  const getIn = async (page) => {
+    await page.keyboard.down('KeyE');
+    await page.waitForTimeout(100);
+    await page.keyboard.up('KeyE');
+    await sim(page, (host) => host.advance(40));
+  };
+  let fails = 0;
+
+  // ---- heat 3: a roadblock laid ahead of the car, and a helicopter overhead
+  {
+    const { page, errors, ctx } = await sceneOpen('&start=car');
+    const c = makeChecker(page, 'police-heat3');
+    const { check, wait, expect } = c;
+    await getIn(page);
+    let info = null;
+    await check('heat 3 with the police in sight: a roadblock is laid 150 to 250 m ahead, out of view', async () => {
+      info = await sim(page, (host, S) => {
+        S.police.spikes.enabled = true;
+        const p = S.registry.get(S.playerPedId).controller;
+        S.law.heat.report(3, 4, p.x, p.z, true);
+        // wait where they are until the police arrive and see them, then go
+        for (let i = 0; i < 60 * 25 && !S.police.seesPlayer; i += 10) window.__bot.park(host, S, 10);
+        window.__bot.speed = 13;
+        let at = null;
+        const t = window.__bot.run(host, S, 60 * 40, () => {
+          const b = S.police.roadblocks.blocks[0];
+          if (b && !at) {
+            // how far along the route the player is on it (the nearest point of the predicted route to the block)
+            const pl = S.police.predicted();
+            let along = -1;
+            if (pl) {
+              let best = Infinity;
+              for (let k = 0; k < pl.pts.length; k++) {
+                const d = Math.hypot(pl.pts[k].x - b.x, pl.pts[k].z - b.z);
+                if (d < best) {
+                  best = d;
+                  along = pl.cum[k];
+                }
+              }
+            }
+            const q = S.registry.get(S.vehicleId).car.pose();
+            at = { straight: Math.hypot(b.x - q.x, b.z - q.z), along, cars: b.unitIds.length };
+          }
+          return !!at;
+        });
+        return { t, at, seen: S.police.seesPlayer };
+      });
+      expect(info.at, `no roadblock within 40 s (${JSON.stringify(info)})`);
+      const d = info.at.along;
+      expect(d > 145 && d < 260, `laid ${d.toFixed(0)} m along the route (${info.at.straight.toFixed(0)} m in a straight line)`);
+      expect(info.at.cars >= 1 && info.at.cars <= 3, `${info.at.cars} cars`);
+      return `${d.toFixed(0)} m along the route (${info.at.straight.toFixed(0)} m straight), ${info.at.cars} cars`;
+    });
+    await wait(700);
+    await check('the client has the roadblock: flagged cars with officers behind them, a spike strip, the counts in the header', async () => {
+      const v = await page.evaluate(() => {
+        const g = window.__hood.game;
+        const ents = [...g.view.entities.values()];
+        return { blockCars: ents.filter((e) => e.kind === 2 && (e.flags & (1 << 14)) !== 0).length, strips: ents.filter((e) => e.kind === 4).length, header: { rb: g.view.roadblocks, he: g.view.helicopters, st: g.view.strips } };
+      });
+      expect(v.blockCars >= 1, `no roadblock car flagged in the client's view (${JSON.stringify(v)})`);
+      expect(v.header.rb >= 1, `header roadblocks ${v.header.rb}`);
+      return `${v.blockCars} cars, ${v.strips} strips, header ${JSON.stringify(v.header)}`;
+    });
+    await check('a helicopter is up, kinematic, drawn from the snapshot with its definition', async () => {
+      const v = await page.evaluate(() => {
+        const g = window.__hood.game;
+        const h = [...g.view.entities.values()].find((e) => e.kind === 3);
+        return h && { agl: h.aux1, def: g.view.defs.get(h.id)?.typeId, header: g.view.helicopters };
+      });
+      expect(v, 'no helicopter entity in the client view');
+      expect(v.def === 'helicopter' && v.header >= 1, JSON.stringify(v));
+      return `agl ${v.agl.toFixed(0)} m`;
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- a PIT by the Highway Patrol on the freeway
+  {
+    const { page, errors, ctx } = await sceneOpen('&start=car');
+    const c = makeChecker(page, 'police-pit');
+    const { check, wait, expect } = c;
+    await getIn(page);
+    await check('on the freeway the Highway Patrol (GHP) runs alongside, matches speed and PITs: the car is spun', async () => {
+      const r = await sim(page, (host, S) => {
+        const v = S.registry.get(S.vehicleId);
+        const rd = S.tile.roads.filter((x) => x.class === 'motorway' && !x.bridge && x.points.length > 6).sort((a, b) => Math.hypot(b.points[b.points.length - 1][0] - b.points[0][0], b.points[b.points.length - 1][2] - b.points[0][2]) - Math.hypot(a.points[a.points.length - 1][0] - a.points[0][0], a.points[a.points.length - 1][2] - a.points[0][2]))[0];
+        const cum = [0];
+        for (let i = 1; i < rd.points.length; i++) cum.push(cum[i - 1] + Math.hypot(rd.points[i][0] - rd.points[i - 1][0], rd.points[i][2] - rd.points[i - 1][2]));
+        const at = (d) => {
+          let i = 1;
+          while (i < cum.length - 1 && cum[i] < d) i++;
+          const k = (d - cum[i - 1]) / (cum[i] - cum[i - 1]);
+          const p0 = rd.points[i - 1];
+          const p1 = rd.points[i];
+          return { x: p0[0] + (p1[0] - p0[0]) * k, y: p0[1] + (p1[1] - p0[1]) * k, z: p0[2] + (p1[2] - p0[2]) * k, yaw: Math.atan2(p1[0] - p0[0], p1[2] - p0[2]) };
+        };
+        const h0 = at(75);
+        v.car.teleport(h0.x, h0.y + 0.7, h0.z, h0.yaw);
+        v.car.body.setLinvel({ x: Math.sin(h0.yaw) * 15, y: 0, z: Math.cos(h0.yaw) * 15 }, true);
+        v.car.adopt();
+        window.__bot.speed = 15;
+        host.advance(5);
+        S.law.heat.report(2, 4, h0.x, h0.z, true);
+        S.police.roadblocks.enabled = false;
+        S.police.heli.enabled = false;
+        S.police.spikes.enabled = false;
+        const ghp = S.law.data.agencies.find((x) => x.id === 'ghp');
+        const c0 = at(30);
+        const u = S.police.deployUnit(ghp, c0.x, c0.z, c0.yaw, 'shotgun');
+        const cop = S.registry.get(u.vehicleId);
+        cop.car.teleport(c0.x, c0.y + 0.7, c0.z, c0.yaw);
+        cop.car.body.setLinvel({ x: Math.sin(c0.yaw) * 19, y: 0, z: Math.cos(c0.yaw) * 19 }, true);
+        cop.car.adopt();
+        let maxDev = 0;
+        let alignAtStrike = -1;
+        window.__bot.run(host, S, 60 * 20, () => {
+          if (u.pit?.struck && alignAtStrike < 0) alignAtStrike = u.pit.alignT;
+          maxDev = Math.max(maxDev, Math.abs(Math.atan2(Math.sin(v.car.yaw - h0.yaw), Math.cos(v.car.yaw - h0.yaw))));
+          return u.pit === null && S.police.stats.pitHits > 0 && maxDev > 2.4;
+        });
+        return { agency: u.agency.id, hits: S.police.stats.pitHits, attempts: S.police.stats.pitAttempts, maxDevDeg: Math.round((maxDev * 180) / Math.PI), alignAtStrike };
+      });
+      expect(r.agency === 'ghp', `agency ${r.agency}`);
+      expect(r.attempts >= 1 && r.hits >= 1, `PIT attempts ${r.attempts}, hits ${r.hits}`);
+      expect(r.alignAtStrike >= 1.3, `struck after only ${r.alignAtStrike}s alongside`);
+      expect(r.maxDevDeg > 100, `the car turned only ${r.maxDevDeg} degrees`);
+      return `spun ${r.maxDevDeg} degrees, ${r.alignAtStrike.toFixed(1)} s alongside before the strike`;
+    });
+    await wait(500);
+    await check('the client heard it: police:pit attempt and hit, and the cruiser is in the Highway Patrol livery', async () => {
+      const ev = await page.evaluate(() => window.__events.filter((e) => e.type === 'police:pit').map((e) => e.phase));
+      expect(ev.includes('attempt') && ev.includes('hit'), `events ${ev}`);
+      const liv = await page.evaluate(() => [...window.__hood.game.view.defs.values()].find((d) => d.police && d.police.agency === 'ghp')?.police.body);
+      expect(liv === 0x1f4d3a, `GHP body colour ${liv}`);
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
+    });
+    await ctx.close();
+    fails += c.fails();
+  }
+
+  // ---- being shot at
+  {
+    const { page, errors, ctx } = await sceneOpen('');
+    const c = makeChecker(page, 'police-shot-at');
+    const { check, wait, expect } = c;
+    let r = null;
+    await check('heat 3 and an officer in the open with a clear line: he shoots through the weapons API, after a reaction time, and the player is hit', async () => {
+      r = await sim(page, (host, S) => {
+        const me = S.registry.get(S.playerPedId);
+        const c = me.controller;
+        S.police.roadblocks.enabled = false;
+        S.police.heli.enabled = false;
+        let spot = null;
+        for (let k = 0; k < 16 && !spot; k++) {
+          const a = (k / 16) * Math.PI * 2;
+          const x = c.x + Math.sin(a) * 13;
+          const z = c.z + Math.cos(a) * 13;
+          if (S.law.clearLine({ x: c.x, y: c.y + 1.4, z: c.z }, { x, y: S.groundAt(x, z) + 1.4, z }) && Math.abs(S.groundAt(x, z) - c.y) < 0.6) spot = { x, z };
+        }
+        const ag = S.law.data.agencies.find((x) => x.id === 'acp');
+        const block = { id: 99, x: spot.x, z: spot.z, dirX: 1, dirZ: 0, width: 8, unitIds: [], t0: 0, passedAt: 0, gap: null, stripId: 0 };
+        const u = S.police.spawnStatic(ag, 'pistol', { x: spot.x + 3, z: spot.z + 3, yaw: 0 }, { x: spot.x, z: spot.z, yaw: Math.atan2(c.x - spot.x, c.z - spot.z) }, block);
+        const o = S.registry.get(u.officerIds[0]);
+        S.law.heat.report(3, 4, c.x, c.z, true);
+        let sees = -1;
+        let fire = -1;
+        let hit = -1;
+        const emit = S.emit.bind(S);
+        S.emit = (e) => {
+          if (e.type === 'police:fire' && fire < 0) fire = S.tick;
+          if (e.type === 'damage' && e.kind === 'bullet' && e.targetId === me.id && hit < 0) hit = S.tick;
+          emit(e);
+        };
+        for (let i = 0; i < 60 * 20 && hit < 0; i++) {
+          host.advance(1);
+          me.armour = 0;
+          if (sees < 0 && o.officer.sees) sees = S.tick;
+        }
+        return { sees, fire, hit, officer: o.id, shots: S.police.fire.stats.shots, health: me.health };
+      });
+      expect(r.hit > 0, `the player was never hit (${JSON.stringify(r)})`);
+      const react = (r.fire - r.sees) / 60;
+      expect(react >= 0.45 && react <= 3, `first shot ${react.toFixed(2)} s after he saw them`);
+      return `first shot ${react.toFixed(2)} s after the sighting, ${r.shots} shots, health ${r.health.toFixed(0)}`;
+    });
+    await wait(700);
+    await check('the client saw the shots: police:fire from the officer, the weapons API\'s weapon:fire, and a bullet damage event on the player', async () => {
+      const ev = await page.evaluate((id) => ({
+        fired: window.__events.filter((e) => e.type === 'police:fire' && e.officerId === id).length,
+        bullets: window.__events.filter((e) => e.type === 'weapon:fire' && e.shooterId === id).length,
+        damage: window.__events.filter((e) => e.type === 'damage' && e.kind === 'bullet' && e.targetId === window.__hood.game.ready.playerId).length,
+      }), r.officer);
+      expect(ev.fired >= 1 && ev.bullets >= ev.fired && ev.damage >= 1, JSON.stringify(ev));
+      const h = await page.evaluate(HUD);
+      expect(h.health < 100, `HUD health ${h.health}`);
+      return JSON.stringify(ev);
+    });
+    await check('no console errors', async () => {
+      expect(errors.length === 0, errors.join(' | '));
     });
     await ctx.close();
     fails += c.fails();

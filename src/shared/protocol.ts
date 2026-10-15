@@ -7,6 +7,7 @@ import type { EntityDef } from './entityDefs';
 import type { EntityId } from './entities';
 import type { CrimeId } from './law';
 import type { TileManifest } from './tile';
+import type { WeaponId } from './weapons';
 
 export const SIM_HZ = 60;
 export const SIM_DT = 1 / SIM_HZ;
@@ -23,6 +24,20 @@ export const Button = {
   Horn: 1 << 5,
   /** On foot: throw a punch. */
   Melee: 1 << 6,
+  /** Hold the gun up (right mouse, left trigger, the touch aim button). Firing also raises it. */
+  Aim: 1 << 7,
+  /** Pull the trigger. */
+  Fire: 1 << 8,
+  Reload: 1 << 9,
+  /** Take cover at a wall in reach, or leave it. */
+  Cover: 1 << 10,
+  WeaponNext: 1 << 11,
+  WeaponPrev: 1 << 12,
+  /** Draw the weapon in slot 1 to 4 (the order of weapons.json). */
+  Slot1: 1 << 13,
+  Slot2: 1 << 14,
+  Slot3: 1 << 15,
+  Slot4: 1 << 16,
 } as const;
 
 /** Indices into `InputCommand.axes`. */
@@ -43,8 +58,10 @@ export const Axis = {
   Steer: 6,
   /** Wanted distance of the camera arm, so the sim can report how much of it is clear. */
   CamDist: 7,
+  /** How strongly the shot is bent toward a threat near the crosshair, 0 to 1: the device decides (mouse low, gamepad and touch high). */
+  AimAssist: 8,
 } as const;
-export const AXIS_COUNT = 8;
+export const AXIS_COUNT = 9;
 
 export interface InputCommand {
   /** Counts up with every command the sender makes. The sim drops older ones and reports the newest it applied (`ack`), which measures latency. */
@@ -92,7 +109,7 @@ export type SimEvent =
   /** The stand-in explosion: a flash, and the car is burnt out and disabled for good. */
   | { type: 'vehicle:explode'; tick: number; vehicleId: EntityId; x: number; y: number; z: number }
   /** A crime was committed (before anyone reports it). */
-  | { type: 'crime'; tick: number; crime: CrimeId; severity: number; heat: number; x: number; y: number; z: number; perpetratorId: EntityId; victimId: EntityId; vehicleId: EntityId; witnesses: number; description: CrimeDescription }
+  | { type: 'crime'; tick: number; crime: CrimeId; severity: number; heat: number; x: number; y: number; z: number; perpetratorId: EntityId; victimId: EntityId; vehicleId: EntityId; witnesses: number; /** How many of the witnesses only heard it (gunfire). */ heard?: number; description: CrimeDescription }
   /** A witness called it in, or police saw it. */
   | { type: 'crime:reported'; tick: number; crime: CrimeId; reporterId: EntityId; police: boolean; x: number; z: number }
   /** A witness who was going to call was knocked down or killed first. */
@@ -100,6 +117,22 @@ export type SimEvent =
   /** The heat level or its phase changed. `phase`: none, reported (hollow stars), seen (solid), lost (flashing). */
   | { type: 'heat:change'; tick: number; level: number; prevLevel: number; phase: HeatPhaseName; prevPhase: HeatPhaseName; reason: 'crime' | 'sighting' | 'lost' | 'cooldown' | 'busted' | 'wasted'; lastKnown: { x: number; z: number } | null }
   | { type: 'police:spawn'; tick: number; vehicleId: EntityId; officerIds: EntityId[]; agency: string }
+  /** A police car took a role in the chase (the first time, and whenever it changes). */
+  | { type: 'police:role'; tick: number; vehicleId: EntityId; role: 'responder' | 'chaser' | 'flanker' | 'blocker'; agency: string }
+  /** A PIT: `attempt` when the unit commits to the strike, `hit` when the target's car has been turned, `abort` when it gives up. */
+  | { type: 'police:pit'; tick: number; vehicleId: EntityId; targetId: EntityId; phase: 'attempt' | 'hit' | 'abort' }
+  /** A police car rammed the target. */
+  | { type: 'police:ram'; tick: number; vehicleId: EntityId; targetId: EntityId }
+  /** A roadblock was laid across the road ahead of the target; `gap` is the opening left to thread, or 0. */
+  | { type: 'police:roadblock'; tick: number; id: number; x: number; z: number; cars: number; gap: number; agency: string }
+  | { type: 'police:roadblock-clear'; tick: number; id: number; reason: 'passed' | 'expired' | 'stand-down' }
+  /** A spike strip was laid across a lane, and later picked up. */
+  | { type: 'police:spikes'; tick: number; id: EntityId; x: number; z: number; yaw: number; length: number }
+  | { type: 'police:spikes-clear'; tick: number; id: EntityId; used: boolean }
+  /** A helicopter joined the search, saw the target (`sees`), lost it, or left. */
+  | { type: 'police:helicopter'; tick: number; heliId: EntityId; state: 'inbound' | 'sees' | 'lost' | 'leaving' }
+  /** An officer fired at the player through the weapons API (the `weapon:fire` event carries the bullets). */
+  | { type: 'police:fire'; tick: number; officerId: EntityId; weapon: string; x: number; y: number; z: number; dx: number; dy: number; dz: number; targetId: EntityId; passenger: boolean }
   /** Units stood down and are leaving. */
   | { type: 'police:stand-down'; tick: number }
   /** An officer got out to chase on foot. */
@@ -110,14 +143,46 @@ export type SimEvent =
   | { type: 'traffic:honk'; tick: number; vehicleId: EntityId; x: number; z: number }
   /** A traffic driver reacted: braked hard, swerved, pulled over for the police or fled danger. */
   | { type: 'traffic:react'; tick: number; vehicleId: EntityId; reaction: 'brake' | 'swerve' | 'pullover' | 'flee'; x: number; z: number }
+  /**
+   * A shot was fired. (x, y, z) is the muzzle, (dx, dy, dz) the unit direction of the shot before spread, and `impacts` one entry per
+   * bullet (the shotgun's pellets are separate). The client draws the tracers, the flash and the puffs from it; the law hears it.
+   */
+  | { type: 'weapon:fire'; tick: number; shooterId: EntityId; weapon: WeaponId; x: number; y: number; z: number; dx: number; dy: number; dz: number; impacts: BulletImpact[] }
+  /** The trigger was pulled on an empty magazine. */
+  | { type: 'weapon:empty'; tick: number; pedId: EntityId; weapon: WeaponId }
+  | { type: 'weapon:reload'; tick: number; pedId: EntityId; weapon: WeaponId; durationS: number }
+  | { type: 'weapon:reloaded'; tick: number; pedId: EntityId; weapon: WeaponId; mag: number; reserve: number }
+  | { type: 'weapon:switch'; tick: number; pedId: EntityId; weapon: WeaponId }
+  /** A bullet shot a tyre out (wheel 0 and 1 are the front pair, left then right; 2 and 3 the rear). */
+  | { type: 'vehicle:tyre'; tick: number; vehicleId: EntityId; wheel: number; shooterId: EntityId }
+  | { type: 'cover:enter'; tick: number; pedId: EntityId; low: boolean; x: number; z: number; nx: number; nz: number }
+  | { type: 'cover:exit'; tick: number; pedId: EntityId }
   | { type: 'player:wasted'; tick: number; pedId: EntityId; x: number; y: number; z: number }
   | { type: 'player:busted'; tick: number; pedId: EntityId; officerId: EntityId }
   | { type: 'player:respawn'; tick: number; pedId: EntityId; reason: 'wasted' | 'busted'; x: number; y: number; z: number };
 
 export type PedReaction = 'flee' | 'cower' | 'film' | 'look' | 'startle';
-export type PedCause = 'violence' | 'carjack' | 'explosion' | 'crash' | 'wreck' | 'car-on-sidewalk' | 'fast-car';
+export type PedCause = 'violence' | 'carjack' | 'explosion' | 'crash' | 'wreck' | 'car-on-sidewalk' | 'fast-car' | 'gunfire';
 
-export type DamageKind = 'melee' | 'vehicle' | 'fall' | 'explosion' | 'fire';
+/** What a bullet landed on. */
+export type HitKind = 'none' | 'world' | 'ped' | 'vehicle';
+
+/** Where one bullet (or shotgun pellet) ended: a hit, or the point at the end of its range for a miss. */
+export interface BulletImpact {
+  kind: HitKind;
+  x: number;
+  y: number;
+  z: number;
+  /** Surface normal at the hit (zero for a miss). */
+  nx: number;
+  ny: number;
+  nz: number;
+  /** The ped or vehicle hit, or 0. */
+  targetId: EntityId;
+  headshot: boolean;
+}
+
+export type DamageKind = 'melee' | 'vehicle' | 'fall' | 'explosion' | 'fire' | 'bullet';
 export type HeatPhaseName = 'none' | 'reported' | 'seen' | 'lost';
 
 /** What the police know about the culprit. Each part can be cleared on its own later. */
@@ -153,6 +218,8 @@ export interface SimInit {
   bystanders?: number;
   /** Starting armour for the player, 0 to 100 (default 0). */
   armour?: number;
+  /** What the player starts with: `default` (a pistol and some rounds), `all` (every weapon) or `none`. `?weapons=` in the URL. */
+  weapons?: 'default' | 'all' | 'none';
   /** Ambient pedestrians from the tile's walk network and the city's population table (default on; `?ambient=0` turns them off). */
   ambientPeds?: boolean;
   /** Most ambient pedestrians at once (the graphics tier sets it: 60 on High). */

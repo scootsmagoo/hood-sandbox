@@ -1,0 +1,84 @@
+{
+  "_comment": "Engine table for the police escalation ladder (docs/contracts/law-data.md, 'Escalation rules'). Arrays indexed by heat level 0 to 6 (index 0 unused). The city pack decides who sends what (jurisdictions.json); this says what each heat level adds: roles, PIT, ramming, roadblocks, spike strips, helicopters, gunfire and how a search wears off. Distances in metres, speeds in m/s, times in seconds.",
+  "roles": {
+    "reassignEveryS": 1.5,
+    "holdS": 4,
+    "maxChasers": 2,
+    "maxBlockers": 2,
+    "flankerMinGapM": 30
+  },
+  "pit": {
+    "minHeat": 1,
+    "targetSpeed": [9, 46],
+    "rangeM": 45,
+    "approachOffsetM": 3.2,
+    "sideOffsetM": 1.9,
+    "matchSpeedBand": 4,
+    "strikeSteer": 0.8,
+    "attemptS": 7.5,
+    "cooldownS": 11,
+    "graceAfterHitS": 8,
+    "warnS": 1.4,
+    "contactSpin": 3.0
+  },
+  "ram": {
+    "minHeat": 4,
+    "rangeM": 14,
+    "cooldownS": 5,
+    "graceAfterHitS": 4,
+    "maxPlayerSpeedAdvantage": 4
+  },
+  "roadblock": {
+    "minHeat": 3,
+    "maxActive": [0, 0, 0, 1, 1, 2, 2],
+    "intervalS": [0, 0, 0, 40, 32, 26, 24],
+    "distanceM": [150, 250],
+    "cars": [2, 3],
+    "gapChance": [0, 0, 0, 0.6, 0.35, 0.1, 0],
+    "gapWidthM": 4.6,
+    "lifeS": 80,
+    "officersPerCar": 1
+  },
+  "spikes": {
+    "minHeat": 3,
+    "maxActive": [0, 0, 0, 1, 2, 2, 3],
+    "intervalS": [0, 0, 0, 30, 24, 20, 18],
+    "lifeS": 45,
+    "lengthM": 4.2,
+    "depthM": 0.8,
+    "beforeRoadblockM": 18,
+    "deployDistanceM": [95, 150]
+  },
+  "helicopter": {
+    "minHeat": 3,
+    "count": [0, 0, 0, 1, 1, 2, 2],
+    "altitudeM": [60, 90],
+    "speed": 42,
+    "accel": 11,
+    "orbitRadiusM": [35, 70],
+    "coneHalfDeg": 42,
+    "rangeM": 190,
+    "searchlightNight": 0.3,
+    "nightSightScale": 0.7,
+    "respawnS": 25
+  },
+  "fire": {
+    "minHeat": 3,
+    "reactionS": [0.5, 1.1],
+    "blockMarginM": 0.8,
+    "loadouts": {
+      "pistol": { "rangeM": 40, "intervalS": 0.32, "burst": [2, 4], "pauseS": [1.1, 2.3], "spreadDeg": 1.0 },
+      "shotgun": { "rangeM": 26, "intervalS": 0.95, "burst": [1, 2], "pauseS": [1.4, 2.6], "spreadDeg": 2.2 },
+      "rifle": { "rangeM": 70, "intervalS": 0.13, "burst": [3, 5], "pauseS": [1.2, 2.2], "spreadDeg": 0.5 }
+    },
+    "spreadPerMeterDeg": 0.04,
+    "spreadPerMpsDeg": 0.12,
+    "driveBySpeedPenaltyDeg": 1.5
+  },
+  "cooldown": {
+    "insideSearchFactor": 0.5,
+    "heliOverheadFactor": 0.3,
+    "heliOverheadM": 170,
+    "minHeatForSlow": 4
+  }
+}

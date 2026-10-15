@@ -15,8 +15,8 @@ export interface VehicleDef {
   readonly color: number;
   /** Registration plate (the description records it; the model may draw it later). */
   readonly plate: string;
-  /** A police car: the agency's livery and lightbar colours (0xRRGGBB). */
-  readonly police?: { agency: string; body: number; stripe: number; lightbar: [number, number] };
+  /** A police car: the agency's livery and lightbar colours (0xRRGGBB). An `unmarked` one has no stripe or lightbar until its lights are on, then two strobes in `lightbar`. */
+  readonly police?: { agency: string; body: number; stripe: number; lightbar: [number, number]; unmarked?: boolean };
 }
 
 export interface PedDef {
@@ -30,7 +30,25 @@ export interface PedDef {
   readonly police?: { agency: string; uniform: number };
 }
 
-export type EntityDef = VehicleDef | PedDef;
+/** A police helicopter. Its pose, searchlight and rotor are in the snapshot (see `HeliFlag`). */
+export interface HelicopterDef {
+  readonly id: EntityId;
+  readonly kind: typeof EntityKind.Helicopter;
+  readonly typeId: 'helicopter';
+  /** The agency's paint, 0xRRGGBB. */
+  readonly color: number;
+  readonly agency: string;
+}
+
+/** A spike strip: `length` metres across the lane, `yaw` is the direction it points along its length. */
+export interface SpikeStripDef {
+  readonly id: EntityId;
+  readonly kind: typeof EntityKind.SpikeStrip;
+  readonly length: number;
+  readonly depth: number;
+}
+
+export type EntityDef = VehicleDef | PedDef | HelicopterDef | SpikeStripDef;
 
 /** Paint colours the sim picks from for parked cars, 0xRRGGBB. */
 export const PAINTS = [0xb23a2e, 0x2f5d8a, 0xd9d6cf, 0x1f2326, 0x6b7a4a, 0xc79a2a, 0x7a2f55, 0x8d949b] as const;

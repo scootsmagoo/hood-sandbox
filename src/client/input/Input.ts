@@ -52,6 +52,8 @@ export class Input {
   /** True if pointer, keys or a source turned the camera this frame. */
   lookActive = false;
   device: InputDevice = 'keyboard';
+  /** Set by the net system each frame: the player is in a car (the pad's triggers are pedals there, so the gun moves to other buttons). */
+  inVehicle = false;
 
   private held = new Set<string>();
   private pressedCodes = new Set<string>();

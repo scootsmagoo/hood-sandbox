@@ -30,6 +30,8 @@ interface Edge {
   length: number;
   oneway: boolean;
   cls: string;
+  /** The road's paved width, m. */
+  width: number;
 }
 
 export interface Snap {
@@ -76,7 +78,7 @@ export class RoadGraph {
       const cum = [0];
       for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
       const id = this.edges.length;
-      this.edges.push({ id, from: a, to: b, pts, cum, length: cum[cum.length - 1], oneway: r.oneway, cls: r.class });
+      this.edges.push({ id, from: a, to: b, pts, cum, length: cum[cum.length - 1], oneway: r.oneway, cls: r.class, width: r.width || 7 });
       this.nodes[a].out.push(id);
       this.nodes[b].out.push(id);
     }
@@ -84,6 +86,11 @@ export class RoadGraph {
 
   get empty(): boolean {
     return this.edges.length === 0;
+  }
+
+  /** The paved width of an edge's road, m. */
+  widthOf(edge: number): number {
+    return this.edges[edge].width;
   }
 
   private node(x: number, z: number): number {
@@ -179,9 +186,22 @@ export class RoadGraph {
    * (bidirectional streets may be taken either way, with a penalty for turning round).
    * Null when the two are not connected.
    */
-  route(from: PathPoint, heading: number, to: PathPoint, startSnap?: Snap | null): PathPoint[] | null {
+  route(from: PathPoint, heading: number, to: PathPoint, startSnap?: Snap | null, goalHeading: number | null = null): PathPoint[] | null {
     const s0 = startSnap ?? this.nearest(from.x, from.z);
-    const g0 = this.nearest(to.x, to.z);
+    // A goal that is a moving car snaps to a street that runs the way it is going (not the cross street it is passing).
+    let g0: Snap | null = null;
+    if (goalHeading !== null) {
+      const gx = Math.sin(goalHeading);
+      const gz = Math.cos(goalHeading);
+      g0 = this.nearest(to.x, to.z, (e) => {
+        const a = e.pts[0];
+        const b = e.pts[e.pts.length - 1];
+        const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        return Math.abs(((b.x - a.x) * gx + (b.z - a.z) * gz) / l) > 0.6;
+      });
+      if (g0 && g0.dist > 25) g0 = null;
+    }
+    g0 ??= this.nearest(to.x, to.z);
     if (!s0 || !g0) return null;
     const se = this.edges[s0.edge];
     const ge = this.edges[g0.edge];
@@ -262,6 +282,81 @@ export class RoadGraph {
     }
     out.push(...this.slice(g0.edge, bestNode === ge.from ? 0 : ge.length, g0.s));
     if (direct && polyLength(direct) <= polyLength(out)) return densify([{ x: from.x, z: from.z }, ...direct]);
+    return densify(out);
+  }
+
+  /**
+   * The road ahead of a position travelling along `heading`: follows the street the position snaps to
+   * in that direction for `length` metres, going straight on (the smallest turn) at each node. A dense
+   * polyline starting at the position; just a stub when the road ends. Used to predict where a
+   * fleeing car is going on streets the lane graph does not cover (the freeways).
+   */
+  follow(x: number, z: number, heading: number, length: number): PathPoint[] {
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    // The nearest edge that runs the way we point (a one-way street the wrong way does not count).
+    let best: Snap | null = null;
+    let bestScore = Infinity;
+    for (const e of this.edges) {
+      for (let i = 1; i < e.pts.length; i++) {
+        const a = e.pts[i - 1];
+        const b = e.pts[i];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const l2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2));
+        const d = Math.hypot(a.x + dx * t - x, a.z + dz * t - z);
+        if (d > 30 || d > bestScore) continue;
+        const l = Math.sqrt(l2);
+        const along = (dx * fx + dz * fz) / l;
+        if (e.oneway && along < 0.2) continue;
+        if (Math.abs(along) < 0.5) continue;
+        const score = d + (1 - Math.abs(along)) * 8;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { edge: e.id, s: e.cum[i - 1] + t * (e.cum[i] - e.cum[i - 1]), x: a.x + dx * t, z: a.z + dz * t, dist: d };
+        }
+      }
+    }
+    const out: PathPoint[] = [{ x, z }];
+    if (!best) return out;
+    let edge = this.edges[best.edge];
+    // Which way along the edge: toward `to` when it runs with us.
+    const here = this.at(edge.id, best.s);
+    let forward = here.dx * fx + here.dz * fz >= 0;
+    let s = best.s;
+    let left = length;
+    for (let guard = 0; guard < 40 && left > 0; guard++) {
+      const end = forward ? edge.length : 0;
+      const take = Math.min(left, Math.abs(end - s));
+      const stop = forward ? s + take : s - take;
+      out.push(...this.slice(edge.id, s, stop).slice(1));
+      left -= take;
+      if (left <= 0.5) break;
+      // At the node: the outgoing edge that turns least.
+      const node = forward ? edge.to : edge.from;
+      const hx = forward ? edge.pts[edge.pts.length - 1].x - edge.pts[Math.max(0, edge.pts.length - 2)].x : edge.pts[0].x - edge.pts[Math.min(1, edge.pts.length - 1)].x;
+      const hz = forward ? edge.pts[edge.pts.length - 1].z - edge.pts[Math.max(0, edge.pts.length - 2)].z : edge.pts[0].z - edge.pts[Math.min(1, edge.pts.length - 1)].z;
+      const hl = Math.hypot(hx, hz) || 1;
+      let pick: { e: Edge; fwd: boolean; cos: number } | null = null;
+      for (const ei of this.nodes[node].out) {
+        if (ei === edge.id) continue;
+        const o = this.edges[ei];
+        if (!this.canLeave(o, node)) continue;
+        const fwd = o.from === node;
+        const p0 = fwd ? o.pts[0] : o.pts[o.pts.length - 1];
+        const p1 = fwd ? o.pts[Math.min(1, o.pts.length - 1)] : o.pts[Math.max(0, o.pts.length - 2)];
+        const dx = p1.x - p0.x;
+        const dz = p1.z - p0.z;
+        const dl = Math.hypot(dx, dz) || 1;
+        const cos = (dx * hx + dz * hz) / (dl * hl);
+        if (!pick || cos > pick.cos) pick = { e: o, fwd, cos };
+      }
+      if (!pick || pick.cos < -0.2) break;
+      edge = pick.e;
+      forward = pick.fwd;
+      s = forward ? 0 : edge.length;
+    }
     return densify(out);
   }
 

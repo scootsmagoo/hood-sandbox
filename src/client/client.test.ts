@@ -16,7 +16,8 @@ describe('bindings', () => {
   it('gives every mouse-capable action a key', () => {
     for (const [action, codes] of Object.entries(DEFAULT_BINDINGS)) {
       expect(codes.length, action).toBeGreaterThan(0);
-      for (const c of codes) expect(c.startsWith('Mouse'), `${action} only on the mouse`).toBe(false);
+      // A mouse button may do it (aim and fire), but a key must too.
+      expect(codes.some((c) => !c.startsWith('Mouse')), `${action} only on the mouse`).toBe(true);
     }
   });
 

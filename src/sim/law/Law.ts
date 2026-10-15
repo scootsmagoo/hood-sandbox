@@ -9,6 +9,7 @@
  * unless they have been knocked down or killed by then. An officer who sees it reports it at once.
  */
 import { CRIMES, LAW_RULES, type CrimeId, type LawData } from '../../shared/law';
+import { WEAPONS } from '../../shared/weapons';
 import type { CrimeDescription, SimEvent } from '../../shared/protocol';
 import type { EntityId } from '../../shared/entities';
 import { GROUPS } from '../physics/rapier';
@@ -84,13 +85,20 @@ export class Law {
         const perp = sim.registry.get(e.sourceId) as PedEntity | undefined;
         const target = sim.registry.get(e.targetId) as PedEntity | undefined;
         if (!perp || perp.role !== 'player' || !target || target.role === 'player') break;
-        if (e.kind !== 'melee' && e.kind !== 'vehicle') break;
+        if (e.kind !== 'melee' && e.kind !== 'vehicle' && e.kind !== 'bullet') break;
         const police = target.role === 'police';
         let id: CrimeId;
+        // Shooting an officer is the same crime as hitting one (the shot itself is heard as a discharge).
         if (police) id = 'assault_officer';
         else if (e.fatal) id = 'kill_ped';
-        else id = e.kind === 'vehicle' ? 'hit_ped' : 'assault';
-        this.crime(id, e.x, e.y, e.z, perp, e.targetId, e.vehicleId ?? 0);
+        else id = e.kind === 'vehicle' ? 'hit_ped' : e.kind === 'bullet' ? 'shoot_ped' : 'assault';
+        this.crime(id, e.x, e.y, e.z, perp, e.targetId, e.vehicleId ?? 0, e.kind === 'bullet' ? this.hearScale(e.sourceId) : 1);
+        break;
+      }
+      case 'weapon:fire': {
+        // Firing in public. Anyone within earshot (further than they can see) takes note.
+        const perp = sim.registry.get(e.shooterId) as PedEntity | undefined;
+        if (perp?.role === 'player') this.crime('discharge', e.x, e.y, e.z, perp, 0, 0, WEAPONS[e.weapon].hearM);
         break;
       }
       case 'vehicle:enter': {
@@ -109,7 +117,7 @@ export class Law {
   }
 
   /** Records a crime and sets its witnesses to work. `vehicle_theft` only counts if someone saw it. */
-  crime(id: CrimeId, x: number, y: number, z: number, perp: PedEntity, victimId: EntityId, vehicleId: EntityId) {
+  crime(id: CrimeId, x: number, y: number, z: number, perp: PedEntity, victimId: EntityId, vehicleId: EntityId, hearScale = 1) {
     const sim = this.sim;
     const def = CRIMES[id];
     const key = `${id}:${perp.id}:${victimId}:${vehicleId}`;
@@ -119,14 +127,22 @@ export class Law {
     const at = { x, y: y + 1.2, z };
     const witnesses: PedEntity[] = [];
     let officerSaw: PedEntity | null = null;
+    // Sound carries further than sight and needs no line: gunfire has a hearRadius.
+    const hearR = (def.hearRadius ?? 0) * hearScale;
+    let heard = 0;
+    let seenBy = 0;
     for (const p of sim.peds()) {
       if (p === perp || p.life !== 'alive') continue;
       const c = p.controller;
       const victim = p.id === victimId;
       if (!victim) {
-        if (Math.hypot(c.x - x, c.z - z) > def.witnessRadius) continue;
-        if (!this.clearLine({ x: c.x, y: c.y + EYE, z: c.z }, at)) continue;
-      }
+        const dist = Math.hypot(c.x - x, c.z - z);
+        if (dist > Math.max(def.witnessRadius, hearR)) continue;
+        const sees = dist <= def.witnessRadius && this.clearLine({ x: c.x, y: c.y + EYE, z: c.z }, at);
+        if (!sees && dist > hearR) continue;
+        if (!sees && p.role === 'civilian') heard++;
+        else if (p.role === 'civilian') seenBy++;
+      } else seenBy++;
       if (p.role === 'police') {
         officerSaw ??= p;
         continue;
@@ -141,10 +157,11 @@ export class Law {
     const d = this.description;
     d.clothes = perp.outfit;
     if (veh) d.vehicle = { id: veh.id, typeId: veh.typeId, plate: veh.plate, color: veh.color };
-    if (witnesses.length > 0) d.face = true;
+    // Someone who only heard it did not see a face.
+    if (seenBy > 0) d.face = true;
     sim.emit({
       type: 'crime', tick: sim.tick, crime: id, severity: def.severity, heat: def.heat, x, y, z,
-      perpetratorId: perp.id, victimId, vehicleId: veh?.id ?? 0, witnesses: witnesses.length + (officerSaw ? 1 : 0),
+      perpetratorId: perp.id, victimId, vehicleId: veh?.id ?? 0, witnesses: witnesses.length + (officerSaw ? 1 : 0), heard,
       description: { ...d, vehicle: d.vehicle ? { ...d.vehicle } : null },
     });
 
@@ -158,13 +175,20 @@ export class Law {
         this.pending.push({ witnessId: w.id, crime: id, at: sim.tick + Math.round(delay * 60), heat: def.heat, severity: def.severity, x, z });
       }
       // Bystanders run (the victim of a carjack already reacts in their own way).
+      // (Ambient people react to gunfire by themselves, each in their own way: running, cowering, filming.)
       const b = w.brain;
-      if (b && w.id !== victimId && (b.state === 'idle' || b.state === 'calm')) b.enter('flee');
+      if (b && w.id !== victimId && !(w.amb && def.hearRadius) && (b.state === 'idle' || b.state === 'calm')) b.enter('flee');
     }
     if (officerSaw) {
       this.heat.report(def.heat, def.severity, x, z, true);
       sim.emit({ type: 'crime:reported', tick: sim.tick, crime: id, reporterId: officerSaw.id, police: true, x, z });
     }
+  }
+
+  /** How far a shooter's gun carries, relative to the crime's hearRadius. */
+  private hearScale(shooterId: EntityId): number {
+    const g = (this.sim.registry.get(shooterId) as PedEntity | undefined)?.gun;
+    return g ? WEAPONS[g.weapon].hearM : 1;
   }
 
   private report(call: PendingCall) {
@@ -195,7 +219,7 @@ export class Law {
       const p = sim.playerPosition();
       this.heat.sight(p.x, p.z);
     }
-    this.heat.step(dt, seen);
+    this.heat.step(dt, seen, sim.police.coolRate());
   }
 }
 

@@ -6,12 +6,15 @@
 import crimesRaw from './data/crimes.json';
 import type { RoadData } from './tile';
 
-export type CrimeId = 'carjack' | 'assault' | 'vehicle_theft' | 'hit_ped' | 'kill_ped' | 'assault_officer';
+export type CrimeId = 'carjack' | 'assault' | 'vehicle_theft' | 'hit_ped' | 'kill_ped' | 'assault_officer' | 'discharge' | 'shoot_ped';
 
 export interface CrimeDef {
   severity: number;
   heat: number;
+  /** How far a witness can see it, m (with a clear line). */
   witnessRadius: number;
+  /** How far a witness hears it, m, with no line needed (gunfire). Absent: it makes no sound. */
+  hearRadius?: number;
 }
 
 export interface LawRules {
@@ -27,6 +30,10 @@ export interface LawRules {
   visionHalfAngleDeg: number;
   /** Police notice you inside this range whichever way they face, m. */
   closeSenseM: number;
+  /** The search area once the police lose you: its radius at that moment by heat level (index 0 unused), how fast it grows (m/s) and its cap (m). */
+  searchStartM: number[];
+  searchGrowMps: number[];
+  searchMaxM: number;
 }
 
 const need = (cond: unknown, msg: string): void => {
@@ -41,20 +48,26 @@ export function parseCrimes(json: unknown): { crimes: Record<CrimeId, CrimeDef>;
     need(Number.isFinite(c.severity) && c.severity >= 1 && c.severity <= 5, `${id}: severity must be 1 to 5`);
     need(Number.isFinite(c.heat) && c.heat >= 1 && c.heat <= 6, `${id}: heat must be 1 to 6`);
     need(Number.isFinite(c.witnessRadius) && c.witnessRadius > 0, `${id}: witnessRadius must be positive`);
-    crimes[id as CrimeId] = { severity: c.severity, heat: c.heat, witnessRadius: c.witnessRadius };
+    need(c.hearRadius === undefined || (Number.isFinite(c.hearRadius) && c.hearRadius >= 0), `${id}: hearRadius must be zero or positive`);
+    crimes[id as CrimeId] = { severity: c.severity, heat: c.heat, witnessRadius: c.witnessRadius, ...(c.hearRadius ? { hearRadius: c.hearRadius } : {}) };
   }
   const r = j.rules ?? {};
   const rules: LawRules = {
     callDelayS: r.callDelayS ?? [3, 8],
     dedupeS: r.dedupeS ?? 6,
     seenGraceS: r.seenGraceS ?? 1.5,
-    cooldownS: r.cooldownS ?? [0, 40, 55, 70, 85, 100, 120],
+    // Heat 4 and up is hard to shake: the cooldown is long, and `police.json` slows it while the search is still on top of you.
+    cooldownS: r.cooldownS ?? [0, 40, 55, 70, 100, 125, 150],
     visionRangeM: r.visionRangeM ?? 75,
     visionHalfAngleDeg: r.visionHalfAngleDeg ?? 65,
     closeSenseM: r.closeSenseM ?? 7,
+    searchStartM: r.searchStartM ?? [0, 45, 55, 70, 85, 100, 110],
+    searchGrowMps: r.searchGrowMps ?? [0, 1.2, 1.6, 2.0, 2.6, 3.0, 3.4],
+    searchMaxM: r.searchMaxM ?? 320,
   };
   need(rules.callDelayS.length === 2 && rules.callDelayS[0] <= rules.callDelayS[1], 'callDelayS must be [min, max]');
   need(rules.cooldownS.length >= 7, 'cooldownS needs an entry for each heat level 0 to 6');
+  need(rules.searchStartM.length >= 7 && rules.searchGrowMps.length >= 7, 'searchStartM and searchGrowMps need an entry for each heat level 0 to 6');
   return { crimes, rules };
 }
 
@@ -87,6 +100,10 @@ export interface Agency {
   /** A handling.json id. */
   vehicle: string;
   minHeat: number;
+  /** Plain cars: no stripe and no lightbar until the unit is chasing, then a pair of strobes. */
+  unmarked: boolean;
+  /** The strobe colours of an unmarked unit (the livery's lightbar is hidden when the lights are off). */
+  strobe: [string, string];
 }
 
 export interface Area {
@@ -140,6 +157,8 @@ export function parseJurisdictions(json: unknown): LawData {
       livery: a.livery,
       vehicle: a.vehicle,
       minHeat: Number.isFinite(a.minHeat) ? a.minHeat : 1,
+      unmarked: !!a.unmarked,
+      strobe: Array.isArray(a.strobe) && a.strobe.length === 2 ? [a.strobe[0], a.strobe[1]] : ['#ff2a2a', '#2a5cff'],
     });
   }
   const areas = Array.isArray(j!.areas) ? j!.areas! : [];

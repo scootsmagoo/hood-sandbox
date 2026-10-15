@@ -14,6 +14,9 @@ import { AXIS_COUNT, SIM_DT, type InputCommand, type SimEvent } from '../shared/
 import type { LawData } from '../shared/law';
 import { MAX_HEALTH } from './entities';
 import { COMBAT, damagePed, knockDown } from './combat/damage';
+import { WeaponRuntime } from './combat/weapons/ballistics';
+import { giveStarterWeapons } from './combat/weapons/api';
+import { gunFlags, writeGunBlock } from './combat/weapons/snapshot';
 import { WRECK } from './combat/vehicleDamage';
 import { blastFalloff, overlayOf } from './combat/systems';
 import { leaveVehicle } from './exit';
@@ -25,7 +28,7 @@ import { E, H, HeatPhase, PedFlag, SnapFlag, VehicleFlag, WHEEL_FLOATS, MAX_ENTI
 import type { TileData } from '../shared/tile';
 import { PedController } from './character/PedController';
 import type { CarjackState } from './carjack';
-import { PedEntity, PlayerSlot, VehicleEntity, type SimEntity } from './entities';
+import { HelicopterEntity, PedEntity, PlayerSlot, SpikeStripEntity, VehicleEntity, type SimEntity } from './entities';
 import { PedBrain, rollPersonality, type Reaction } from './npc/brain';
 import { GROUPS, initRapier } from './physics/rapier';
 import { defaultSystems, type SimSystem } from './systems';
@@ -60,6 +63,8 @@ export interface SimOptions {
   bystanders?: number;
   /** The player's starting armour (default 0). */
   armour?: number;
+  /** What the player carries: a pistol and some rounds (`default`), every weapon (`all`) or nothing. */
+  weapons?: 'default' | 'all' | 'none';
   /** The law tables (a city pack's jurisdictions). Left out, the pack of the tile's city is loaded, or a generic one. */
   law?: LawData;
   /** Ambient pedestrians from the tile's walk network (default off here, on in the game; see `SimInit.ambientPeds`). Needs `paths.json`. */
@@ -118,6 +123,8 @@ export class Simulation {
   /** The same events, for the rules module to read once per tick. */
   private ruleEvents: SimEvent[] = [];
   readonly law: Law;
+  /** Hitscan lookups and the random stream for spread (the guns themselves live on the peds: combat/weapons/api.ts). */
+  readonly weapons: WeaponRuntime;
   readonly police: PoliceManager;
   /** The ambient pedestrian director, when the tile has a walk network and ambient peds are on. */
   readonly ambient: AmbientPeds | null = null;
@@ -127,6 +134,7 @@ export class Simulation {
   private readonly eventTaps: ((e: SimEvent) => void)[] = [];
   readonly fireRng: Rng;
   private readonly plateRng: Rng;
+  private readonly starterWeapons: 'default' | 'all' | 'none';
   private readonly lives = new Map<number, PlayerLife>();
   private queued: { slot: number; cmd: InputCommand }[] = [];
 
@@ -141,12 +149,16 @@ export class Simulation {
     this.fireRng = this.rng.fork('fire');
     this.plateRng = this.rng.fork('plates');
     this.clock = new GameClock(opts.clock);
+    this.weapons = new WeaponRuntime(this);
+    this.starterWeapons = opts.weapons ?? 'default';
     this.law = new Law(this, opts.law ?? loadedLaw(opts));
     this.police = new PoliceManager(this);
+    this.eventTaps.push((e) => this.police.onEvent(e));
     this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
-    if (opts.ambientPeds && opts.tile.paths) {
+    const walk = opts.tile.paths ? new WalkGraph(opts.tile.paths) : undefined;
+    if (opts.ambientPeds && walk) {
       this.ambient = new AmbientPeds(this, {
-        graph: new WalkGraph(opts.tile.paths),
+        graph: walk,
         scenarios: new ScenarioIndex(opts.tile.scenarios),
         population: opts.population ?? GENERIC_POPULATION,
         junctions: opts.tile.junctions,
@@ -157,7 +169,7 @@ export class Simulation {
     if ((opts.traffic ?? 0) > 0 && opts.tile.lanes) {
       const graph = new LaneGraph(opts.tile.lanes);
       if (graph.usable) {
-        this.traffic = new TrafficManager(this, graph, opts.trafficPopulation ?? GENERIC_TRAFFIC_POPULATION, Math.min(1, opts.traffic!));
+        this.traffic = new TrafficManager(this, graph, opts.trafficPopulation ?? GENERIC_TRAFFIC_POPULATION, Math.min(1, opts.traffic!), walk);
         this.eventTaps.push((e) => this.traffic?.onEvent(e));
       }
     }
@@ -202,6 +214,7 @@ export class Simulation {
     const ped = this.addPed(px, Math.max(py, this.groundAt(px, pz)), pz, pyaw, 0, false, (p) => {
       p.role = 'player';
       p.armour = clampArmour(armour);
+      giveStarterWeapons(p, this.starterWeapons);
     });
     ped.owner = 1;
     this.players.set(1, new PlayerSlot(1, ped.id));
@@ -308,6 +321,8 @@ export class Simulation {
 
   /** The definition of an entity (what the client needs to draw it). */
   defOf(e: SimEntity): EntityDef {
+    if (e instanceof HelicopterEntity) return { id: e.id, kind: EntityKind.Helicopter, typeId: 'helicopter', color: e.color, agency: e.agency };
+    if (e instanceof SpikeStripEntity) return { id: e.id, kind: EntityKind.SpikeStrip, length: e.length, depth: e.depth };
     if (e instanceof VehicleEntity) return { id: e.id, kind: EntityKind.Vehicle, typeId: e.typeId, color: e.color, plate: e.plate, ...(e.police ? { police: e.police } : {}) };
     return { id: e.id, kind: EntityKind.Ped, outfit: e.outfit, player: e.role === 'player', ...(e.officer ? { police: { agency: e.officer.agency, uniform: e.officer.uniform } } : {}) };
   }
@@ -317,6 +332,11 @@ export class Simulation {
     const out: EntityDef[] = [];
     for (const e of this.registry.values()) out.push(this.defOf(e));
     return out;
+  }
+
+  /** Announces an entity the police system made (a helicopter, a spike strip) so the client gets its definition. */
+  announceEntity(e: SimEntity) {
+    this.announceSpawn(e);
   }
 
   private announceSpawn(e: SimEntity) {
@@ -338,7 +358,7 @@ export class Simulation {
           if (v && v.occupantId === id) v.occupantId = 0;
         }
         e.controller.dispose();
-      } else {
+      } else if (e instanceof VehicleEntity) {
         e.car.dispose();
       }
       this.registry.remove(id);
@@ -587,9 +607,11 @@ export class Simulation {
       u[o + E.Id] = e.id;
       u[o + E.Kind] = e.kind;
       if (e instanceof PedEntity) this.writePed(view, o, e);
-      else this.writeVehicle(view, o, e as VehicleEntity);
+      else if (e instanceof VehicleEntity) this.writeVehicle(view, o, e);
+      else this.police.writeEntity(view, o, e);
     }
     u[H.Count] = n;
+    this.police.writeHeader(view);
   }
 
   private writePed(view: SnapshotView, o: number, e: PedEntity) {
@@ -620,12 +642,16 @@ export class Simulation {
       (b?.state === 'fight' ? PedFlag.Fighting : 0) |
       (b?.state === 'dragged' ? PedFlag.Dragged : 0) |
       (e.busy ? PedFlag.Busy : 0) |
+      (e.officer?.sees ? PedFlag.Sees : 0) |
+      (e.officer && e.officer.fireT > 0 ? PedFlag.Firing : 0) |
+      gunFlags(e, this.tick) |
       ((e.pose & 7) << PedFlag.PoseShift);
     f[o + E.Speed] = c.speed;
     f[o + E.Aux0] = c.yaw;
     f[o + E.Aux1] = e.melee ? Math.min(1, e.melee.t / COMBAT.swingTime) : (b?.swing ?? 0);
     f[o + E.Health] = e.health;
     f[o + E.Health2] = e.armour;
+    writeGunBlock(view, o, e);
   }
 
   private writeVehicle(view: SnapshotView, o: number, e: VehicleEntity) {
@@ -659,7 +685,11 @@ export class Simulation {
       (e.burnt ? VehicleFlag.Burnt : 0) |
       (e.police ? VehicleFlag.Police : 0) |
       (e.lightbar ? VehicleFlag.Lightbar : 0) |
-      (e.trafficCar ? VehicleFlag.Traffic : 0);
+      (e.trafficCar ? VehicleFlag.Traffic : 0) |
+      (e.roadblock ? VehicleFlag.Roadblock : 0) |
+      (e.siren ? VehicleFlag.Siren : 0) |
+      (car.flatMask << VehicleFlag.FlatShift) |
+      ((e.policeRole & 7) << VehicleFlag.RoleShift);
     f[o + E.Health] = e.health;
     f[o + E.Health2] = e.engine;
     f[o + E.Aux2] = e.onFire ? Math.min(1, e.burnT / e.burnFor) : 0;

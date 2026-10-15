@@ -14,6 +14,10 @@
  *   tiers    18  switch the graphics tier round (shadow maps are made and dropped, the camera's far
  *                plane and the fog change). Needs the dev server (it imports src/client/graphics.ts).
  *   drive    6   drive 20 s of street, park, get out and in: streaming of views and snapshots
+ *   gunfire  30  raise the gun (the aim camera and the crosshair) and send 120 shots through the client's event path
+ *                (tracers, flashes, puffs, sparks, blood, bullet holes, the gunshot sounds): the pooled effects must not grow
+ *   police   20  a helicopter and a spike strip appear (heat 3, a strip laid) and are taken away: their models, beam and glow are made and
+ *                disposed with the entities. Needs the sim on the main thread: `--query transport=loopback`.
  * Counted after each cycle: JS heap, renderer geometries, textures, programs, materials and objects in
  * the scene, entities in the client's view, DOM nodes and event listeners (CDP), and the whole
  * agent cluster's memory in MB including the sim worker (`measureUserAgentSpecificMemory`, when the
@@ -31,9 +35,11 @@ const args = parseArgs();
 const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
-const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd').split(',').filter(Boolean);
-const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12 };
+const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire').split(',').filter(Boolean);
+const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20 };
 const WARM = 2;
+/** Longest a single cycle may take before it is counted as stuck. */
+const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
 /** Allowed growth per counter (absolute, or a fraction of the first sample, whichever is larger), by phase. */
 const TOL = {
   reload: { geometries: 0, textures: 0, programs: 0, materials: 0, objects: 0, entities: 3, listeners: 20, domNodes: 20 },
@@ -107,6 +113,59 @@ const ACTIVITIES = {
       await window.__h.sleep(full ? 2500 : 3500);
     }, i % 2 === 0);
   },
+  /**
+   * Gunfire. The shots are events fed to the client's own listeners (the sim is not asked to shoot: that would be a crime and bring the
+   * police), so the effects, the camera and the sound run exactly as they do in play. Every weapon, every kind of hit.
+   */
+  async gunfire() {
+    await page.evaluate(async () => {
+      const g = window.__hood.game;
+      const listeners = g.net.listeners;
+      g.input.holdAction('aim', true);
+      await window.__h.sleep(350);
+      const cam = g.camera.position;
+      const f = { x: -Math.sin(g.cameraRig.yaw), z: -Math.cos(g.cameraRig.yaw) };
+      const weapons = ['pistol', 'smg', 'shotgun', 'rifle'];
+      const kinds = ['world', 'ped', 'vehicle', 'none'];
+      let n = 0;
+      for (let burst = 0; burst < 8; burst++) {
+        for (let k = 0; k < 15; k++, n++) {
+          const w = weapons[burst % 4];
+          const pellets = w === 'shotgun' ? 8 : 1;
+          const impacts = [];
+          for (let p = 0; p < pellets; p++) {
+            const d = 8 + ((n * 7 + p * 3) % 40);
+            const side = ((n + p) % 9) - 4;
+            impacts.push({ kind: kinds[(n + p) % 4], x: cam.x + f.x * d - f.z * side, y: cam.y - 1 + ((n + p) % 3) * 0.5, z: cam.z + f.z * d + f.x * side, nx: -f.x, ny: 0, nz: -f.z, targetId: 0, headshot: false });
+          }
+          const e = { type: 'weapon:fire', tick: 0, shooterId: 0, weapon: w, x: cam.x + f.x * 0.8, y: cam.y - 0.3, z: cam.z + f.z * 0.8, dx: f.x, dy: 0, dz: f.z, impacts };
+          for (const fn of listeners) fn(e);
+          await window.__h.sleep(35);
+        }
+        for (const fn of listeners) fn({ type: 'weapon:reload', tick: 0, pedId: g.view.ped.id, weapon: weapons[burst % 4], durationS: 1.2 });
+        for (const fn of listeners) fn({ type: 'weapon:empty', tick: 0, pedId: g.view.ped.id, weapon: weapons[burst % 4] });
+      }
+      g.input.holdAction('aim', false);
+      await window.__h.sleep(300);
+    });
+  },
+  /** A helicopter (heat 3) and a spike strip come into the world and go again; the client makes a model for each and must drop it. */
+  async police() {
+    await page.evaluate(async () => {
+      const S = window.__hood.game.transport.host?.simulation;
+      if (!S) throw new Error('the police phase needs the sim on the main thread: --query transport=loopback');
+      const p = S.playerPosition();
+      S.police.roadblocks.enabled = false;
+      S.law.heat.report(3, 4, p.x, p.z, true);
+      S.police.spikes.lay(p.x + 12, p.z, 0, 6);
+      await window.__h.sleep(600);
+      S.police.heli.clearAll();
+      S.police.spikes.clearAll();
+      S.law.heat.clear('cooldown');
+      S.police.clearAll();
+      await window.__h.sleep(400);
+    });
+  },
   async drive() {
     await page.evaluate(async () => {
       const b = window.__h.bot;
@@ -123,7 +182,7 @@ const ACTIVITIES = {
 // `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
 const FROZEN = { pedBudget: 0, traffic: 0 };
 const LIVE = { pedBudget: 40, traffic: 0.75 };
-const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE };
+const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN };
 const setPopulation = (c) => page.evaluate((c) => window.__hood.game.transport.config?.(c), c);
 let population = null;
 const results = [];
@@ -139,7 +198,10 @@ for (const phase of phases) {
     await page.waitForTimeout(14000);
   }
   const run = async (i) => {
-    try { await act(i); } catch (e) { errors.push(`[${phase} ${i}] ${e.message.split('\n')[0]}`); }
+    // A stuck bot (it once hung the drive phase for 50 minutes) fails its cycle instead of the whole run.
+    let timer;
+    const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`cycle took over ${CYCLE_LIMIT_S} s`)), CYCLE_LIMIT_S * 1000); });
+    try { await Promise.race([act(i), limit]); } catch (e) { errors.push(`[${phase} ${i}] ${e.message.split('\n')[0]}`); } finally { clearTimeout(timer); }
   };
   for (let i = 0; i < WARM && !isCrashed(); i++) await run(i);
   const rows = [await sample()];

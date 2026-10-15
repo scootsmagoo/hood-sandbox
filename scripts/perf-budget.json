@@ -45,6 +45,17 @@
           "draws": 740,
           "triangles": 380000,
           "slowFrames": 6
+        },
+        "gunfire": {
+          "frameP50": 25,
+          "frameP95": 25,
+          "cpuMean": 3.1,
+          "cpuP95": 4.2,
+          "gpuP50": 1.2,
+          "gpuP95": 1.4,
+          "draws": 290,
+          "triangles": 230000,
+          "slowFrames": 6
         }
       },
       "bootMs": 1194,
@@ -96,6 +107,17 @@
           "gpuP95": 1.6,
           "draws": 730,
           "triangles": 330000,
+          "slowFrames": 6
+        },
+        "gunfire": {
+          "frameP50": 25,
+          "frameP95": 25,
+          "cpuMean": 3,
+          "cpuP95": 5.2,
+          "gpuP50": 1.1,
+          "gpuP95": 1.4,
+          "draws": 290,
+          "triangles": 220000,
           "slowFrames": 6
         }
       },
@@ -149,6 +171,17 @@
           "draws": 540,
           "triangles": 220000,
           "slowFrames": 6
+        },
+        "gunfire": {
+          "frameP50": 25,
+          "frameP95": 25,
+          "cpuMean": 2.1,
+          "cpuP95": 4.9,
+          "gpuP50": 1.3,
+          "gpuP95": 1.4,
+          "draws": 220,
+          "triangles": 150000,
+          "slowFrames": 6
         }
       },
       "bootMs": 936,
@@ -200,6 +233,17 @@
           "gpuP95": 1.2,
           "draws": 430,
           "triangles": 150000,
+          "slowFrames": 6
+        },
+        "gunfire": {
+          "frameP50": 25,
+          "frameP95": 25,
+          "cpuMean": 3.9,
+          "cpuP95": 5,
+          "gpuP50": 1.1,
+          "gpuP95": 1.2,
+          "draws": 160,
+          "triangles": 110000,
           "slowFrames": 6
         }
       },

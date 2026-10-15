@@ -6,15 +6,17 @@ import * as THREE from 'three';
 import { EntityKind, type EntityId } from '../../shared/entities';
 import type { EntityDef } from '../../shared/entityDefs';
 import { HANDLING } from '../../shared/handling';
-import { PedFlag, VehicleFlag } from '../../shared/snapshot';
+import { HeliFlag, PedFlag, VehicleFlag, gunWeapon } from '../../shared/snapshot';
+import { weaponByIndex } from '../../shared/weapons';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
 import { OUTFIT_COUNT } from '../../shared/entityDefs';
 import { buildPedModel, buildVehicleModel, glowTex, OUTFITS, setHeadlights, type PedMode, type PedModel, type VehicleModel } from './models';
 import { TrafficInstances } from './TrafficInstances';
-import { newJoints, solvePose } from './pedPose';
+import { newJoints, solvePose, type PoseExtra } from './pedPose';
 import { PedCrowd, varyLook } from './PedCrowd';
 import { SmokeSystem } from './Smoke';
+import { buildHelicopter, buildSpikeStrip, type HeliModel, type StripModel } from './PoliceProps';
 
 /** A colour scaled toward black. */
 function shade(color: number, k: number): number {
@@ -69,6 +71,7 @@ export class EntityViews implements System {
   /** Everyone who is not the player or an officer, drawn as instances. */
   readonly crowd = new PedCrowd(192);
   private readonly joints = newJoints();
+  private readonly extra: PoseExtra = {};
   /** Ambient traffic cars away from the camera, drawn as instances. */
   readonly traffic = new TrafficInstances();
 
@@ -110,6 +113,10 @@ export class EntityViews implements System {
     setHeadlights(0.8 + 1.6 * night);
     this.traffic.begin();
     for (const [id, st] of entities) {
+      if (st.kind === EntityKind.Helicopter || st.kind === EntityKind.SpikeStrip) {
+        this.updateProp(id, st, dt, night);
+        continue;
+      }
       let v = this.views.get(id);
       if (st.kind === EntityKind.Vehicle && st.flags & VehicleFlag.Traffic) {
         // Ambient traffic is drawn as instances, unless it smokes, burns or has a door open.
@@ -137,6 +144,11 @@ export class EntityViews implements System {
       if (v.kind === 'vehicle' || v.model) {
         v.model!.root.position.set(st.x, st.y, st.z);
         v.model!.root.quaternion.set(st.q.x, st.q.y, st.q.z, st.q.w);
+        // An officer sitting in a car is not worth 13 draw calls (26 with the shadow pass) once the car is far: a whole response is a dozen of them.
+        if (v.kind === 'ped' && st.flags & PedFlag.Police) {
+          const cam = this.game.camera.position;
+          v.model!.root.visible = !(st.flags & PedFlag.InVehicle) || Math.hypot(st.x - cam.x, st.z - cam.z) < 40;
+        }
       }
       if (v.kind === 'ped') {
         const f = st.flags;
@@ -148,9 +160,27 @@ export class EntityViews implements System {
         const pedPose = (f & PedFlag.PoseMask) >> PedFlag.PoseShift;
         if (v.model) {
           v.model.lie(v.lie);
-          v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time + v.seed);
+          // Guns, cover and flinches are drawn on the models of the player and officers (the crowd never carries one).
+          const gun = f & PedFlag.Armed ? weaponByIndex(gunWeapon(st.gun)) : undefined;
+          v.model.setGun(gun ? gun.kind : null);
+          // Aiming from a car puts the camera at the driver's eyes: the driver's own body would fill the view.
+          v.model.root.visible = !(this.game.aim?.active && this.game.view.inVehicle && id === this.game.view.ped?.id);
+          const x = this.extra;
+          x.aim = f & PedFlag.Aiming ? st.aimPitch : undefined;
+          x.long = !!gun && (gun.kind === 'rifle' || gun.kind === 'shotgun');
+          x.crouch = (f & PedFlag.Crouched) !== 0;
+          x.cover = (f & PedFlag.InCover) !== 0;
+          x.flinch = f & PedFlag.Flinch ? 1 : 0;
+          x.firing = (f & PedFlag.Firing) !== 0;
+          x.reload = f & PedFlag.Reloading ? 1 : 0;
+          v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time + v.seed, f & (PedFlag.Aiming | PedFlag.Crouched | PedFlag.InCover | PedFlag.Flinch | PedFlag.Reloading) ? x : undefined);
         } else {
-          solvePose(this.joints, st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time, v.lie, v.seed);
+          const x = this.extra;
+          x.aim = undefined;
+          x.crouch = x.cover = x.firing = false;
+          x.flinch = f & PedFlag.Flinch ? 1 : 0;
+          x.reload = 0;
+          solvePose(this.joints, st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time, v.lie, v.seed, x.flinch ? x : undefined);
           this.crowd.place(id, st.x, st.y, st.z, st.q, this.joints);
         }
       } else {
@@ -165,6 +195,9 @@ export class EntityViews implements System {
     this.traffic.end();
     for (const [id, v] of this.views) {
       if (!entities.has(id) || !defs.has(id)) this.dropView(id, v);
+    }
+    for (const [id, p] of this.props) {
+      if (!entities.has(id) || !defs.has(id)) this.dropProp(id, p);
     }
     this.crowd.commit();
     const cam = this.game.camera;
@@ -188,6 +221,57 @@ export class EntityViews implements System {
     }
   }
 
+  /** Helicopters and spike strips, drawn by `PoliceProps`. */
+  private readonly props = new Map<EntityId, { heli: HeliModel | null; strip: StripModel | null }>();
+  private readonly beamTarget = new THREE.Vector3();
+
+  private updateProp(id: EntityId, st: EntityState, dt: number, night: number) {
+    let p = this.props.get(id);
+    if (!p) {
+      const def = this.game.view.defs.get(id);
+      if (!def) return;
+      if (def.kind === EntityKind.Helicopter) {
+        const heli = buildHelicopter(def.color);
+        this.group.add(heli.root, heli.fx);
+        p = { heli, strip: null };
+      } else if (def.kind === EntityKind.SpikeStrip) {
+        const strip = buildSpikeStrip(def.length, def.depth);
+        this.group.add(strip.root);
+        p = { heli: null, strip };
+      } else return;
+      this.props.set(id, p);
+    }
+    const root = p.heli ? p.heli.root : p.strip!.root;
+    root.position.set(st.x, st.y + (p.strip ? 0.06 : 0), st.z);
+    root.quaternion.set(st.q.x, st.q.y, st.q.z, st.q.w);
+    if (p.heli) {
+      // The beam goes where the helicopter is looking: at the player when it has them, else a sweep of the ground ahead of it.
+      const ground = st.y - st.aux1;
+      const ped = this.game.view.controlled ?? this.game.view.ped;
+      if (st.flags & HeliFlag.Sees && ped) this.beamTarget.set(ped.x, ped.y + 0.2, ped.z);
+      else {
+        const yaw = Math.atan2(2 * (st.q.x * st.q.z + st.q.w * st.q.y), 1 - 2 * (st.q.x * st.q.x + st.q.y * st.q.y));
+        const ahead = Math.max(10, st.aux1 * 0.7);
+        const side = Math.sin(this.time * 0.6) * st.aux1 * 0.45;
+        this.beamTarget.set(st.x + Math.sin(yaw) * ahead + Math.cos(yaw) * side, ground + 0.2, st.z + Math.cos(yaw) * ahead - Math.sin(yaw) * side);
+      }
+      const light = st.flags & HeliFlag.Searchlight ? Math.min(1, 0.4 + night) : 0;
+      p.heli.update(dt, this.time, st.aux0, light, this.beamTarget);
+    }
+  }
+
+  private dropProp(id: EntityId, p: { heli: HeliModel | null; strip: StripModel | null }) {
+    if (p.heli) {
+      this.group.remove(p.heli.root, p.heli.fx);
+      p.heli.dispose();
+    }
+    if (p.strip) {
+      this.group.remove(p.strip.root);
+      p.strip.dispose();
+    }
+    this.props.delete(id);
+  }
+
   /** Removes an entity's own model (its meshes and GPU buffers go with it). */
   private dropView(id: EntityId, v: View) {
     if (v.kind === 'ped' && !v.model) this.crowd.remove(id);
@@ -209,10 +293,12 @@ export class EntityViews implements System {
       if (!def.police && !def.player && this.crowd.add(def.id, varyLook(look, def.id))) return { kind: 'ped', model: null, seed: def.id * 1.7, phase: def.id * 0.9, lie: 0 };
       return { kind: 'ped', model: buildPedModel(look), seed: def.id * 1.7, phase: 0, lie: 0 };
     }
+    // (helicopters and spike strips are drawn by `updateProp`)
+    if (def.kind !== EntityKind.Vehicle) throw new Error(`no view for entity kind ${def.kind}`);
     const h = HANDLING[def.typeId] ?? HANDLING.sedan;
     return {
       kind: 'vehicle',
-      model: buildVehicleModel(h, def.color, def.police ? { body: def.police.body, stripe: def.police.stripe, lightbar: def.police.lightbar } : undefined),
+      model: buildVehicleModel(h, def.color, def.police ? { body: def.police.body, stripe: def.police.stripe, lightbar: def.police.lightbar, unmarked: def.police.unmarked } : undefined),
       handlingId: h.id,
       door: 0,
       wear: 0,
@@ -232,6 +318,7 @@ export class EntityViews implements System {
       v.model.setCondition(wear, burnt);
     }
     if (v.police) v.model.flash(this.time, (st.flags & VehicleFlag.Lightbar) !== 0);
+    v.model.setFlats((st.flags & VehicleFlag.FlatMask) >> VehicleFlag.FlatShift);
     this.q.set(st.q.x, st.q.y, st.q.z, st.q.w);
     // The engine is at the front of the car, under the bonnet.
     this.tmp.set(0, h.chassis.offset[1] + h.chassis.halfExtents[1] + 0.1, h.chassis.halfExtents[2] * 0.62).applyQuaternion(this.q);
@@ -272,6 +359,7 @@ export class EntityViews implements System {
   }
 
   dispose() {
+    for (const [id, p] of [...this.props]) this.dropProp(id, p);
     this.traffic.dispose();
     this.crowd.dispose();
     this.smoke.dispose();

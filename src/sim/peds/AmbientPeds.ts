@@ -15,6 +15,7 @@
  */
 import { clamp, approachAngle } from '../../shared/math';
 import type { PedCause, PedReaction, SimEvent } from '../../shared/protocol';
+import { WEAPONS } from '../../shared/weapons';
 import { Axis, SIM_DT } from '../../shared/protocol';
 import { Rng } from '../../shared/rng';
 import { MAX_ENTITIES } from '../../shared/snapshot';
@@ -23,6 +24,7 @@ import { walkState, type SignalJunction } from '../../shared/signals';
 import type { ScenarioType } from '../../shared/walk';
 import { PED } from '../character/locomotion';
 import { PedEntity, type VehicleEntity } from '../entities';
+import type { PedBrain } from '../npc/brain';
 import type { Simulation } from '../Simulation';
 import { cellKey, PAVEMENT_KINDS, WalkGraph } from './graph';
 import { RoadMask } from './roadMask';
@@ -525,6 +527,7 @@ export class AmbientPeds {
       case 'flee':
       case 'fight':
         this.violent(ped, a, b.state);
+        if (b.state === 'flee') this.steerFlee(ped, a, b, dt);
         return;
       case 'dragged':
       case 'seated':
@@ -579,6 +582,8 @@ export class AmbientPeds {
     a.reactKind = '';
     if (state === 'fight') a.persistent = true;
     if (state === 'flee') {
+      a.route = null;
+      a.fleeT = 3;
       const p = this.sim.playerPosition();
       this.sim.emit({ type: 'ped:react', tick: this.sim.tick, pedId: ped.id, reaction: 'flee', cause: 'violence', x: p.x, z: p.z });
     }
@@ -952,8 +957,32 @@ export class AmbientPeds {
     this.leaveScenario(a);
     a.mode = 'flee';
     a.crossAttr = -1;
+    a.route = null;
+    a.fleeT = 3;
     b.enter('flee');
     b.threat = { x: fx, z: fz };
+  }
+
+  /**
+   * A runner heads for a far stretch of the walk network: the brain is steered to the next node of
+   * its escape route. Replanned every few seconds (sooner when it has no route). Off the network, or
+   * with nowhere clearly farther to go, there is no waypoint and the brain runs by open ground.
+   */
+  private steerFlee(ped: PedEntity, a: AmbientState, b: PedBrain, dt: number) {
+    const g = this.graph;
+    const c = ped.controller;
+    const threat = b.threat ?? this.sim.playerPosition();
+    a.fleeT += dt;
+    const r = a.route;
+    if (r && a.routeI < r.length && Math.hypot(g.x[r[a.routeI]] - c.x, g.z[r[a.routeI]] - c.z) < 1.6) a.routeI++;
+    const spent = r !== null && a.routeI >= r.length;
+    if (spent || a.fleeT >= 3 || (a.route === null && a.fleeT >= 1)) {
+      a.route = g.escapeRoute(c.x, c.z, threat.x, threat.z);
+      a.routeI = 0;
+      a.fleeT = 0;
+    }
+    const next = a.route && a.routeI < a.route.length ? a.route[a.routeI] : -1;
+    b.waypoint = next >= 0 ? { x: g.x[next], z: g.z[next] } : null;
   }
 
   /** Decides what someone at distance `d` from something frightening does, and when it starts. */
@@ -972,6 +1001,13 @@ export class AmbientPeds {
         break;
       case 'wreck':
         kind = r < 0.7 ? 'look' : courage > 0.6 && r < 0.9 ? 'film' : '';
+        break;
+      case 'gunfire':
+        // Shots: most run, the timid drop where they stand, and now and then somebody holds a phone up.
+        if (courage < 0.4 && d < 14 && r < 0.5) kind = 'cower';
+        else if (courage > 0.88 && d > 12 && r < 0.2) kind = 'film';
+        else if (d > 45 && r < 0.35) kind = 'look';
+        else kind = 'flee';
         break;
       default:
         // violence and carjacking
@@ -997,7 +1033,11 @@ export class AmbientPeds {
       const c = ped.controller;
       const d = Math.hypot(c.x - x, c.z - z);
       if (d > radius) continue;
-      if (d > 6 && !law.clearLine({ x: c.x, y: c.y + 1.5, z: c.z }, { x, y: y + 1.2, z })) continue;
+      // A burst of fire is dozens of shots: whoever is already running, hiding or fighting has made up their mind (and costs no ray).
+      if (cause === 'gunfire' && (a.mode === 'flee' || a.mode === 'cower' || a.mode === 'fight' || a.mode === 'calm')) continue;
+      // Gunfire is heard through walls within a share of its range; everything else has to be seen.
+      const heard = cause === 'gunfire' && d <= radius * 0.6;
+      if (d > 6 && !heard && !law.clearLine({ x: c.x, y: c.y + 1.5, z: c.z }, { x, y: y + 1.2, z })) continue;
       this.decide(ped, a, cause, x, z, d, strength);
     }
   }
@@ -1037,6 +1077,7 @@ export class AmbientPeds {
   /** Called by the sim for every event it emits; handled at the start of the ambient system's tick. */
   onEvent(e: SimEvent) {
     switch (e.type) {
+      case 'weapon:fire':
       case 'damage':
       case 'carjack':
       case 'vehicle:explode':
@@ -1063,6 +1104,10 @@ export class AmbientPeds {
           if (e.kind === 'melee' || e.kind === 'vehicle') this.scare(e.x, e.y, e.z, 26, 'violence');
           break;
         }
+        case 'weapon:fire':
+          // Gunfire: everyone within earshot reacts (the weapon says how far it carries).
+          this.scare(e.x, e.y, e.z, 60 * WEAPONS[e.weapon].hearM, 'gunfire');
+          break;
         case 'carjack': {
           const v = sim.registry.get(e.victimId) as PedEntity | undefined;
           if (v?.amb) v.amb.persistent = true;

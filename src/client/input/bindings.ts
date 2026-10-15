@@ -14,6 +14,16 @@ export type Action =
   | 'handbrake'
   | 'reset'
   | 'melee'
+  | 'aim'
+  | 'fire'
+  | 'reload'
+  | 'cover'
+  | 'weaponNext'
+  | 'weaponPrev'
+  | 'weapon1'
+  | 'weapon2'
+  | 'weapon3'
+  | 'weapon4'
   | 'lookLeft'
   | 'lookRight'
   | 'lookUp'
@@ -41,6 +51,18 @@ export const DEFAULT_BINDINGS: Bindings = {
   handbrake: ['Space'],
   reset: ['KeyR'],
   melee: ['KeyQ'],
+  // Right mouse aims, left fires (Z and G, or Enter, for a trackpad). R is the car reset (it does nothing on foot, but it is taken), so reload is T.
+  aim: ['Mouse2', 'KeyZ'],
+  fire: ['Mouse0', 'KeyG', 'Enter'],
+  reload: ['KeyT'],
+  cover: ['KeyX'],
+  // The wheel also cycles weapons while aiming (the camera rig leaves the zoom alone then); the brackets do it any time.
+  weaponNext: ['BracketRight'],
+  weaponPrev: ['BracketLeft'],
+  weapon1: ['Digit1'],
+  weapon2: ['Digit2'],
+  weapon3: ['Digit3'],
+  weapon4: ['Digit4'],
   lookLeft: ['ArrowLeft'],
   lookRight: ['ArrowRight'],
   lookUp: ['ArrowUp'],
@@ -99,6 +121,8 @@ export function codeLabel(code: string): string {
   if (code.startsWith('Digit')) return code.slice(5);
   const map: Record<string, string> = {
     Mouse0: 'Left click',
+    BracketLeft: '[',
+    BracketRight: ']',
     Mouse1: 'Middle click',
     Mouse2: 'Right click',
     WheelUp: 'Scroll up',

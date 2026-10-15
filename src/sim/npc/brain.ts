@@ -89,6 +89,8 @@ export class PedBrain {
   state: BrainState;
   /** What to run from when it is not the player (an explosion, a car on the pavement). Cleared when the brain leaves `flee`. */
   threat: { x: number; z: number } | null = null;
+  /** Where a runner is heading on the walk network (the next node of its escape), or null: by open ground. Cleared when the brain leaves `flee`. */
+  waypoint: { x: number; z: number } | null = null;
   /** Seconds in the current state. */
   timer = 0;
   /** Punch wind-up progress, 0 to 1 (0 when not swinging). */
@@ -122,6 +124,7 @@ export class PedBrain {
     if (state !== 'flee') {
       this.heading = null;
       this.threat = null;
+      this.waypoint = null;
     }
   }
 
@@ -161,18 +164,36 @@ export class PedBrain {
     this.rethinkIn -= s.dt;
     if (this.rethinkIn <= 0 || this.heading === null) {
       this.rethinkIn = BRAIN.rethink;
-      const c = chooseFleeHeading(s.x, s.z, s.threatX, s.threatZ, this.heading, s.probe);
-      this.heading = c.heading;
-      this.cornered = c.cornered ? this.cornered + BRAIN.rethink : 0;
-      if (this.cornered >= BRAIN.corneredFor) {
-        this.enter('fight');
-        return;
+      const guided = this.guidedHeading(s);
+      if (guided !== null) {
+        this.heading = guided;
+        this.cornered = 0;
+      } else {
+        const c = chooseFleeHeading(s.x, s.z, s.threatX, s.threatZ, this.heading, s.probe);
+        this.heading = c.heading;
+        this.cornered = c.cornered ? this.cornered + BRAIN.rethink : 0;
+        if (this.cornered >= BRAIN.corneredFor) {
+          this.enter('fight');
+          return;
+        }
       }
     }
     out.dirX = Math.sin(this.heading);
     out.dirZ = Math.cos(this.heading);
     // Sprint while the threat is close, then settle into a run.
     out.speed = dist < 30 ? 'sprint' : 'run';
+  }
+
+  /** Towards the waypoint, when the way to it is clear for a little; null otherwise (then the open-ground choice decides). */
+  private guidedHeading(s: BrainSense): number | null {
+    const w = this.waypoint;
+    if (!w) return null;
+    const dx = w.x - s.x, dz = w.z - s.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.5) return null;
+    const h = Math.atan2(dx, dz);
+    const look = Math.min(4, d);
+    return s.probe(h, look) >= look - 0.3 ? h : null;
   }
 
   private fight(s: BrainSense, dx: number, dz: number, dist: number, out: BrainOutput) {

@@ -7,56 +7,18 @@
  */
 import * as THREE from 'three';
 
-/** Atlanta's latitude, degrees north. */
-export const LATITUDE_DEG = 33.75;
-/** The sun's declination on mid-October, degrees. */
-export const DECLINATION_DEG = -8;
-/** Solar noon in mid-October (Eastern daylight time), hours after midnight. */
-export const SOLAR_NOON_H = 13.38;
+import { DECLINATION_DEG, LATITUDE_DEG, SOLAR_NOON_H, isNight, nightFactor, smoothstep, solar, sunElevation } from '../../shared/daylight';
 
-const D2R = Math.PI / 180;
-const R2D = 180 / Math.PI;
+// The sun's arc and the night factor are pure and the sim uses them too (the helicopter's searchlight): see shared/daylight.ts.
+export { DECLINATION_DEG, LATITUDE_DEG, SOLAR_NOON_H, isNight, nightFactor, sunElevation };
+
 const MINUTES_PER_DAY = 1440;
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/** Sine of the sun's elevation, and its east and north components, from the solar arc. */
-function solar(minutes: number): { east: number; north: number; up: number } {
-  const H = (minutes / 60 - SOLAR_NOON_H) * 15 * D2R;
-  const phi = LATITUDE_DEG * D2R;
-  const del = DECLINATION_DEG * D2R;
-  const cosH = Math.cos(H);
-  const cosDel = Math.cos(del);
-  return {
-    east: -cosDel * Math.sin(H),
-    north: Math.sin(del) * Math.cos(phi) - cosDel * Math.sin(phi) * cosH,
-    up: Math.sin(del) * Math.sin(phi) + cosDel * Math.cos(phi) * cosH,
-  };
-}
-
-/** The sun's elevation above the horizon, degrees (negative at night). */
-export function sunElevation(minutes: number): number {
-  return Math.asin(Math.max(-1, Math.min(1, solar(minutes).up))) * R2D;
-}
 
 /** Unit vector pointing at the sun, in game axes. Written into `out`. */
 export function sunDirection(minutes: number, out: THREE.Vector3): THREE.Vector3 {
   const s = solar(minutes);
   return out.set(s.east, s.up, -s.north);
-}
-
-function smoothstep(a: number, b: number, x: number): number {
-  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
-
-/** 0 in full daylight, 1 once the sun is well below the horizon. Dusk and dawn sit between. */
-export function nightFactor(minutes: number): number {
-  return 1 - smoothstep(-6, 4, sunElevation(minutes));
-}
-
-/** True when the night lights should be on (the sun is more than about 2 degrees below the horizon). */
-export function isNight(minutes: number): boolean {
-  return nightFactor(minutes) >= 0.5;
 }
 
 /** The sky's warm wash at dusk and dawn: strongest at the horizon, gone by about 14 degrees either side. */

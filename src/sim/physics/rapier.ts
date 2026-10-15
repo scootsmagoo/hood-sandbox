@@ -37,4 +37,6 @@ export const GROUPS = {
   vehicleQuery: groups(Group.Query, Group.Vehicle),
   /** The camera arm sees only the world. */
   cameraQuery: groups(Group.Query, Group.World),
+  /** A bullet sees the world, cars and people. (Its membership is World because a person's collider only answers to World.) */
+  bullet: groups(Group.World, Group.World | Group.Vehicle | Group.Ped),
 } as const;

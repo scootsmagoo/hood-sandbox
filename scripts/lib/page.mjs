@@ -11,6 +11,7 @@
  *           drive(s)           drive a wandering route over the streets for s seconds
  *           parkAndExit()      brake to a stop and get out
  *           spin(s)            stand and turn the camera round once
+ *           gunfire(s)         hold the gun up and send a barrage through the client's event path for s seconds (see below)
  *   rec   a frame recorder: begin(name) ... end() gives the summary of a phase: animation-frame times, main-thread
  *         CPU ms per frame, GPU ms per frame (timer queries), draws, triangles, heap
  *   memory()  counts the harnesses watch: renderer geometries (and `unusedGeometries`, the uploaded ones the scene
@@ -216,13 +217,15 @@ export function installHarness(cfg) {
         case 'toCar': {
           // Back to where we got out (or started): E works there. (Where the door is, and who sits
           // in the car, is the sim's business and changes; a spot that worked once keeps working.)
-          const home = bot.home || st;
+          // If that has not worked in 6 s (traffic may have shoved the parked car away), walk to the nearest car instead.
+          const late = now - bot.toCarFrom > 6000 && v.vehicle;
+          const home = late ? v.vehicle : bot.home || st;
           const d = Math.hypot(home.x - st.x, home.z - st.z);
           game.cameraRig.yaw = Math.atan2(-(home.x - st.x), -(home.z - st.z));
           if (v.inVehicle) finish();
           else {
-            input.setAnalogMove('bot', 0, d > 0.8 ? -1 : 0);
-            if (d < 2.5) tapE();
+            input.setAnalogMove('bot', 0, d > (late ? 1.6 : 0.8) ? -1 : 0);
+            if (d < (late ? 3.2 : 2.5)) tapE();
           }
           break;
         }
@@ -304,6 +307,7 @@ export function installHarness(cfg) {
   bot.enterCar = async () => {
     if (game.view.inVehicle) return;
     bot.stats.enters++;
+    bot.toCarFrom = performance.now();
     await go('toCar');
   };
   bot.drive = async (seconds) => {
@@ -319,6 +323,35 @@ export function installHarness(cfg) {
     bot.spinMs = seconds * 1000;
     bot.spinYaw0 = game.cameraRig.yaw;
     return go('spin');
+  };
+  /**
+   * A gunfight as the client sees it: the aim camera and the crosshair up, and 12 shots a second for `seconds` (an SMG's rate, with a
+   * shotgun volley of eight pellets every second shot), hitting the street, people and cars, plus reloads and clicks. The shots are
+   * events fed to the client's own listeners (the sim is not asked to shoot: it would raise the heat and bring the police), so the
+   * tracers, flashes, puffs, holes, camera kick and sound all run as they do in play.
+   */
+  bot.gunfire = async (seconds) => {
+    const listeners = game.net.listeners;
+    game.input.holdAction('aim', true);
+    await sleep(400);
+    const kinds = ['world', 'ped', 'vehicle', 'none', 'world'];
+    const t0 = performance.now();
+    for (let n = 0; performance.now() - t0 < seconds * 1000; n++) {
+      const cam = game.camera.position;
+      const f = { x: -Math.sin(game.cameraRig.yaw), z: -Math.cos(game.cameraRig.yaw) };
+      const shotgun = n % 2 === 1;
+      const impacts = [];
+      for (let p = 0; p < (shotgun ? 8 : 1); p++) {
+        const d = 6 + ((n * 7 + p * 5) % 45);
+        const side = ((n + p * 2) % 11) - 5;
+        impacts.push({ kind: kinds[(n + p) % 5], x: cam.x + f.x * d - f.z * side, y: cam.y - 1.2 + ((n + p) % 4) * 0.4, z: cam.z + f.z * d + f.x * side, nx: -f.x, ny: 0, nz: -f.z, targetId: 0, headshot: false });
+      }
+      const e = { type: 'weapon:fire', tick: 0, shooterId: game.view.ped.id, weapon: shotgun ? 'shotgun' : 'smg', x: cam.x + f.x * 0.8, y: cam.y - 0.3, z: cam.z + f.z * 0.8, dx: f.x, dy: 0, dz: f.z, impacts };
+      for (const fn of listeners) fn(e);
+      if (n % 30 === 29) for (const fn of listeners) fn({ type: 'weapon:reload', tick: 0, pedId: game.view.ped.id, weapon: 'smg', durationS: 1.5 });
+      await sleep(1000 / 12);
+    }
+    game.input.holdAction('aim', false);
   };
   bot.stop = () => finish();
   bot.ready = ready;

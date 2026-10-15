@@ -6,7 +6,9 @@
  */
 import * as THREE from 'three';
 import type { HandlingData } from '../../shared/handling';
-import { newJoints, solvePose, type PedMode } from './pedPose';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { newJoints, solvePose, type PedMode, type PoseExtra } from './pedPose';
+import type { WeaponKind } from '../../shared/weapons';
 import { WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
 
 // Boxes of the same size share one geometry, so building and dropping models does not leak.
@@ -33,6 +35,8 @@ export interface VehicleModel {
   flash(time: number, on: boolean): void;
   /** Wear: 0 (new) to 1 (wrecked) darkens the paint; `burnt` chars the whole car. */
   setCondition(wear: number, burnt: boolean): void;
+  /** Flat tyres, one bit a wheel (snapshot order): those wheels are drawn squashed and sunk. */
+  setFlats(mask: number): void;
   dispose(): void;
 }
 
@@ -41,6 +45,8 @@ export interface ModelLivery {
   body: number;
   stripe: number;
   lightbar: [number, number];
+  /** A plain car: no stripe and no roof bar, only two strobes in the windscreen and grille that show when the lights are on. */
+  unmarked?: boolean;
 }
 
 let glowTexture: THREE.CanvasTexture | null = null;
@@ -93,13 +99,18 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
   tail.userData.part = 'tail';
   const c = h.chassis;
   const [hx, hy, hz] = c.halfExtents;
-  root.add(box(hx * 2, hy * 2, hz * 2, paint, c.offset[0], c.offset[1], c.offset[2]));
+  const shadowCasters: THREE.Object3D[] = [];
+  const bodyBox = box(hx * 2, hy * 2, hz * 2, paint, c.offset[0], c.offset[1], c.offset[2]);
+  shadowCasters.push(bodyBox);
+  root.add(bodyBox);
   // Bumpers and lower trim.
   root.add(box(hx * 2 + 0.02, 0.16, 0.14, shared.trim, 0, c.offset[1] - hy + 0.1, hz));
   root.add(box(hx * 2 + 0.02, 0.16, 0.14, shared.trim, 0, c.offset[1] - hy + 0.1, -hz));
   // Greenhouse: glass with a body-coloured roof slab.
   const cab = c.cabin;
-  root.add(box(cab.halfExtents[0] * 2, cab.halfExtents[1] * 2, cab.halfExtents[2] * 2, shared.glass, cab.offset[0], cab.offset[1], cab.offset[2]));
+  const cabBox = box(cab.halfExtents[0] * 2, cab.halfExtents[1] * 2, cab.halfExtents[2] * 2, shared.glass, cab.offset[0], cab.offset[1], cab.offset[2]);
+  shadowCasters.push(cabBox);
+  root.add(cabBox);
   root.add(box(cab.halfExtents[0] * 2 + 0.04, 0.06, cab.halfExtents[2] * 2 - 0.1, paint, cab.offset[0], cab.offset[1] + cab.halfExtents[1] + 0.03, cab.offset[2]));
   if (h.body === 'pickup') {
     // An open bed behind the cab: floor rails, side walls and a tailgate.
@@ -164,27 +175,46 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
   // Police: a stripe down the flank and a lightbar on the roof, two lamps that take turns.
   const lamps: { mat: THREE.MeshStandardMaterial; glow: THREE.Sprite; color: number }[] = [];
   if (livery) {
-    const stripe = new THREE.MeshStandardMaterial({ color: livery.stripe, roughness: 0.5 });
-    owned.push(stripe);
-    for (const sx of [-1, 1]) root.add(box(0.03, 0.14, hz * 1.5, stripe, sx * (hx + 0.012), c.offset[1] + 0.02, -0.1));
-    const roofY = cab.offset[1] + cab.halfExtents[1] + 0.12;
     const dark = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 });
     owned.push(dark);
-    root.add(box(cab.halfExtents[0] * 1.3, 0.07, 0.24, dark, cab.offset[0], roofY - 0.04, cab.offset[2]));
-    for (const [i, sx] of [-1, 1].entries()) {
-      const col = livery.lightbar[i];
-      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(col).multiplyScalar(0.25), emissive: col, emissiveIntensity: 0, roughness: 0.4 });
-      owned.push(mat);
-      const lamp = box(cab.halfExtents[0] * 0.62, 0.08, 0.2, mat, cab.offset[0] + sx * cab.halfExtents[0] * 0.38, roofY + 0.02, cab.offset[2]);
+    const addLamp = (col: number, size: [number, number, number], x: number, y: number, z: number, glowSize: number) => {
+      const lm = new THREE.MeshStandardMaterial({ color: new THREE.Color(col).multiplyScalar(0.25), emissive: col, emissiveIntensity: 0, roughness: 0.4 });
+      owned.push(lm);
+      const lamp = box(size[0], size[1], size[2], lm, x, y, z);
       lamp.castShadow = false;
       root.add(lamp);
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
-      glow.scale.setScalar(2.4);
-      glow.position.set(lamp.position.x, roofY + 0.15, lamp.position.z);
+      glow.scale.setScalar(glowSize);
+      glow.position.set(x, y + 0.1, z);
       root.add(glow);
       owned.push(glow.material);
-      lamps.push({ mat, glow, color: col });
+      lamps.push({ mat: lm, glow, color: col });
+    };
+    if (livery.unmarked) {
+      // Strobes behind the windscreen and in the grille: nothing to see until they are switched on.
+      const dashY = cab.offset[1] + cab.halfExtents[1] * 0.55;
+      const dashZ = cab.offset[2] + cab.halfExtents[2] - 0.12;
+      addLamp(livery.lightbar[0], [0.22, 0.06, 0.08], -cab.halfExtents[0] * 0.5, dashY, dashZ, 1.5);
+      addLamp(livery.lightbar[1], [0.22, 0.06, 0.08], cab.halfExtents[0] * 0.5, dashY, dashZ, 1.5);
+      addLamp(livery.lightbar[1], [0.2, 0.05, 0.05], -hx * 0.55, c.offset[1] - hy * 0.2, hz + 0.04, 1.1);
+      addLamp(livery.lightbar[0], [0.2, 0.05, 0.05], hx * 0.55, c.offset[1] - hy * 0.2, hz + 0.04, 1.1);
+    } else {
+      // A stripe down the flank and a lightbar on the roof, two lamps that take turns.
+      const stripe = new THREE.MeshStandardMaterial({ color: livery.stripe, roughness: 0.5 });
+      owned.push(stripe);
+      for (const sx of [-1, 1]) root.add(box(0.03, 0.14, hz * 1.5, stripe, sx * (hx + 0.012), c.offset[1] + 0.02, -0.1));
+      const roofY = cab.offset[1] + cab.halfExtents[1] + 0.12;
+      root.add(box(cab.halfExtents[0] * 1.3, 0.07, 0.24, dark, cab.offset[0], roofY - 0.04, cab.offset[2]));
+      for (const [i, sx] of [-1, 1].entries()) addLamp(livery.lightbar[i], [cab.halfExtents[0] * 0.62, 0.08, 0.2], cab.offset[0] + sx * cab.halfExtents[0] * 0.38, roofY + 0.02, cab.offset[2], 2.4);
     }
+  }
+  // A police car's detail (wheels' hubs, lamps, trim) does not cast a shadow of its own: the body does, and a response of five cars would
+  // otherwise cost a hundred more draws in the shadow pass.
+  if (livery) {
+    const keep = new Set<THREE.Object3D>(shadowCasters);
+    root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && !keep.has(o)) o.castShadow = false;
+    });
   }
   const paintBase = new THREE.Color(color);
   const doorBase = new THREE.Color(color).multiplyScalar(0.92);
@@ -211,6 +241,12 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
         l.glow.material.opacity = lit ? 0.95 : 0;
       }
     },
+    setFlats(mask) {
+      for (let i = 0; i < WHEEL_COUNT; i++) {
+        const flat = (mask >> i) & 1;
+        rollers[i].scale.set(1, flat ? 0.74 : 1, flat ? 0.74 : 1);
+      }
+    },
     setCondition(wear, burnt) {
       const k = burnt ? 1 : Math.min(0.55, wear * 0.55);
       paint.color.copy(paintBase).lerp(char, k);
@@ -235,7 +271,9 @@ export type { PedMode };
 export interface PedModel {
   root: THREE.Group;
   /** `speed` in m/s; `phase` is advanced by the caller; `swing` is a punch's wind-up, 0 to 1; `pedPose` is the sim's `PedPose` and `time` seconds. */
-  pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number, pedPose?: number, time?: number): void;
+  pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number, pedPose?: number, time?: number, extra?: PoseExtra): void;
+  /** Puts a gun of this kind in the hands (null: empty hands). Its mesh is made the first time and shares geometry with every other model. */
+  setGun(kind: WeaponKind | null): void;
   /** Topples the figure: 1 lies on its back (knocked down), -1 face down (dead), 0 stands. A stand-in for a ragdoll. */
   lie(amount: number): void;
 }
@@ -256,6 +294,27 @@ export const OUTFITS: readonly PedLook[] = [
   { jacket: 0xd0a43a, jeans: 0x232a33, skin: 0xa8734f, cap: 0x2d5e7a },
   { jacket: 0x4a4a52, jeans: 0x5a6a80, skin: 0xd5a784, cap: null },
 ];
+
+// ---- Guns: one merged mesh per kind, barrel along +Z, origin at the grip.
+const gunGeos = new Map<WeaponKind, THREE.BufferGeometry>();
+let gunMaterial: THREE.MeshStandardMaterial | null = null;
+function gunGeometry(kind: WeaponKind): THREE.BufferGeometry {
+  let g = gunGeos.get(kind);
+  if (g) return g;
+  const parts: [number, number, number, number, number, number][] =
+    kind === 'pistol'
+      ? [[0.035, 0.045, 0.19, 0, 0.03, 0.07], [0.035, 0.1, 0.05, 0, -0.045, -0.01]]
+      : kind === 'smg'
+        ? [[0.05, 0.075, 0.3, 0, 0.02, 0.12], [0.03, 0.15, 0.04, 0, -0.09, 0.08], [0.04, 0.05, 0.12, 0, 0.0, -0.1], [0.025, 0.025, 0.1, 0, 0.03, 0.3]]
+        : kind === 'shotgun'
+          ? [[0.04, 0.04, 0.72, 0, 0.03, 0.32], [0.045, 0.085, 0.3, 0, 0.0, -0.18], [0.06, 0.045, 0.2, 0, -0.035, 0.26]]
+          : [[0.05, 0.09, 0.5, 0, 0.02, 0.2], [0.025, 0.025, 0.32, 0, 0.03, 0.62], [0.045, 0.1, 0.26, 0, -0.01, -0.2], [0.035, 0.15, 0.05, 0, -0.11, 0.15], [0.03, 0.03, 0.12, 0, 0.09, 0.2]];
+  const geos = parts.map(([w, h, d, x, y, z]) => new THREE.BoxGeometry(w, h, d).translate(x, y, z));
+  g = mergeGeometries(geos, false)!;
+  for (const b of geos) b.dispose();
+  gunGeos.set(kind, g);
+  return g;
+}
 
 const pedMaterials = new Map<number, THREE.MeshStandardMaterial>();
 const pedMat = (color: number, rough = 0.8) => {
@@ -308,15 +367,36 @@ export function buildPedModel(look: PedLook = OUTFITS[0]): PedModel {
   if (look.cap !== null) torso.add(box(0.25, 0.06, 0.28, pedMat(look.cap), 0, 0.81, 0.04));
   inner.add(legL, legR, torso, armL, armR);
 
+  // The gun sits in the right hand's pivot, its barrel along the arm; a lowered arm points it at the ground.
+  let gunKind: WeaponKind | null = null;
+  const guns = new Map<WeaponKind, THREE.Mesh>();
   let lying = 0;
   const j = newJoints();
   return {
     root,
+    setGun(kind) {
+      if (kind === gunKind) return;
+      if (gunKind) guns.get(gunKind)!.visible = false;
+      gunKind = kind;
+      if (!kind) return;
+      let m = guns.get(kind);
+      if (!m) {
+        m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.45, metalness: 0.6 })));
+        m.castShadow = true;
+        m.rotation.x = Math.PI / 2;
+        // The grip is in the hand at the end of the arm and the barrel runs on past it; drawn a little oversize so it reads from behind.
+        m.position.set(0, -0.58, 0.0);
+        m.scale.setScalar(1.35);
+        armR.add(m);
+        guns.set(kind, m);
+      }
+      m.visible = true;
+    },
     lie(amount) {
       lying = amount;
     },
-    pose(speed, grounded, phase, mode = 'normal', swing = 0, pedPose = 0, time = 0) {
-      solvePose(j, speed, grounded, phase, mode, swing, pedPose, time, lying);
+    pose(speed, grounded, phase, mode = 'normal', swing = 0, pedPose = 0, time = 0, extra) {
+      solvePose(j, speed, grounded, phase, mode, swing, pedPose, time, lying, 0, extra);
       inner.scale.setScalar(j.scale);
       inner.rotation.x = j.tiltX;
       inner.position.set(0, j.shiftY, j.shiftZ);

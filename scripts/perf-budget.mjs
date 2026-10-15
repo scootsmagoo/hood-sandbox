@@ -14,6 +14,7 @@
  *   walk    out along the streets about 60 m and back (on foot)
  *   drive   40 s in the car over a wandering route of real streets
  *   look    6 s standing, the camera turning once round
+ *   gunfire 6 s standing with the gun up and 12 shots a second through the client's event path (tracers, flashes, puffs, holes, sound)
  * Per phase:
  *   frameP50, frameP95  ms between animation frames, at the display's rate (16.7 ms at 60 Hz, so a
  *                       budget on these catches dropped frames, not headroom)
@@ -47,7 +48,7 @@ const TIMED = new Set(['frameP50', 'frameP95', 'cpuMean', 'cpuP95', 'gpuP50', 'g
 const WORST = new Set([...TIMED, 'draws', 'triangles']);
 /** Frame times are display-bound (16.7 ms at 60 Hz), so their budget is a fixed drop threshold, not measured x headroom (which would accept 30 fps). */
 const FRAME_BUDGET_MS = 25;
-const PHASES = ['idle', 'walk', 'drive', 'look'];
+const PHASES = ['idle', 'walk', 'drive', 'look', 'gunfire'];
 
 const server = await startServer(args);
 const browser = await launch({ browserName: args.browser ?? 'chromium', uncapped: !!args.uncapped });
@@ -149,6 +150,7 @@ async function runProfile(name) {
     });
     await page.evaluate(() => window.__h.bot.parkAndExit());
     await phase('look', () => page.evaluate(() => window.__h.bot.spin(6)));
+    await phase('gunfire', () => page.evaluate(() => window.__h.bot.gunfire(6)));
     await gc(cdp);
     const mem = await page.evaluate(() => window.__h.memory());
     const driven = await page.evaluate(() => window.__h.bot.stats);

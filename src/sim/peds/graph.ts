@@ -21,6 +21,47 @@ export interface EdgeHit {
 
 export const cellKey = (cx: number, cz: number) => (cx + 4096) * 8192 + (cz + 4096);
 
+/** A binary min-heap of [key, node] pairs, for the searches over the network. */
+class MinHeap {
+  private readonly a: [number, number][] = [];
+
+  get size(): number {
+    return this.a.length;
+  }
+
+  push(f: number, n: number) {
+    const heap = this.a;
+    heap.push([f, n]);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p][0] <= heap[i][0]) break;
+      [heap[p], heap[i]] = [heap[i], heap[p]];
+      i = p;
+    }
+  }
+
+  pop(): [number, number] {
+    const heap = this.a;
+    const top = heap[0];
+    const last = heap.pop()!;
+    if (heap.length) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === i) break;
+        [heap[m], heap[i]] = [heap[i], heap[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
 export class WalkGraph {
   readonly nodeCount: number;
   readonly edgeCount: number;
@@ -173,46 +214,13 @@ export class WalkGraph {
     const came = new Map<number, number>();
     const closed = new Set<number>();
     const h = (n: number) => Math.hypot(this.x[n] - this.x[to], this.z[n] - this.z[to]);
-    // A binary heap of [f, node].
-    const heap: [number, number][] = [[h(from), from]];
-    const push = (f: number, n: number) => {
-      heap.push([f, n]);
-      let i = heap.length - 1;
-      while (i > 0) {
-        const p = (i - 1) >> 1;
-        if (heap[p][0] <= heap[i][0]) break;
-        [heap[p], heap[i]] = [heap[i], heap[p]];
-        i = p;
-      }
-    };
-    const pop = (): [number, number] => {
-      const top = heap[0];
-      const last = heap.pop()!;
-      if (heap.length) {
-        heap[0] = last;
-        let i = 0;
-        for (;;) {
-          const l = 2 * i + 1, r = l + 1;
-          let m = i;
-          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-          if (m === i) break;
-          [heap[m], heap[i]] = [heap[i], heap[m]];
-          i = m;
-        }
-      }
-      return top;
-    };
+    const heap = new MinHeap();
+    heap.push(h(from), from);
     let expanded = 0;
-    while (heap.length && expanded < maxExpand) {
-      const [, n] = pop();
+    while (heap.size && expanded < maxExpand) {
+      const [, n] = heap.pop();
       if (closed.has(n)) continue;
-      if (n === to) {
-        const path = [n];
-        let c = n;
-        while (came.has(c)) { c = came.get(c)!; path.push(c); }
-        return path.reverse();
-      }
+      if (n === to) return this.pathTo(came, n);
       closed.add(n);
       expanded++;
       const gn = g.get(n)!;
@@ -226,11 +234,78 @@ export class WalkGraph {
         if (ng < (g.get(m) ?? Infinity)) {
           g.set(m, ng);
           came.set(m, n);
-          push(ng + h(m), m);
+          heap.push(ng + h(m), m);
         }
       }
     }
     return null;
+  }
+
+  /**
+   * A short run away from a threat at (tx, tz), for someone standing at (x, z): Dijkstra out from both
+   * ends of the walk edge they are on (the walk to either end is what it costs), for up to `maxExpand`
+   * nodes and `maxCost` metres, to the node that ends farthest from the threat less what it costs to
+   * get there. Crossings cost four times their length, so a runner keeps to the pavement. Returns the
+   * nodes to walk through, the first of them an end of the edge, or null when nothing is clearly
+   * farther off than (x, z) (cornered, or off the network).
+   */
+  escapeRoute(x: number, z: number, tx: number, tz: number, maxExpand = 260, maxCost = 90): number[] | null {
+    const hit = this.nearestEdge(x, z, 8);
+    if (!hit) return null;
+    const dThreat = (n: number) => Math.hypot(this.x[n] - tx, this.z[n] - tz);
+    const start = Math.hypot(x - tx, z - tz);
+    const g = new Map<number, number>();
+    const came = new Map<number, number>();
+    const closed = new Set<number>();
+    const heap = new MinHeap();
+    for (const n of [this.ea[hit.edge], this.eb[hit.edge]]) {
+      const c = Math.hypot(this.x[n] - x, this.z[n] - z);
+      if (c < (g.get(n) ?? Infinity)) {
+        g.set(n, c);
+        heap.push(c, n);
+      }
+    }
+    let best = -1;
+    let bestScore = start;
+    let expanded = 0;
+    while (heap.size && expanded < maxExpand) {
+      const [gn, n] = heap.pop();
+      if (closed.has(n) || gn > g.get(n)!) continue;
+      closed.add(n);
+      expanded++;
+      const score = dThreat(n) - 0.3 * gn;
+      if (score > bestScore) {
+        bestScore = score;
+        best = n;
+      }
+      // never run past the threat itself
+      if (dThreat(n) < 5) continue;
+      for (let k = this.adjStart[n]; k < this.adjStart[n + 1]; k++) {
+        const e = this.adjEdges[k];
+        const m = this.other(e, n);
+        if (closed.has(m)) continue;
+        const kind = this.kindOf(e);
+        const ng = gn + this.len[e] * (kind === 'crossing' ? 4 : kind === 'steps' ? 1.2 : 1) + (kind === 'crossing' ? 10 : 0);
+        if (ng > maxCost) continue;
+        if (ng < (g.get(m) ?? Infinity)) {
+          g.set(m, ng);
+          came.set(m, n);
+          heap.push(ng, m);
+        }
+      }
+    }
+    if (best < 0 || dThreat(best) < start + 4) return null;
+    return this.pathTo(came, best);
+  }
+
+  private pathTo(came: Map<number, number>, to: number): number[] {
+    const path = [to];
+    let c = to;
+    while (came.has(c)) {
+      c = came.get(c)!;
+      path.push(c);
+    }
+    return path.reverse();
   }
 
   /** The edge joining two nodes, or -1. */

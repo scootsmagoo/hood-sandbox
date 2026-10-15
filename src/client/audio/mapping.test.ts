@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceGain, dopplerFactor, enginePitch, gearFor, IDLE_HZ, impactGain, REDLINE_HZ, squealLevel } from './mapping';
+import { distanceGain, dopplerFactor, enginePitch, gearFor, gunshotFilterHz, gunshotGain, IDLE_HZ, impactGain, REDLINE_HZ, squealLevel } from './mapping';
 
 describe('gearFor', () => {
   it('shifts up at each threshold', () => {
@@ -71,5 +71,20 @@ describe('curves', () => {
     expect(dopplerFactor(20)).toBeGreaterThan(1);
     expect(dopplerFactor(-20)).toBeLessThan(1);
     expect(dopplerFactor(0)).toBe(1);
+  });
+});
+
+describe('gunshots', () => {
+  it('carry further than a thud, fall off smoothly and are gone past 420 m', () => {
+    expect(gunshotGain(0)).toBe(1);
+    expect(gunshotGain(60)).toBeGreaterThan(distanceGain(60) * 1.5);
+    expect(gunshotGain(100)).toBeLessThan(gunshotGain(50));
+    expect(gunshotGain(430)).toBe(0);
+    expect(gunshotGain(-5)).toBe(1);
+  });
+  it('lose their crack with distance: the low-pass closes', () => {
+    expect(gunshotFilterHz(0)).toBe(16000);
+    expect(gunshotFilterHz(100)).toBeLessThan(gunshotFilterHz(20));
+    expect(gunshotFilterHz(5000)).toBe(650);
   });
 });

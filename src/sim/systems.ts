@@ -14,6 +14,7 @@ import { BRAIN, newBrainOutput } from './npc/brain';
 import { probeFrom } from './npc/probe';
 import { GROUPS } from './physics/rapier';
 import { damagePed } from './combat/damage';
+import { AimPoseSystem, WeaponSystem, playerWeaponInput } from './combat/weapons/WeaponSystem';
 import { DownedSystem, FallSystem, LifeSystem, MeleeSystem, VehicleDamageSystem, VehicleHitSystem, startMelee } from './combat/systems';
 import { LawSystem } from './law/Law';
 import { PoliceSystem } from './police/PoliceSystem';
@@ -87,7 +88,9 @@ export class PlayerControlSystem implements SimSystem {
         veh.car.reset();
         sim.emit({ type: 'vehicle:reset', tick: sim.tick, vehicleId: veh.id });
       }
-      if (!veh && p.edges & Button.Melee) startMelee(sim, ped);
+      // Guns, cover and the weapon keys; aiming with a gun, the punch button reloads instead.
+      const tookMelee = playerWeaponInput(sim, p, ped, veh);
+      if (!veh && !tookMelee && p.edges & Button.Melee) startMelee(sim, ped);
       p.edges = 0;
 
       const held = p.buttons;
@@ -372,7 +375,7 @@ export class TrafficSystem implements SimSystem {
 }
 
 export function defaultSystems(): SimSystem[] {
-  return [new PlayerControlSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem()].sort(
+  return [new PlayerControlSystem(), new WeaponSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new AimPoseSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem()].sort(
     (a, b) => a.priority - b.priority,
   );
 }

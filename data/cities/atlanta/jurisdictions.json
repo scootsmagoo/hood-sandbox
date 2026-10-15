@@ -46,7 +46,9 @@
       "pit": false,
       "livery": { "body": "#15171a", "stripe": "#2a2d33", "lightbar": ["#252a31", "#2a2526"] },
       "vehicle": "coupe",
-      "minHeat": 4
+      "minHeat": 4,
+      "unmarked": true,
+      "strobe": ["#ff2a2a", "#2a5cff"]
     },
     {
       "id": "fed",
@@ -58,7 +60,9 @@
       "pit": false,
       "livery": { "body": "#3d4046", "stripe": "#8a8f98", "lightbar": ["#f0f0f0", "#6a7cff"] },
       "vehicle": "pickup",
-      "minHeat": 5
+      "minHeat": 5,
+      "unmarked": true,
+      "strobe": ["#ffffff", "#ff2a2a"]
     },
     {
       "id": "guard",

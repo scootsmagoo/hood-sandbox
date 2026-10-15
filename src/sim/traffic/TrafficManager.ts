@@ -18,6 +18,7 @@ import { EntityKind, type EntityId } from '../../shared/entities';
 import { clamp, lerp, rotateVec, smoothstep, wrapAngle, yawFromDir, type Quat } from '../../shared/math';
 import { SIM_DT, Axis, type SimEvent } from '../../shared/protocol';
 import { Rng } from '../../shared/rng';
+import { WEAPONS } from '../../shared/weapons';
 import { legState } from '../../shared/signals';
 import { AI_OWNER, PedEntity, VehicleEntity } from '../entities';
 import { PedBrain, rollPersonality, type Personality } from '../npc/brain';
@@ -25,7 +26,9 @@ import { GROUPS } from '../physics/rapier';
 import { pedalsFor, pursuitAngle, steerCommand } from '../police/pursuit';
 import type { Simulation } from '../Simulation';
 import { steerLock } from '../vehicles/dynamics';
+import type { WalkGraph } from '../peds/graph';
 import { Ctl, LaneGraph, type EdgePoint, type SpawnSpot } from './LaneGraph';
+import { YIELD, crossingBusy, indexCrossings, type LaneCrossing } from './crossings';
 import { DEFAULT_IDM, MAX_BRAKE, freeAccel, idmAccel, mobilChange, stoppingDistance, type IdmParams } from './idm';
 import { Arbiter, type Probe } from './junction';
 import { carSlot, carZoneAt, pickVehicle, type TrafficPopulation } from './population';
@@ -140,6 +143,10 @@ export class TrafficCar {
   why = 'free';
   /** the last verdict at a junction gate (debugging) */
   gateWhy = '';
+  /** seconds spent stopped for people on a crossing; the crossing it gave way to; and the one it has given up waiting for */
+  crossT = 0;
+  crossWait = -1;
+  crossSkip = -1;
 
   constructor(
     readonly serial: number,
@@ -233,6 +240,8 @@ export class TrafficManager implements Probe {
   private readonly dangers: Danger[] = [];
   private readonly spotBuf: SpawnSpot[] = [];
   private readonly walkers: { x: number; z: number; vx: number; vz: number; player: boolean }[] = [];
+  /** the unsignalled crossings each lane crosses (none without the walk network) */
+  private readonly crossings: LaneCrossing[][] | null;
   /** Vehicles that are not driven by the traffic and stand still: parked cars, wrecks, the player's car at rest. */
   private readonly statics: { x: number; z: number; fx: number; fz: number; hl: number; hw: number; player: boolean }[] = [];
   private box: RAPIER.Cuboid | null = null;
@@ -250,10 +259,12 @@ export class TrafficManager implements Probe {
     readonly graph: LaneGraph,
     private readonly pop: TrafficPopulation,
     density = 1,
+    walk?: WalkGraph,
   ) {
     this.rng = sim.rng.fork('traffic');
     this.arbiter = new Arbiter(graph);
     this.density = density;
+    this.crossings = walk ? indexCrossings(graph, walk) : null;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -305,6 +316,17 @@ export class TrafficManager implements Probe {
       case 'damage':
         if (e.kind === 'melee') this.dangers.push({ x: e.x, z: e.z, t0: tick, r: 30, s: 8 });
         break;
+      case 'weapon:fire': {
+        // Shots: drivers within earshot floor it (or swerve); one who is shot at, or sees it close, may abandon the car.
+        const hear = 70 * WEAPONS[e.weapon].hearM;
+        this.dangers.push({ x: e.x, z: e.z, t0: tick, r: hear, s: 14 });
+        for (const im of e.impacts) {
+          if (im.kind !== 'vehicle') continue;
+          const c = this.carOf(im.targetId);
+          if (c) this.shotAt(c);
+        }
+        break;
+      }
       case 'carjack': {
         const c = this.carOf(e.vehicleId);
         if (c) this.hand(c, 'jacked');
@@ -317,6 +339,23 @@ export class TrafficManager implements Probe {
       }
       default:
         break;
+    }
+  }
+
+  /** A bullet hit this traffic car: the driver panics for a good while, and the timid get out and run. */
+  private shotAt(c: TrafficCar) {
+    c.touched = true;
+    c.panic = 1;
+    c.panicUntil = this.now + 20;
+    const driver = c.veh.occupantId ? (this.sim.registry.get(c.veh.occupantId) as PedEntity | undefined) : undefined;
+    if (!driver || driver.role === 'player' || driver.life === 'dead' || c.mode === 'free') return;
+    // Bold drivers floor it; the rest stop, get out and run. Decided by the same roll each time (the personality), not by chance per bullet.
+    if (driver.brain && driver.brain.personality.courage < 0.55) {
+      this.hand(c, 'wreck', 'shot-at');
+      this.sim.ejectPed(driver);
+      driver.brain.release();
+      driver.brain.enter('flee');
+      driver.brain.threat = { x: this.px, z: this.pz };
     }
   }
 
@@ -864,6 +903,37 @@ export class TrafficManager implements Probe {
     return stopLine;
   }
 
+  /**
+   * Where a car must stop for people on an unsignalled crossing ahead on its path: the distance from
+   * its centre to the stop, or Infinity. Only lanes (not junctions) are yielded on, and only where the
+   * car can still stop comfortably; a car that has already given way to a crossing for too long skips it.
+   */
+  private crossingStop(c: TrafficCar): number {
+    if (!this.crossings || c.mode === 'free' || this.graph.isConnector[c.edge]) return Infinity;
+    const g = this.graph;
+    const horizon = 60;
+    let edge = c.edge;
+    let dist = -c.s;
+    for (let k = 0; k <= c.route.length && k < 6; k++) {
+      if (!g.isConnector[edge]) {
+        for (const x of this.crossings[edge]) {
+          const d = dist + x.s;
+          if (d < 0.5) continue;
+          if (d > horizon) return Infinity;
+          if (x.s < YIELD.minS || x.walk === c.crossSkip || !crossingBusy(x, this.walkers)) continue;
+          const stop = d - YIELD.gap;
+          if (stop - c.len / 2 < stoppingDistance(c.v, MAX_BRAKE)) return Infinity;
+          c.crossWait = x.walk;
+          return stop;
+        }
+      }
+      dist += g.len[edge];
+      if (k >= c.route.length) break;
+      edge = c.route[k];
+    }
+    return Infinity;
+  }
+
   /** Whether the lane after a junction has no room for `c` at its start. */
   private exitBlocked(outLane: number, c: TrafficCar): boolean {
     const list = this.edgeCars.get(outLane);
@@ -950,7 +1020,7 @@ export class TrafficManager implements Probe {
     const base = { v0: idm.v0, T: idm.T / (1 + 0.5 * c.panic), a: idm.a * panicKick, b: idm.b, s0: idm.s0 };
 
     let acc = freeAccel(base, c.v);
-    let binding: 'free' | 'car' | 'gate' | 'obstacle' = 'free';
+    let binding: 'free' | 'car' | 'gate' | 'crossing' | 'obstacle' = 'free';
     const lead = this.findLeader(c);
     if (lead) {
       const a = idmAccel(base, c.v, lead.gap, lead.v);
@@ -959,15 +1029,27 @@ export class TrafficManager implements Probe {
         binding = 'car';
       }
     }
-    const stop = this.gate(c);
+    const gateStop = this.gate(c);
+    const crossStop = this.crossingStop(c);
+    if (crossStop === Infinity) c.crossT = 0;
+    else {
+      // people on an unsignalled crossing: give way, but not for ever
+      c.crossT += SIM_DT;
+      if (c.crossT > YIELD.patience) {
+        c.crossSkip = c.crossWait;
+        c.crossT = 0;
+      }
+    }
+    const stop = Math.min(gateStop, crossStop);
     if (stop !== Infinity) {
       // (the stop line is a thing to stop at, not a car: the stand-still gap is shorter)
       const a = idmAccel(base, c.v, Math.max(0.1, stop - c.len / 2 + idm.s0 * 0.8), 0);
       if (a < acc) {
         acc = a;
-        binding = 'gate';
+        binding = crossStop < gateStop ? 'crossing' : 'gate';
       }
-    } else if (!g.isConnector[c.edge]) {
+    }
+    if (gateStop === Infinity && !g.isConnector[c.edge]) {
       c.dwell = 0;
       c.waitT = 0;
     }
@@ -1329,7 +1411,7 @@ export class TrafficManager implements Probe {
         const closing = (ov.x - car.body.linvel().x) * -dx + (ov.z - car.body.linvel().z) * -dz;
         if (back < 8 && back > -45 && Math.abs(lat) < 9 && closing > 0) {
           c.pullOver = true;
-          swerve = -1.3; // to the right of travel
+          swerve = this.pullOverSide(c, lat);
           if (c.reactCool <= 0) this.react(c, 'pullover');
         }
         continue;
@@ -1378,6 +1460,27 @@ export class TrafficManager implements Probe {
     }
     c.swerve += (swerve - c.swerve) * 0.12;
     if (Math.abs(c.swerve) < 0.02) c.swerve = 0;
+  }
+
+  /**
+   * Which way to edge over for a police car with its lights on that is `lat` m to the car's left (negative: right):
+   * toward the kerb. The right kerb in the rightmost lane; on a one-way street the leftmost lane's kerb is on the
+   * left; in the lanes between (or the leftmost lane of a two-way street, whose left is the centre line) away from the
+   * police. The offset is bigger where there is a lane to give up.
+   */
+  pullOverSide(c: TrafficCar, lat: number): number {
+    const g = this.graph;
+    const e = c.edge;
+    const lane = g.isConnector[e] ? -1 : e;
+    if (lane < 0) return lat >= 0 ? -1.3 : 1.3;
+    const rightKerb = g.right[lane] < 0;
+    const leftKerb = g.left[lane] < 0 && g.oneWay[lane] === 1;
+    // Police to the right of a car that has the left kerb: go left; otherwise right where a right kerb is.
+    if (rightKerb && !(leftKerb && lat < -1.5)) return -1.3;
+    if (leftKerb) return 1.3;
+    // (the inner lane of a two-way street has the centre line on its left: never that way)
+    if (g.left[lane] < 0) return -1.6;
+    return lat >= 0 ? -1.6 : 1.6;
   }
 
   private react(c: TrafficCar, reaction: 'brake' | 'swerve' | 'flee' | 'pullover') {

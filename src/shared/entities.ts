@@ -6,6 +6,10 @@
 export const EntityKind = {
   Ped: 1,
   Vehicle: 2,
+  /** A police helicopter: a kinematic flyer (see `HeliFlag`). */
+  Helicopter: 3,
+  /** A spike strip lying across a lane. */
+  SpikeStrip: 4,
 } as const;
 export type EntityKind = (typeof EntityKind)[keyof typeof EntityKind];
 

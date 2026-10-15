@@ -115,6 +115,54 @@ The budgets in `scripts/perf-budget.json` were re-baselined on 2026-10-15 from t
 
 `node scripts/traffic-shots.mjs` takes the traffic screenshots into `.shots/` (a busy street, a red-light queue, signal heads, a carjack at a light with real key presses).
 
+## Gunfire (2026-10-15)
+
+What the guns cost, measured with every pool full at once: 96 tracers, 16 muzzle flashes, 64 bullet holes, and the dust, spark and blood puffs, all alive in one frame (`GunFx.timeScale` set to 0.02 so nothing expires), aim camera up, against the same frame with the gun up and nothing fired. 1280 x 720, Chromium, frame-rate limit off, `graphics=high` and `low`.
+
+| Tier | Draws | Triangles | Main-thread CPU, mean |
+|---|---|---|---|
+| high | 375 -> 384 (+9) | 176.9k -> 177.6k (+0.7k) | 0.67 -> 0.76 ms |
+| low | 209 -> 218 (+9) | 116.7k -> 117.4k (+0.7k) | 0.45 -> 0.53 ms |
+
+Idle (nothing in the air, no shots) the effects cost nothing: every pool is an `InstancedMesh` with `count = 0` and `visible = false`, or a point pool with nothing alive, so they draw no calls.
+
+How it stays cheap and flat:
+
+- **Pooled, built once.** `GunFx` (`src/client/render/GunFx.ts`) makes its three instanced meshes (a ring of 96 tracers, 16 flashes, 64 bullet holes) and three `SmokeSystem` point pools (dust, sparks, blood) at boot, before the first shot. A shot only writes into a ring slot: no object, geometry, material or texture is created or disposed while playing, so a long fight cannot grow the scene. The tracers and flashes are camera-facing quads; the holes lie on the surface hit and the oldest is overwritten.
+- **No lights.** A muzzle flash is a glow sprite, not a point light: a light that came and went would change the shader programs and recompile them.
+- **Guns on models.** The player and the officers have their own models (the crowd never carries a gun); a gun is one merged mesh per kind, made the first time it is drawn and shared by every model after.
+- **The sim.** A shot is one Rapier ray per pellet (eight for the shotgun) and a lookup from the body that was hit to its entity, built once per tick when something fires. The weapon systems walk the peds twice a tick (timers and the post-step facing), a few microseconds. Reactions to gunfire skip anyone who is already running, hiding or fighting, so a burst of fifty shots costs a ray per newly frightened person, not per shot.
+- **The snapshot.** A ped's record already had 16 free words (the wheel block cars use); the gun, aim, lock-on and cover state go there, so the snapshot did not grow.
+
+`npm run leaks` has a new `gunfire` phase (30 cycles, 120 shots each, every weapon and every kind of hit, plus the aim camera and the reload and click sounds): geometries 548 -> 548, textures 6 -> 6, programs 34 -> 34, materials and scene objects exactly flat, heap 39.0 -> 39.2 MB. `npm run perf-budget` has a new `gunfire` phase (6 s standing with the gun up, 12 shots a second through the client's event path); its budgets are in `scripts/perf-budget.json`. Both feed the shots through the client's listeners (`game.net.listeners`) rather than asking the sim to shoot, because a real shot is a crime and brings the police, and the point of the phases is the client's pools.
+
+## The police escalation (2026-10-15)
+
+Roadblocks, spike strips, helicopters, roles, PIT, ramming and police gunfire (`src/sim/police/`, the models in `src/client/render/PoliceProps.ts`). None of it runs without heat, so the existing scripted routes (no crime) are the check that nothing leaked into the quiet game, and a separate scene measures what a response costs.
+
+**The harnesses, no heat.** `npm run perf-budget` and `perf-budget:phone`: every draw, triangle, geometry and heap budget passes with the same margins as before (desktop-high worst phase 559 draws and 283k triangles against 740 and 380k; phone-low 326 and 128k against 430 and 170k). The only failures were timing tripwires (p95 of the main thread's frame cost) on a machine that other jobs were using: desktop-low `drive.cpuP95` 2.3 ms against 2.2 passed on a repeat (1.8), and phone-low `walk.cpuP95` 5.1 and 4.8 against 4.4 passed on a quiet machine (load 0.04, best of three: 2.4 ms). `npm run soak` (5 min, desktop-medium): PASS, heap 36.7 -> 36.9 MB (0.1 MB/min), cpu 4.64 -> 3.2 us per draw call (limit 7.5), 0 slow frames, geometries +13 raw (+0 unused). `npm run leaks`: PASS, all six phases flat (reload 223 -> 223 geometries, heap 36 -> 36.7 MB). A new `police` phase (`--phases police --query transport=loopback`, 20 cycles) makes a helicopter (rotor, beam, glow) and a spike strip and takes them away again: geometries 225 -> 225, objects 912 -> 912, materials and programs flat, heap 81 -> 80.8 MB.
+
+**What a response costs** (real Downtown tile, ambient traffic 0.75 and 40 people, 60 s of a bot driving, in Node):
+
+| Heat | Police `update` per tick (mean) | Whole sim step (mean / worst) | Entities |
+|---|---|---|---|
+| none | 0.025 ms | 0.67 / 5.3 ms | 80 |
+| 3 (a helicopter, 2 roadblock cars, strips, 2 cars) | 0.075 ms | 0.80 / 6.2 ms | 85 |
+| 5 (2 helicopters, 3 more cars, 2 roadblocks, rams and fire) | 0.100 ms | 1.02 / 5.4 ms | 104 |
+
+The expensive parts are the A* searches (lane graph, up to four candidate goals each): at most two run a tick across all units (`PoliceManager.routeBudget`), which took the worst tick from 5.8 to 3.8 ms. Shooting is one ray and a loop over the civilians a tick per officer that is in sight.
+
+**Drawing it** (desktop-high, night, a car on the street, heat 5 after 20 s: 5 police cars, 10 officers, 1 helicopter, 2 strips; in the browser, 90 frames):
+
+| | No police | Heat 5 |
+|---|---|---|
+| desktop-high: draws / triangles / main-thread cpu | 327 / 232k / 1.25 ms | 606 / 217k / 1.85 ms |
+| desktop-low: draws / triangles / main-thread cpu | 223 / 144k / 0.90 ms | 429 / 141k / 1.43 ms |
+
+So a heat 5 response is about 280 draws on High and 200 on Low: a police car is a full 28-mesh stand-in model (traffic is instanced, the police are not, because each car flashes its own lightbar in its own livery), an officer on foot 13 meshes. Two things keep it from being worse: an officer seated in a car is not drawn once the car is 40 m away, and a police car's wheels, lamps and trim do not cast shadows of their own (the body does). The helicopter's beam is three additive cones and a disc, not a light, so it adds no shader variants. **Next:** draw police cars from the instanced path (a per-instance lightbar phase) and officers from the crowd's meshes when they are not carrying a gun.
+
+**Snapshot.** The header grew from 16 to 24 words (96 bytes a snapshot) for the search area and the police counts; helicopters and spike strips are ordinary 36-word records.
+
 ## Road markings: first-visit uploads (2026-10-14)
 
 The re-baked tile has one road-markings mesh per 256 m chunk (62 of them), drawn only within 320 m x lodScale and hidden beyond. The soak's raw `geometries` count then rose by about 22 in the window it judges, and the soak failed against its limit of 8. The cause is not a leak: three.js uploads a geometry the first time it draws one of its objects, and frees it only on `dispose()`. Hiding a chunk does not free it, and does not need to. So the raw count rises once for every chunk the camera first sees, whatever its type (markings, ground levels, roads, buildings) and whatever the route, and never falls.
@@ -135,7 +183,9 @@ All live in `scripts/`; each starts its own Vite server and Chromium unless you 
 
 **Profiles** (`--profile`): `desktop-high`, `desktop-medium`, `desktop-low` (1280x720), `phone-low` (iPhone 15 Pro: 393x659 at 3x, touch, Low tier, CPU slowed 4x through CDP `Emulation.setCPUThrottlingRate`; `--throttle n` changes the factor).
 
-### `npm run perf-budget` (about 90 s per profile)
+### `npm run perf-budget` (about 90 s per profile and run)
+
+The npm scripts run each profile twice (`--repeat 2`): timings keep each one's best, and counts keep the worst. A single p95 spike (one GC or a background job) tripped the 2.2 to 2.3 ms desktop-low CPU tripwires in single runs, while the same tree measured 1.1 to 1.2 ms on reruns.
 
 ```
 npm run perf-budget                                   # desktop-high, medium, low against scripts/perf-budget.json

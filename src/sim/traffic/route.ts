@@ -61,9 +61,10 @@ class Heap {
 
 /**
  * The cheapest chain of edges from `start` (exclusive) to `goal` (inclusive), or null. `maxExpand`
- * bounds the work.
+ * bounds the work. `extra`, when given, adds a cost in seconds to entering an edge (the police use it
+ * to steer a flanker off the street the target is on).
  */
-export function planRoute(g: LaneGraph, start: number, goal: number, maxExpand = 6000): number[] | null {
+export function planRoute(g: LaneGraph, start: number, goal: number, maxExpand = 6000, extra?: (edge: number) => number): number[] | null {
   if (start === goal) return [];
   const gs = g.pts[goal];
   const gx = gs[0];
@@ -88,7 +89,7 @@ export function planRoute(g: LaneGraph, start: number, goal: number, maxExpand =
     const d0 = dist.get(cur)!;
     for (const nx of g.next[cur]) {
       if (!g.main[nx] || closed.has(nx)) continue;
-      const d = d0 + cost(g, nx);
+      const d = d0 + cost(g, nx) + (extra ? extra(nx) : 0);
       if (d < (dist.get(nx) ?? Infinity)) {
         dist.set(nx, d);
         prev.set(nx, cur);

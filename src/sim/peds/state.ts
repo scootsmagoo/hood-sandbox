@@ -19,9 +19,11 @@ export interface AmbientState {
   node: number;
   prev: number;
   next: number;
-  /** A planned route (nodes) and how far along it. */
+  /** A planned route (nodes) and how far along it. A runner's route is an escape (`graph.escapeRoute`), replanned as it goes. */
   route: number[] | null;
   routeI: number;
+  /** Seconds since a runner last planned its escape. */
+  fleeT: number;
   /** Heading the body is steering to, rad (direction (sin h, cos h)). */
   heading: number;
   /** The attribute index of the crossing being crossed, or -1. */
@@ -70,7 +72,7 @@ export interface AmbientState {
 export function newAmbientState(group: string, speed: number, lane: number, tick: number): AmbientState {
   return {
     group, speed, lane, mode: 'walk', persistent: false,
-    node: -1, prev: -1, next: -1, route: null, routeI: 0, heading: 0,
+    node: -1, prev: -1, next: -1, route: null, routeI: 0, fleeT: 0, heading: 0,
     crossAttr: -1, waitEdge: -1, waitT: 0, avoidEdge: -1,
     sc: -1, scSlot: 0, scCount: 1, scAction: 'wait', scUntil: 0, scType: null, poseT: 0,
     until: 0, faceX: 0, faceZ: 0,

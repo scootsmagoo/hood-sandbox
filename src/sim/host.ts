@@ -48,6 +48,7 @@ export class SimHost {
         parkedCars: init.parkedCars,
         bystanders: init.bystanders,
         armour: init.armour,
+        weapons: init.weapons,
         clock: init.clock,
         ambientPeds: init.ambientPeds ?? true,
         pedBudget: this.pendingBudget ?? init.pedBudget,

@@ -34,7 +34,7 @@ describe('entity definitions', () => {
     expect(new Set(vehicles.map((v) => (v.kind === EntityKind.Vehicle ? v.typeId : ''))).size).toBeGreaterThanOrEqual(3);
     for (const d of defs) {
       if (d.kind === EntityKind.Vehicle) expect(PAINTS).toContain(d.color);
-      else expect(d.outfit).toBeLessThan(OUTFIT_COUNT);
+      else if (d.kind === EntityKind.Ped) expect(d.outfit).toBeLessThan(OUTFIT_COUNT);
     }
     // the player's character is outfit 0, the driver someone else
     const driver = peds.find((p) => p.kind === EntityKind.Ped && !p.player)!;

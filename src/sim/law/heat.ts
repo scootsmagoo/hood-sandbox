@@ -52,6 +52,18 @@ export class HeatModel {
     return this.rules.cooldownS[Math.min(this.level, MAX_HEAT)] ?? 60;
   }
 
+  /**
+   * The search area, m: the police know roughly where you are (the last known position) and sweep a
+   * circle that grows with every second they have not seen you, from `searchStartM` at that level at
+   * `searchGrowMps` up to `searchMaxM`. Zero when there is no heat or the police have eyes on you.
+   */
+  get searchRadius(): number {
+    if (this.level === 0 || this.phase === 'seen' || !this.lastKnown) return 0;
+    const lv = Math.min(MAX_HEAT, this.level);
+    const grown = Math.max(0, this.sightT - this.rules.seenGraceS) * (this.rules.searchGrowMps[lv] ?? 2);
+    return Math.min(this.rules.searchMaxM, (this.rules.searchStartM[lv] ?? 50) + grown);
+  }
+
   /** 0 to 1: how far toward clearing. */
   get cooldownFrac(): number {
     return this.level === 0 || this.phase === 'seen' ? 0 : Math.min(1, this.coolT / this.cooldownS);
@@ -83,15 +95,18 @@ export class HeatModel {
     this.set(this.level, 'seen', 'sighting');
   }
 
-  /** Advances the clocks. `seen` says whether the police see you now (call `sight` as well). */
-  step(dt: number, seen: boolean) {
+  /**
+   * Advances the clocks. `seen` says whether the police see you now (call `sight` as well). `coolRate`
+   * scales how fast the cooldown runs (the police slow it while the search is still on top of you).
+   */
+  step(dt: number, seen: boolean, coolRate = 1) {
     if (this.level === 0 || seen) return;
     this.sightT += dt;
     if (this.phase === 'seen') {
       if (this.sightT >= this.rules.seenGraceS) this.set(this.level, 'lost', 'lost');
       return;
     }
-    this.coolT += dt;
+    this.coolT += dt * coolRate;
     if (this.coolT >= this.cooldownS) this.clear('cooldown');
   }
 

@@ -62,6 +62,8 @@ export class LaneGraph {
   /** a connector too tight for a car to drive (a U-turn, a turn of under about 4 m radius): cars follow it as spline followers */
   readonly tight: Uint8Array;
   readonly cls: string[];
+  /** a lane of a one-way street (the road has no lanes the other way): its left side is a kerb, not the centre line */
+  readonly oneWay: Uint8Array;
   /** in the largest strongly connected component */
   readonly main: Uint8Array;
   readonly conflicts: Int32Array[] = [];
@@ -91,6 +93,7 @@ export class LaneGraph {
     this.bridge = new Uint8Array(n);
     this.tight = new Uint8Array(n);
     this.cls = new Array<string>(n).fill('');
+    this.oneWay = new Uint8Array(n);
     data.junctions.forEach((j, i) => {
       this.junctionIndex.set(j.id, i);
       this.junctions.push({ index: i, id: j.id, control: CTL[j.control], legs: j.legs ?? [] });
@@ -129,6 +132,13 @@ export class LaneGraph {
         this.yields.push(Int32Array.from(e.y));
         this.mutual.push(Int32Array.from(e.m));
       }
+    }
+    // one-way: no lane of the same road runs the other way
+    const ways = new Set<string>();
+    for (const e of edges) if (e.t === 0) ways.add(`${e.road}|${e.dir}`);
+    for (let i = 0; i < n; i++) {
+      const e = edges[i];
+      if (e.t === 0 && !ways.has(`${e.road}|${-e.dir}`)) this.oneWay[i] = 1;
     }
     for (let i = 0; i < n; i++) {
       if (!this.isConnector[i] || this.turn[i] === 0) continue;

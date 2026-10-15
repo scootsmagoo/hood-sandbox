@@ -9,12 +9,28 @@ import type { Input, InputSource } from './Input';
 const STICK_RADIUS = 56;
 const LOOK_GAIN = { yaw: 0.0055, pitch: 0.0045 };
 
-const BUTTONS: { label: string; actions: Action[]; cls: string }[] = [
+interface TouchButton {
+  label: string;
+  actions: Action[];
+  cls: string;
+  /** In the gun cluster above the main one. */
+  gun?: boolean;
+  /** `toggle`: a tap turns it on or off. `look`: dragging the held button also turns the camera (so fire and aim share a thumb). */
+  mode?: 'toggle' | 'look';
+}
+
+const BUTTONS: TouchButton[] = [
   { label: 'Jump', actions: ['jump', 'handbrake'], cls: 'b-jump' },
   { label: 'Run', actions: ['sprint'], cls: 'b-run' },
   { label: 'Get in', actions: ['interact'], cls: 'b-use' },
   { label: 'Reset', actions: ['reset'], cls: 'b-reset' },
   { label: 'Punch', actions: ['melee'], cls: 'b-melee' },
+  // The gun: fire (drag it to turn), aim (a toggle), reload, change weapon, cover.
+  { label: 'Fire', actions: ['fire'], cls: 'b-fire', gun: true, mode: 'look' },
+  { label: 'Aim', actions: ['aim'], cls: 'b-aim', gun: true, mode: 'toggle' },
+  { label: 'Reload', actions: ['reload'], cls: 'b-reload', gun: true },
+  { label: 'Gun', actions: ['weaponNext'], cls: 'b-weapon', gun: true },
+  { label: 'Cover', actions: ['cover'], cls: 'b-cover', gun: true },
 ];
 
 export class TouchControls implements InputSource {
@@ -48,30 +64,53 @@ export class TouchControls implements InputSource {
 
     const pad = document.createElement('div');
     pad.className = 'touch-buttons';
+    const gunPad = document.createElement('div');
+    gunPad.className = 'touch-buttons touch-gun';
     for (const b of BUTTONS) {
       const el = document.createElement('button');
       el.type = 'button';
       el.className = `touch-btn ${b.cls}`;
       el.textContent = b.label;
       if (b.cls === 'b-use') this.useButton = el;
+      let toggled = false;
       const set = (down: boolean) => {
         for (const a of b.actions) input.holdAction(a, down);
         el.classList.toggle('on', down);
       };
+      let dragId: number | null = null;
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         el.setPointerCapture(e.pointerId);
         input.setDevice('touch');
+        if (b.mode === 'toggle') {
+          toggled = !toggled;
+          set(toggled);
+          return;
+        }
         set(true);
+        if (b.mode === 'look') {
+          dragId = e.pointerId;
+          this.lookLast = { x: e.clientX, y: e.clientY };
+        }
       });
+      if (b.mode === 'look') {
+        el.addEventListener('pointermove', (e) => {
+          if (e.pointerId !== dragId) return;
+          this.lookDelta.x += e.clientX - this.lookLast.x;
+          this.lookDelta.y += e.clientY - this.lookLast.y;
+          this.lookLast = { x: e.clientX, y: e.clientY };
+        });
+      }
       const up = (e: PointerEvent) => {
         e.preventDefault();
-        set(false);
+        dragId = null;
+        if (b.mode !== 'toggle') set(false);
       };
       el.addEventListener('pointerup', up);
       el.addEventListener('pointercancel', up);
-      pad.appendChild(el);
+      (b.gun ? gunPad : pad).appendChild(el);
     }
+    root.appendChild(gunPad);
     root.appendChild(pad);
     parent.appendChild(root);
 

@@ -11,7 +11,7 @@
 import type { EntityId } from '../../shared/entities';
 import { nlerpQuat, wrapAngle, type Quat } from '../../shared/math';
 import { SIM_DT } from '../../shared/protocol';
-import { E, WHEEL_COUNT, WHEEL_FLOATS, type SnapshotView } from '../../shared/snapshot';
+import { E, PB, WHEEL_COUNT, WHEEL_FLOATS, type SnapshotView } from '../../shared/snapshot';
 
 export interface Sample {
   a: SnapshotView;
@@ -42,12 +42,25 @@ export interface EntityState {
   aux2: number;
   /** Per wheel: steer, roll, suspension length, slip. */
   wheels: Float32Array;
+  /** Ped only: the weapon block (packed gun word, see `gunWeapon`/`gunMag`/`gunReserve`; aim yaw and pitch; reload 0..1; spread in degrees; the locked entity; the wall's normal and the lean in cover). */
+  gun: number;
+  aimYaw: number;
+  aimPitch: number;
+  reload: number;
+  bloom: number;
+  lock: number;
+  coverNx: number;
+  coverNz: number;
+  lean: number;
+  /** Bit n set: the weapon with index n + 1 is carried. */
+  owned: number;
 }
 
 export function newEntityState(): EntityState {
   return {
     id: 0, kind: 0, x: 0, y: 0, z: 0, q: { x: 0, y: 0, z: 0, w: 1 }, vx: 0, vy: 0, vz: 0, flags: 0, speed: 0, aux0: 0, aux1: 0, health: 0, health2: 0, aux2: 0,
     wheels: new Float32Array(WHEEL_COUNT * WHEEL_FLOATS),
+    gun: 0, aimYaw: 0, aimPitch: 0, reload: 0, bloom: 0, lock: 0, coverNx: 0, coverNz: 0, lean: 0, owned: 0,
   };
 }
 
@@ -186,6 +199,23 @@ export function blendEntity(s: Sample, id: EntityId, out: EntityState, hint = -1
   const a0 = fa[oa + E.Aux0];
   const b0 = fb[ob + E.Aux0];
   out.aux0 = isPed ? a0 + wrapAngle(b0 - a0) * k : a0 + (b0 - a0) * k;
+  if (isPed) {
+    out.gun = ub[ob + PB.Gun];
+    const ay0 = fa[oa + PB.AimYaw];
+    out.aimYaw = ay0 + wrapAngle(fb[ob + PB.AimYaw] - ay0) * k;
+    out.aimPitch = fa[oa + PB.AimPitch] + (fb[ob + PB.AimPitch] - fa[oa + PB.AimPitch]) * k;
+    out.reload = fb[ob + PB.Reload];
+    out.bloom = fb[ob + PB.Bloom];
+    out.lock = ub[ob + PB.Lock];
+    out.owned = ub[ob + PB.Owned];
+    out.coverNx = fb[ob + PB.CoverNx];
+    out.coverNz = fb[ob + PB.CoverNz];
+    out.lean = fa[oa + PB.Lean] + (fb[ob + PB.Lean] - fa[oa + PB.Lean]) * k;
+  } else {
+    out.gun = 0;
+    out.lock = 0;
+    out.owned = 0;
+  }
   if (!isPed) {
     for (let w = 0; w < WHEEL_COUNT; w++) {
       const j = E.Wheels + w * WHEEL_FLOATS;

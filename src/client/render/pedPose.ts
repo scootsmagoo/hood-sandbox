@@ -31,6 +31,24 @@ export interface PedJoints {
   torsoLift: number;
 }
 
+/** Gun, cover and flinch on top of the base pose. All optional. */
+export interface PoseExtra {
+  /** The gun is up and pointing at this pitch (radians, positive up). Undefined: it is not. */
+  aim?: number;
+  /** A long gun (rifle, shotgun) is held higher, the support hand further forward. */
+  long?: boolean;
+  /** Crouched behind low cover. */
+  crouch?: boolean;
+  /** Flush against a high wall. */
+  cover?: boolean;
+  /** 0 to 1: just hit by a bullet. */
+  flinch?: number;
+  /** A shot just went off. */
+  firing?: boolean;
+  /** 0 to 1 through a reload; 0 when not reloading. */
+  reload?: number;
+}
+
 export function newJoints(): PedJoints {
   return { scale: 1, tiltX: 0, shiftY: 0, shiftZ: 0, legL: 0, legR: 0, armL: 0, armR: 0, armLz: 0, armRz: 0, torsoX: 0, torsoY: 0, torsoLift: 0 };
 }
@@ -41,7 +59,64 @@ const HIPS = 0.9;
  * Fills `j`. `lie` is how far toppled (1 on the back, -1 face down); `time` is seconds, `seed` a
  * per-ped offset so a crowd does not move in step.
  */
-export function solvePose(j: PedJoints, speed: number, grounded: boolean, phase: number, mode: PedMode, swing: number, pose: number, time: number, lie: number, seed = 0): PedJoints {
+export function solvePose(j: PedJoints, speed: number, grounded: boolean, phase: number, mode: PedMode, swing: number, pose: number, time: number, lie: number, seed = 0, extra?: PoseExtra): PedJoints {
+  basePose(j, speed, grounded, phase, mode, swing, pose, time, lie, seed);
+  if (extra && Math.abs(lie) <= 0.02 && mode !== 'dragged') applyExtra(j, mode, time, extra);
+  return j;
+}
+
+/** Arms up with a gun, a crouch behind a wall, a flinch. Skipped for someone on the ground. */
+function applyExtra(j: PedJoints, mode: PedMode, time: number, x: PoseExtra) {
+  if (x.crouch) {
+    j.shiftY = -0.42;
+    j.legL = -1.3;
+    j.legR = -1.15;
+    j.torsoX = 0.2;
+    j.armL = -0.9;
+    j.armR = -1.05;
+    j.torsoLift = 0;
+  } else if (x.cover) {
+    // Back to the wall, the gun held up by the chest.
+    j.legL = 0.04;
+    j.legR = -0.04;
+    j.torsoX = -0.05;
+    j.armL = -1.9;
+    j.armR = -2.15;
+    j.armLz = -0.3;
+    j.armRz = 0.2;
+    j.torsoLift = 0;
+  }
+  if (x.aim !== undefined) {
+    const p = x.aim;
+    // Both hands out in front on the gun, tilted with the aim; a long gun is braced further forward.
+    j.armR = -1.5 - p;
+    j.armL = (x.long ? -1.62 : -1.45) - p;
+    j.armRz = 0.04;
+    j.armLz = x.long ? -0.16 : -0.28;
+    j.torsoX = (mode === 'seated' ? 0.05 : 0.07) + (x.firing ? -0.1 : 0);
+    j.torsoY = 0;
+    if (x.crouch) j.shiftY = 0;
+    if (x.firing) {
+      j.armR -= 0.12;
+      j.armL -= 0.1;
+    }
+  }
+  if (x.reload && x.reload > 0 && x.aim === undefined) {
+    // Bring the gun in to the chest and work the magazine.
+    j.armR = -1.1;
+    j.armL = -1.0 + Math.sin(time * 14) * 0.18;
+    j.armLz = -0.5;
+  }
+  if (x.flinch && x.flinch > 0) {
+    const f = x.flinch;
+    j.torsoX += 0.42 * f;
+    j.torsoY += 0.32 * f;
+    j.armL -= 0.7 * f;
+    j.armR -= 0.4 * f;
+  }
+}
+
+function basePose(j: PedJoints, speed: number, grounded: boolean, phase: number, mode: PedMode, swing: number, pose: number, time: number, lie: number, seed = 0): PedJoints {
   j.scale = mode === 'seated' ? SEATED_SCALE : 1;
   j.tiltX = 0;
   j.shiftY = 0;

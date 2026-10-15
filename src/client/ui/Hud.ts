@@ -13,6 +13,7 @@ import { codeLabel } from '../input/bindings';
 import { padButtonFor, padButtonLabel, type GamepadSource } from '../input/gamepad';
 import type { TouchControls } from '../input/touch';
 import { formatClock } from '../render/timeOfDay';
+import { radarTop } from './minimap';
 
 const MPS_TO_MPH = 2.23694;
 /** Same rules as the sim's enter and exit (systems.ts). */
@@ -90,6 +91,8 @@ export class Hud implements System {
     this.promptEl = el('div', 'hud-prompt', this.root);
     // Health and armour, bottom left.
     const bars = el('div', 'hud-bars', this.root);
+    // The radar (minimap.ts) sits at the bottom left: the bars stand above it.
+    bars.style.bottom = `${radarTop()}px`;
     this.armourEl = el('div', 'bar armour', bars);
     this.armourFill = el('div', 'fill', this.armourEl);
     this.healthEl = el('div', 'bar health', bars);
@@ -111,6 +114,7 @@ export class Hud implements System {
     this.overlayText = el('div', 'text', this.overlayEl);
     this.toastEl = el('div', 'hud-toast', this.root);
     this.helpEl = el('div', 'hud-help', this.root);
+    this.helpEl.style.bottom = `${radarTop() + 42}px`;
     this.attribEl = el('div', 'hud-attrib', this.root);
     this.debugEl = el('pre', 'hud-debug', this.root);
     this.debugEl.hidden = !this.debugOn;
@@ -146,15 +150,18 @@ export class Hud implements System {
     const pad = this.game.input.device === 'gamepad';
     const touch = this.game.input.device === 'touch';
     const rows: [string, string][] = touch
-      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, punch, reset']]
+      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, punch, reset'], ['Aim / Fire', 'Hold Aim, tap Fire; Cover, Reload, Gun to change weapon']]
       : pad
-        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('melee'), 'Punch'], [k('reset'), 'Reset car']]
+        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('melee'), 'Punch (reload while aiming)'], [k('reset'), 'Reset car'], ['LT / RT', 'Aim / fire (RB / X from a car)'], ['D-pad left, right', 'Change weapon'], [k('cover'), 'Take cover']]
         : [
             ['W A S D', 'Move, or throttle, brake and steer'],
             ['Shift', 'Sprint'],
             [`${k('jump')}`, 'Jump, or handbrake'],
             [k('interact'), 'Get in or out; at a driver\'s door, carjack'],
             [k('melee'), 'Punch (on foot)'],
+            [`${k('aim')} / ${k('fire')}`, 'Aim / fire (a pistol or SMG works from a car)'],
+            [`1 - 4, ${k('weaponNext')} ${k('weaponPrev')}, scroll`, 'Change weapon (scroll while aiming)'],
+            [`${k('reload')} / ${k('cover')}`, 'Reload / take cover at a wall'],
             ['Arrow keys / mouse', 'Look (click the game to capture the mouse)'],
             [k('lookBack'), 'Look behind (car)'],
             [`${k('toggleView')} / scroll`, 'Camera distance'],
@@ -200,6 +207,9 @@ export class Hud implements System {
         break;
       case 'entity:respawn':
         this.toast('Back to the spawn point');
+        break;
+      case 'weapon:empty':
+        if (e.pedId === this.game.view.ped?.id) this.toast('Empty. Reload', 900);
         break;
     }
   }

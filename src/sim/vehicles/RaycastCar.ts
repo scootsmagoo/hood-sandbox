@@ -40,6 +40,20 @@ export interface VehicleInput {
 
 export const IDLE_INPUT: Readonly<VehicleInput> = { throttle: 0, brake: 0, steer: 0, handbrake: true };
 
+/**
+ * A flat tyre (a spike strip): the wheel sits lower, grips less and drags. `flat` runs 0 (inflated) to 1
+ * (flat) and follows the target at `rate` a second, so the car settles rather than jolts.
+ */
+export const FLAT = {
+  /** Share of the wheel's radius lost at flat 1. */
+  radiusLoss: 0.3,
+  /** Share of grip (longitudinal and lateral) lost at flat 1. */
+  gripLoss: 0.35,
+  /** Rim scraping: extra deceleration of the whole car with all four flat, m/s^2 (a quarter of it per flat wheel). */
+  drag: 2.6,
+  rate: 2.5,
+} as const;
+
 export interface WheelState {
   /** Steering angle, positive turns left. */
   steer: number;
@@ -53,6 +67,11 @@ export interface WheelState {
 
 interface Wheel extends WheelState {
   front: boolean;
+  /** 0 (inflated) to 1 (flat), and where it is heading. */
+  flat: number;
+  flatTarget: number;
+  /** Current rolling radius, m. */
+  rad: number;
   /** Mount point in the body's frame. */
   mx: number;
   my: number;
@@ -106,6 +125,8 @@ export class RaycastCar {
   private prevTravelYaw = 0;
   /** How fast the direction of travel turns, rad/s (smoothed). */
   private travelTurn = 0;
+  /** Seconds left in which the slide assists are let go after a PIT (see `pitKick`). */
+  private slideT = 0;
   /** Largest sudden speed change in the last step, m/s. Used to report impacts. */
   impactSpeedLoss = 0;
   /** The velocity change of the last step in the world frame, m/s. */
@@ -169,6 +190,7 @@ export class RaycastCar {
         my: wb.mountY,
         mz: front ? wb.frontZ : wb.rearZ,
         steer: 0, roll: 0, length: h.suspension.travel, grounded: false, slip: 0,
+        flat: 0, flatTarget: 0, rad: wb.radius,
         prevLength: h.suspension.travel,
         share: (front ? frontMass : rearMass) / 2,
         accel: 0, hitDist: 0, nx: 0, ny: 1, nz: 0, ox: 0, oy: 0, oz: 0,
@@ -220,6 +242,33 @@ export class RaycastCar {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.forgetVelocity();
+  }
+
+  /** Flattens a tyre (0 front left, 1 front right, 2 rear left, 3 rear right). It stays flat for the life of the car. Returns false if it already was. */
+  deflate(i: number): boolean {
+    const w = this.wheels[i];
+    if (!w || w.flatTarget >= 1) return false;
+    w.flatTarget = 1;
+    return true;
+  }
+
+  /**
+   * A PIT: the tail has been shoved round. Adds `yawRate` (rad/s, positive turns left) to the spin and, for
+   * `slideS` seconds, lets go of the counter-steer and drift assists, which would otherwise catch the slide.
+   */
+  pitKick(yawRate: number, slideS = 1.8) {
+    const q = this.body.rotation();
+    const up = rotateVec(q, 0, 1, 0);
+    const av = this.body.angvel();
+    this.body.setAngvel({ x: av.x + up.x * yawRate, y: av.y + up.y * yawRate, z: av.z + up.z * yawRate }, true);
+    this.slideT = Math.max(this.slideT, slideS);
+  }
+
+  /** Which tyres are flat (or going flat), one bit a wheel in snapshot order. */
+  get flatMask(): number {
+    let m = 0;
+    for (let i = 0; i < 4; i++) if (this.wheels[i].flatTarget >= 1) m |= 1 << i;
+    return m;
   }
 
   /** Takes the car out of the physics world for good. */
@@ -277,7 +326,10 @@ export class RaycastCar {
 
     // Steering. The assist adds to the driver's input, and only in a slide.
     const lock = steerLock(speed, h.steering);
-    const assist = counterSteer(vL, vF, h.assists.counterSteer, h.steering.lockDeg * DEG) * (1 - this.donut);
+    // (after a PIT the assists let go for a moment, so the slide is a real one)
+    const assistK = this.slideT > 0 ? 0.1 : 1;
+    this.slideT = Math.max(0, this.slideT - dt);
+    const assist = counterSteer(vL, vF, h.assists.counterSteer, h.steering.lockDeg * DEG) * (1 - this.donut) * assistK;
     const target = clamp(-clamp(input.steer, -1, 1) * lock + assist, -h.steering.lockDeg * DEG, h.steering.lockDeg * DEG);
     this.steerAngle = slewSteer(this.steerAngle, target, dt, h.steering);
     const cosS = Math.cos(this.steerAngle);
@@ -290,6 +342,8 @@ export class RaycastCar {
     const reach = sus.travel + h.wheels.radius;
     let grounded = 0;
     for (const w of this.wheels) {
+      if (w.flat !== w.flatTarget) w.flat = w.flat < w.flatTarget ? Math.min(w.flatTarget, w.flat + FLAT.rate * dt) : Math.max(w.flatTarget, w.flat - FLAT.rate * dt);
+      w.rad = h.wheels.radius * (1 - FLAT.radiusLoss * w.flat);
       const m = rotateVec(q, w.mx, w.my, w.mz);
       w.ox = tr.x + m.x;
       w.oy = tr.y + m.y;
@@ -306,7 +360,7 @@ export class RaycastCar {
         w.grounded = true;
         grounded++;
         w.hitDist = hit.timeOfImpact;
-        w.length = clamp(hit.timeOfImpact - h.wheels.radius, 0, sus.travel);
+        w.length = clamp(hit.timeOfImpact - w.rad, 0, sus.travel);
         const n = hit.normal;
         const nl = Math.hypot(n.x, n.y, n.z);
         if (nl > 0.5) {
@@ -410,8 +464,15 @@ export class RaycastCar {
         if (!wantSpin) brake += (d.handbrakeForce * h.mass) / 2;
         tmpTire.lateralMult = h.traction.handbrakeGripMult;
       }
+      // After a PIT the tail has let go: the rear tyres hold little until the car has come round.
+      if (this.slideT > 0) tmpTire.lateralMult *= w.front ? 0.5 : 0.12;
+      // A flat tyre scrapes the rim (drag) and holds the road less.
+      if (w.flat > 0) {
+        brake += (FLAT.drag * w.flat * h.mass) / 4;
+        tmpTire.lateralMult *= 1 - FLAT.gripLoss * w.flat;
+      }
       tmpTire.brakeForce = brake;
-      tmpTire.gripMult = w.front ? lerp(1, h.assists.donutFrontGrip, donut) : 1;
+      tmpTire.gripMult = (w.front ? lerp(1, h.assists.donutFrontGrip, donut) : 1) * (1 - FLAT.gripLoss * w.flat);
       tireForce(tmpTire, h.traction, tireOut);
       if (driven && (tireOut.spinning || wantSpin)) {
         tmpTire.lateralMult *= lowSpeedGrip(speed, true, h.traction);
@@ -432,7 +493,7 @@ export class RaycastCar {
       let wv = tmpTire.vLong;
       if (hb && !w.front) wv = 0;
       else if (tireOut.spinning) wv += Math.sign(tmpTire.driveForce) * 14;
-      w.roll = (w.roll + (wv / h.wheels.radius) * dt) % (Math.PI * 2);
+      w.roll = (w.roll + (wv / w.rad) * dt) % (Math.PI * 2);
     }
 
     // Air drag and downforce.
@@ -452,7 +513,7 @@ export class RaycastCar {
         const ca = wc * speed * donut * h.mass * dt;
         body.applyImpulse({ x: (lv.z / speed) * ca, y: 0, z: (-lv.x / speed) * ca }, true);
       }
-      let yawAcc = aa * (1 - donut);
+      let yawAcc = aa * (1 - donut) * assistK;
       if (donut > 0) yawAcc += donutYawAccel(yawRate, donutYawTarget(input.steer, speed, h.assists)) * donut;
       if (yawAcc !== 0) {
         const ti = this.yawInertia * yawAcc * dt;

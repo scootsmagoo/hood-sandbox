@@ -33,6 +33,13 @@ export interface ViewState {
   overlayT: number;
   /** 0 to 1: how far the heat has cooled toward clearing. */
   cooldown: number;
+  /** The police search area: the last known position and the radius they are sweeping, m (0: none), and what the police have out (roadblocks, helicopters, spike strips). */
+  searchX: number;
+  searchZ: number;
+  searchR: number;
+  roadblocks: number;
+  helicopters: number;
+  strips: number;
   /** Newest snapshot tick and the last input tick the sim has applied. */
   tick: number;
   ack: number;
@@ -59,7 +66,8 @@ export class NetSystem implements System {
   private readonly sample: Sample = {} as Sample;
   private lastSent: InputCommand | null = null;
   private lastSendAt = -Infinity;
-  private listeners: Array<(e: SimEvent) => void> = [];
+  /** Everyone who listens to sim events (the leak harness feeds synthetic ones through this). */
+  readonly listeners: Array<(e: SimEvent) => void> = [];
   private pool = new Map<EntityId, EntityState>();
   /** Sent-command count, for diagnostics. */
   sent = 0;
@@ -67,7 +75,7 @@ export class NetSystem implements System {
   constructor(private readonly game: Game) {
     game.net = this;
     game.view = {
-      sample: null, entities: new Map(), ped: null, vehicle: null, defs: new Map(), controlled: null, inVehicle: false, camClear: 99, health: 100, armour: 0, heat: 0, heatPhase: 0, overlay: 0, overlayT: 0, cooldown: 0, tick: 0, ack: 0, lagTicks: 0,
+      sample: null, entities: new Map(), ped: null, vehicle: null, defs: new Map(), controlled: null, inVehicle: false, camClear: 99, health: 100, armour: 0, heat: 0, heatPhase: 0, overlay: 0, overlayT: 0, cooldown: 0, searchX: 0, searchZ: 0, searchR: 0, roadblocks: 0, helicopters: 0, strips: 0, tick: 0, ack: 0, lagTicks: 0,
     };
     game.onSimEvent = (fn) => this.listeners.push(fn);
     for (const d of game.ready.entities ?? []) game.view.defs.set(d.id, d);
@@ -103,6 +111,12 @@ export class NetSystem implements System {
     v.overlay = newest.overlay;
     v.overlayT = newest.overlayT;
     v.cooldown = newest.cooldown;
+    v.searchX = newest.searchX;
+    v.searchZ = newest.searchZ;
+    v.searchR = newest.searchR;
+    v.roadblocks = newest.roadblocks;
+    v.helicopters = newest.helicopters;
+    v.strips = newest.strips;
 
     const sample = this.interpolator.sample(now, this.sample);
     v.sample = sample;
@@ -134,10 +148,32 @@ export class NetSystem implements System {
     }
     v.controlled = v.entities.get(b.controlled) ?? v.ped;
     v.inVehicle = !!v.ped && (v.ped.flags & PedFlag.InVehicle) !== 0;
+    g.input.inVehicle = v.inVehicle;
     if (v.controlled) g.focus.set(v.controlled.x, v.controlled.y, v.controlled.z);
   }
 
   private cmdTick = 0;
+
+  /**
+   * The gun and cover buttons. A tap on a screen can start and end inside one frame, so a press counts as
+   * held for the frame it happened in. While aiming, the wheel cycles weapons (the camera leaves the zoom alone then).
+   */
+  private gunButtons(input: Game['input']): number {
+    const aiming = this.game.aim?.intent ?? false;
+    const on = (a: Parameters<Game['input']['down']>[0]) => input.down(a) || input.pressed(a);
+    return (
+      (on('aim') ? Button.Aim : 0) |
+      (on('fire') ? Button.Fire : 0) |
+      (on('reload') ? Button.Reload : 0) |
+      (on('cover') ? Button.Cover : 0) |
+      (on('weaponNext') || (aiming && on('zoomOut')) ? Button.WeaponNext : 0) |
+      (on('weaponPrev') || (aiming && on('zoomIn')) ? Button.WeaponPrev : 0) |
+      (on('weapon1') ? Button.Slot1 : 0) |
+      (on('weapon2') ? Button.Slot2 : 0) |
+      (on('weapon3') ? Button.Slot3 : 0) |
+      (on('weapon4') ? Button.Slot4 : 0)
+    );
+  }
 
   private send(now: number, dt: number) {
     const g = this.game;
@@ -148,7 +184,8 @@ export class NetSystem implements System {
       (input.down('interact') ? Button.Interact : 0) |
       (input.down('handbrake') ? Button.Handbrake : 0) |
       (input.down('reset') ? Button.Reset : 0) |
-      (input.down('melee') ? Button.Melee : 0);
+      (input.down('melee') ? Button.Melee : 0) |
+      this.gunButtons(input);
     if (buttons === (this.lastSent?.buttons ?? 0) && now - this.lastSendAt < MIN_SEND_GAP) return;
     const axes = new Array<number>(AXIS_COUNT).fill(0);
     const move = input.moveAxes();
@@ -157,6 +194,8 @@ export class NetSystem implements System {
     axes[Axis.Yaw] = g.cameraArm.yaw;
     axes[Axis.Pitch] = g.cameraArm.pitch;
     axes[Axis.CamDist] = g.cameraArm.dist;
+    // A pad or a finger gets a strong lock-on, a mouse only a little magnetism.
+    axes[Axis.AimAssist] = input.device === 'keyboard' ? 0.12 : 1;
     const drive = input.driveAxes(Math.min(0.05, (now - this.lastSendAt) / 1000 || dt));
     axes[Axis.Throttle] = drive.throttle;
     axes[Axis.Brake] = drive.brake;

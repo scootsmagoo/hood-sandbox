@@ -1,4 +1,5 @@
 import { Authority, EntityKind, type EntityBase, type EntityId } from '../shared/entities';
+import type { CoverState, GunState } from './combat/weapons/state';
 import type { PedController, PedInput } from './character/PedController';
 import type { PedBrain } from './npc/brain';
 import type { AmbientState } from './peds/state';
@@ -49,6 +50,12 @@ export class PedEntity implements EntityBase {
   pose = 0;
   /** Under the sim's control for a scripted moment (a carjack): commands are ignored and the body is moved by hand. */
   busy = false;
+  /** The weapons this ped carries and the state of the gun in hand; null when unarmed (see combat/weapons/api.ts). */
+  gun: GunState | null = null;
+  /** The wall this ped is taking cover against, or null. */
+  cover: CoverState | null = null;
+  /** Seconds left of flinching from a bullet (drawn as a stagger). */
+  flinchT = 0;
 
   constructor(
     readonly id: EntityId,
@@ -83,8 +90,12 @@ export class VehicleEntity implements EntityBase {
   /** The player has driven this car: getting in it again is not a theft. */
   playerOwned = false;
   /** Set for a police car: the agency, and the unit that drives it. */
-  police: { agency: string; body: number; stripe: number; lightbar: [number, number] } | null = null;
+  police: { agency: string; body: number; stripe: number; lightbar: [number, number]; unmarked?: boolean } | null = null;
   lightbar = false;
+  /** A police car's siren is wailing, its role in the chase (`PoliceRole` in the snapshot), and whether it is a roadblock car. */
+  siren = false;
+  policeRole = 0;
+  roadblock = false;
   /** The ped driving, or 0. */
   occupantId: EntityId = 0;
   input: VehicleInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
@@ -114,7 +125,64 @@ export class VehicleEntity implements EntityBase {
 /** Owner id for cars driven by the sim's own AI (police). */
 export const AI_OWNER = 1000;
 
-export type SimEntity = PedEntity | VehicleEntity;
+/**
+ * A police helicopter. Not physics: a kinematic flyer the police system moves (`police/helicopter.ts`).
+ * `x, y, z` is the airframe, `yaw` its heading, `bank` and `pitch` the lean it draws with.
+ */
+export class HelicopterEntity implements EntityBase {
+  readonly kind = EntityKind.Helicopter;
+  owner = 0;
+  authority: Authority = Authority.Local;
+  health = 100;
+  x = 0;
+  y = 0;
+  z = 0;
+  vx = 0;
+  vy = 0;
+  vz = 0;
+  yaw = 0;
+  bank = 0;
+  pitch = 0;
+  /** Height above the ground under it, m, and the circle its cone sees on the ground, m. */
+  agl = 0;
+  footprint = 0;
+  searchlight = false;
+  sees = false;
+  leaving = false;
+  /** Rotor speed, 0 to 1. */
+  rotor = 1;
+
+  constructor(
+    readonly id: EntityId,
+    readonly agency: string,
+    readonly color: number,
+  ) {}
+}
+
+/** A spike strip lying across a lane. `yaw` is the direction along its length. */
+export class SpikeStripEntity implements EntityBase {
+  readonly kind = EntityKind.SpikeStrip;
+  owner = 0;
+  authority: Authority = Authority.Local;
+  health = 1;
+  used = false;
+  /** Seconds it has lain there. */
+  age = 0;
+
+  constructor(
+    readonly id: EntityId,
+    readonly x: number,
+    readonly y: number,
+    readonly z: number,
+    readonly yaw: number,
+    readonly length: number,
+    readonly depth: number,
+    /** Seconds it lies before it is picked up. */
+    readonly life: number,
+  ) {}
+}
+
+export type SimEntity = PedEntity | VehicleEntity | HelicopterEntity | SpikeStripEntity;
 
 /** One human player: their latest input and the edges (presses) accumulated since the last tick. */
 export class PlayerSlot {

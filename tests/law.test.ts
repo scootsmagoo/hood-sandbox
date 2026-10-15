@@ -10,10 +10,15 @@ import { addNpc, Button, cmd, flatTile, makeSim, ofType, ped, run, runLog, vehic
 
 describe('the crime table', () => {
   it('matches the contract and validates', () => {
-    expect(Object.keys(CRIMES).sort()).toEqual(['assault', 'assault_officer', 'carjack', 'hit_ped', 'kill_ped', 'vehicle_theft']);
+    expect(Object.keys(CRIMES).sort()).toEqual(['assault', 'assault_officer', 'carjack', 'discharge', 'hit_ped', 'kill_ped', 'shoot_ped', 'vehicle_theft']);
     expect(CRIMES.carjack).toEqual({ severity: 2, heat: 1, witnessRadius: 35 });
     expect(CRIMES.hit_ped.heat).toBe(2);
     expect(CRIMES.kill_ped.heat).toBe(3);
+    // Gunfire carries further than it can be seen.
+    expect(CRIMES.discharge).toMatchObject({ severity: 1, heat: 1 });
+    expect(CRIMES.discharge.hearRadius!).toBeGreaterThan(CRIMES.discharge.witnessRadius);
+    expect(CRIMES.shoot_ped.severity).toBeGreaterThanOrEqual(4);
+    expect(CRIMES.shoot_ped.hearRadius!).toBeGreaterThan(CRIMES.shoot_ped.witnessRadius);
     expect(LAW_RULES.cooldownS[2]).toBeGreaterThan(LAW_RULES.cooldownS[1]);
     expect(() => parseCrimes({ crimes: { x: { severity: 9, heat: 1, witnessRadius: 5 } } })).toThrow(/severity/);
     expect(() => parseCrimes({})).toThrow();

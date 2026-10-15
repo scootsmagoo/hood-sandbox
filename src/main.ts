@@ -14,6 +14,10 @@ import { loadScenarioProps } from './client/render/ScenarioProps';
 import { loadSignalHeads } from './client/render/SignalHeads';
 import { createTransport } from './client/transport/createTransport';
 import { Hud } from './client/ui/Hud';
+import { GunHud } from './client/ui/GunHud';
+import { GunFx } from './client/render/GunFx';
+import { AimSystem } from './client/weapons/AimSystem';
+import { Minimap } from './client/ui/minimap';
 import { createWorldView, type WorldView } from './world/WorldView';
 
 declare global {
@@ -58,6 +62,8 @@ async function main() {
       parkedCars: params.has('parked') ? Math.max(0, Math.min(20, Number(params.get('parked')) || 0)) : undefined,
       bystanders: params.has('peds') ? Math.max(0, Math.min(12, Number(params.get('peds')) || 0)) : undefined,
       armour: params.has('armour') ? Math.max(0, Math.min(100, Number(params.get('armour')) || 0)) : undefined,
+      // ?weapons=all: every gun; ?weapons=none: unarmed. Default: a pistol and some rounds.
+      weapons: ['all', 'none'].includes(params.get('weapons') ?? '') ? (params.get('weapons') as 'all' | 'none') : undefined,
       clock: clockFromParams(params),
       // ?traffic=0 turns the ambient cars off; ?traffic=0.5 scales the tier's density.
       traffic: params.has('traffic') ? Math.max(0, Math.min(1, Number(params.get('traffic')) || 0)) : game.tier.trafficDensity,
@@ -89,10 +95,14 @@ async function main() {
     const heads = await loadSignalHeads(game, tileBase, game.ready.tile.lanes);
     if (heads) game.addSystem(heads);
     game.addSystem(new NetSystem(game));
+    game.addSystem(new AimSystem(game));
     game.addSystem(new EntityViews(game));
+    game.addSystem(new GunFx(game));
     game.addSystem(new CameraRig(game));
     game.addSystem(new Atmosphere(game));
     game.addSystem(new Hud(game));
+    game.addSystem(new GunHud(game));
+    game.addSystem(new Minimap(game, tileBase));
     game.addSystem(new AudioSystem(game));
     game.gamepad = new GamepadSource();
     game.input.addSource(game.gamepad);

@@ -74,3 +74,52 @@ html, body { margin: 0; height: 100%; background: #0b0d10; color: var(--ink); fo
 .hud-overlay .text { font: 800 min(14vw, 120px) / 1 system-ui, sans-serif; letter-spacing: 0.08em; transform: scale(calc(1.15 - var(--ov, 0) * 0.15)); }
 .hud-overlay.wasted .text { color: #d83a2e; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9); }
 .hud-overlay.busted .text { color: #6aa3ff; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9); }
+
+/* Guns: crosshair, lock-on, hit marker, ammo, weapon strip */
+.gun-hud { position: absolute; inset: 0; pointer-events: none; }
+.gun-hud[hidden] { display: none; }
+.xhair { --gap: 8px; position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity 0.08s; }
+.xhair.on { opacity: 1; }
+.xhair .tick { position: absolute; background: rgba(255, 255, 255, 0.92); box-shadow: 0 0 2px rgba(0, 0, 0, 0.9); }
+.xhair .tick.t { width: 2px; height: 11px; left: -1px; top: calc(-1 * var(--gap) - 11px); }
+.xhair .tick.b { width: 2px; height: 11px; left: -1px; top: var(--gap); }
+.xhair .tick.l { height: 2px; width: 11px; top: -1px; left: calc(-1 * var(--gap) - 11px); }
+.xhair .tick.r { height: 2px; width: 11px; top: -1px; left: var(--gap); }
+.xhair .dot { position: absolute; width: 3px; height: 3px; left: -1.5px; top: -1.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 2px rgba(0, 0, 0, 0.9); }
+.xhair.locked .tick, .xhair.locked .dot { background: #ff6b5a; }
+.gun-lock { position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid #ff6b5a; transform-origin: center; opacity: 0; box-shadow: 0 0 6px rgba(0, 0, 0, 0.7); border-radius: 3px; }
+.gun-lock.on { opacity: 0.95; }
+.gun-hit { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
+.gun-hit.on { opacity: 1; }
+.gun-hit i { position: absolute; width: 9px; height: 2px; background: #fff; box-shadow: 0 0 2px #000; }
+.gun-hit i.a { transform: translate(8px, 8px) rotate(45deg); }
+.gun-hit i.b { transform: translate(-17px, 8px) rotate(-45deg); }
+.gun-hit i.c { transform: translate(8px, -10px) rotate(-45deg); }
+.gun-hit i.d { transform: translate(-17px, -10px) rotate(45deg); }
+.gun-hit.kill i { background: #ff4a3a; }
+.gun-ammo { position: absolute; right: 22px; bottom: 124px; text-align: right; font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+.gun-ammo .wname { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
+.gun-ammo .mag { font-size: 34px; font-weight: 700; }
+.gun-ammo .mag.low { color: #ff7a5a; }
+.gun-ammo .res { margin-left: 6px; color: var(--dim); font-size: 16px; }
+.gun-ammo.empty .mag { color: #ff4a3a; }
+.gun-ammo .reload { height: 3px; margin-top: 3px; background: rgba(255, 255, 255, 0.18); border-radius: 2px; opacity: 0; overflow: hidden; }
+.gun-ammo .reload.on { opacity: 1; }
+.gun-ammo .reload i { display: block; height: 100%; width: 0; background: var(--accent); }
+.gun-strip { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); display: flex; gap: 6px; opacity: 0; transition: opacity 0.2s; }
+.gun-strip.on { opacity: 1; }
+.gun-strip .slot { min-width: 66px; padding: 4px 8px; border-radius: 6px; background: var(--panel); border: 1px solid transparent; color: var(--dim); opacity: 0.45; display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.gun-strip .slot.have { opacity: 0.9; color: var(--ink); }
+.gun-strip .slot.cur { border-color: var(--accent); opacity: 1; }
+.gun-strip .slot b { color: var(--accent); font-weight: 700; }
+.gun-cover { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); padding: 3px 10px; border-radius: 5px; background: var(--panel); font-size: 12px; color: var(--dim); opacity: 0; }
+.gun-cover.on { opacity: 0.9; }
+.has-touch .gun-ammo { top: auto; bottom: 214px; right: 250px; }
+.has-touch .gun-strip { bottom: auto; top: 54px; left: 50%; right: auto; transform: translateX(-50%); }
+.touch-gun { bottom: calc(196px + env(safe-area-inset-bottom)); height: 150px; }
+.b-fire { right: 0; bottom: 0; width: 84px; height: 84px; background: rgba(190, 60, 48, 0.55); }
+.b-aim { right: 94px; bottom: 6px; width: 62px; height: 62px; }
+.b-reload { right: 166px; bottom: 0; width: 50px; height: 50px; font-size: 11px; }
+.b-weapon { right: 166px; bottom: 58px; width: 50px; height: 50px; font-size: 11px; }
+.b-cover { right: 100px; bottom: 76px; width: 50px; height: 50px; font-size: 11px; }
+.gun-hurt { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, rgba(180, 20, 10, 0) 45%, rgba(190, 25, 12, 0.55) 100%); }

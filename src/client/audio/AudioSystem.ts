@@ -7,10 +7,12 @@
  * unknown event types and missing fields are ignored, so new gameplay events can't break audio.
  */
 import type { SimEvent } from '../../shared/protocol';
+import { EntityKind } from '../../shared/entities';
 import { PedFlag, VehicleFlag, WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
 import type { EntityState } from '../net/Interpolator';
 import type { Game, System } from '../Game';
-import { distanceGain, enginePitch, impactGain, squealLevel, strideLength } from './mapping';
+import { WEAPONS, type WeaponId } from '../../shared/weapons';
+import { distanceGain, enginePitch, gunshotFilterHz, gunshotGain, impactGain, squealLevel, strideLength } from './mapping';
 import { createSiren, type Siren } from './siren';
 
 const MUTE_KEY = 'KeyM';
@@ -125,6 +127,7 @@ export class AudioSystem implements System {
     this.updateFootsteps(v.ped, v.inVehicle);
     this.updateDoors(v.entities);
     this.updateSiren(v.entities);
+    this.updateRotor(v.entities);
   }
 
   private updateFootsteps(ped: EntityState | null, inVehicle: boolean) {
@@ -159,14 +162,39 @@ export class AudioSystem implements System {
     for (const id of this.doorOpen.keys()) if (!entities.has(id)) this.doorOpen.delete(id);
   }
 
-  /** A siren on the nearest police car with its lightbar on, within earshot. Yelps once the police have eyes on the player. */
+  /** The nearest police helicopter's rotor: a low thump at blade-pass rate, louder and higher as it comes close. */
+  private rotor: Rotor | null = null;
+
+  private updateRotor(entities: Map<number, EntityState>) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noise) return;
+    const cam = this.game.camera.position;
+    let best: EntityState | null = null;
+    let bestD = 600;
+    for (const st of entities.values()) {
+      if (st.kind !== EntityKind.Helicopter) continue;
+      const d = Math.hypot(st.x - cam.x, st.z - cam.z, (st.y - cam.y) * 0.5);
+      if (d < bestD) {
+        bestD = d;
+        best = st;
+      }
+    }
+    if (!best) {
+      this.rotor?.set(0, 0, ctx.currentTime);
+      return;
+    }
+    this.rotor ??= new Rotor(ctx, this.master, this.noise);
+    this.rotor.set(distanceGain(bestD * 0.45) * best.aux0, this.spatial(best).pan, ctx.currentTime);
+  }
+
+  /** A siren on the nearest police car with its siren sounding, within earshot. Yelps once the police have eyes on the player. */
   private updateSiren(entities: Map<number, EntityState>) {
     const ctx = this.ctx;
     const cam = this.game.camera.position;
     let best: EntityState | null = null;
     let bestD = 220;
     for (const st of entities.values()) {
-      if (st.kind !== 2 || (st.flags & VehicleFlag.Lightbar) === 0 || (st.flags & VehicleFlag.Burnt) !== 0) continue;
+      if (st.kind !== 2 || (st.flags & VehicleFlag.Siren) === 0 || (st.flags & VehicleFlag.Burnt) !== 0) continue;
       const d = Math.hypot(st.x - cam.x, st.z - cam.z);
       if (d < bestD) {
         bestD = d;
@@ -212,6 +240,22 @@ export class AudioSystem implements System {
           this.thud(victim, clamp01(0.15 + amount / 60), 0.6);
           break;
         }
+        case 'weapon:fire': {
+          const id = ev.weapon as WeaponId;
+          if (WEAPONS[id]) this.gunshot(id, { x: num(ev.x) ?? 0, z: num(ev.z) ?? 0 }, ev.shooterId === this.game.view.ped?.id);
+          break;
+        }
+        case 'weapon:reload': {
+          const id = ev.weapon as WeaponId;
+          if (WEAPONS[id]) this.reloadClicks(id, num(ev.durationS) ?? 1.5, this.entity(ev.pedId));
+          break;
+        }
+        case 'weapon:empty':
+          this.dryClick(this.entity(ev.pedId));
+          break;
+        case 'weapon:switch':
+          if (ev.pedId === this.game.view.ped?.id) this.dryClick(null, 0.5);
+          break;
         case 'traffic:honk': {
           // A driver leans on the horn: where their car is.
           this.horn(this.entity(ev.vehicleId));
@@ -265,6 +309,152 @@ export class AudioSystem implements System {
     body.connect(out);
     this.play(body, now, 0.25, out);
     this.burst(now, 0.08, 'lowpass', 500, 0.8, out, 0.6);
+  }
+
+  /** A short filtered noise hit that cleans up only its own nodes (the shared outputs of a gunshot outlive each part). */
+  private noiseHit(at: number, dur: number, type: BiquadFilterType, freq: number, q: number, dest: AudioNode, level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.noise) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(level, at);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(filter).connect(env).connect(dest);
+    this.live.add(src);
+    src.onended = () => {
+      this.live.delete(src);
+      src.disconnect();
+      filter.disconnect();
+      env.disconnect();
+    };
+    src.start(at, Math.random() * 1.2, dur + 0.05);
+    src.stop(at + dur + 0.05);
+  }
+
+  /** Active gunshot voices (a burst of automatic fire would otherwise stack hundreds of nodes). */
+  private gunVoices = 0;
+
+  /**
+   * A gunshot, built from three parts: a crack (a short, bright noise burst), a body (a falling sine
+   * thump) and a tail (low-passed noise that rings out, with a late slap for the long guns). Distance
+   * lowers the level and closes a low-pass, so far shots are dull. The player's own gun is a little
+   * louder and always full-bandwidth.
+   */
+  private gunshot(id: WeaponId, at: { x: number; z: number }, own: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noise) return;
+    const cam = this.game.camera.position;
+    const dist = own ? 0 : Math.hypot(at.x - cam.x, at.z - cam.z);
+    const level = gunshotGain(dist) * (own ? 1.15 : 1);
+    if (level < 0.015) return;
+    const def = GUN_SOUND[id];
+    const { pan } = this.spatial(own ? null : at);
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = def.level * level;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = gunshotFilterHz(dist);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = own ? 0 : pan;
+    lp.connect(out).connect(panner).connect(this.master);
+    // Crack.
+    this.noiseHit(now, def.crackS, 'bandpass', def.crackHz * (0.92 + Math.random() * 0.16), 0.7, lp, 1);
+    // Body.
+    const body = ctx.createOscillator();
+    const bg = ctx.createGain();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(def.bodyHz[0], now);
+    body.frequency.exponentialRampToValueAtTime(def.bodyHz[1], now + def.bodyS);
+    bg.gain.setValueAtTime(0.9, now);
+    bg.gain.exponentialRampToValueAtTime(0.001, now + def.bodyS);
+    body.connect(bg).connect(lp);
+    this.live.add(body);
+    body.onended = () => {
+      this.live.delete(body);
+      body.disconnect();
+      bg.disconnect();
+    };
+    body.start(now);
+    body.stop(now + def.bodyS + 0.05);
+    // Tail, unless there are already plenty of voices going.
+    if (this.live.size < 70) {
+      this.noiseHit(now + 0.004, def.tailS, 'lowpass', def.tailHz, 0.6, lp, 0.55);
+      if (def.slap) this.noiseHit(now + def.slap, def.tailS * 0.8, 'lowpass', def.tailHz * 0.7, 0.5, lp, 0.22);
+    }
+    // The shared output nodes go when the last source ends; keep a count so a long burst does not pile up.
+    this.gunVoices++;
+    window.setTimeout(() => {
+      this.gunVoices = Math.max(0, this.gunVoices - 1);
+      try {
+        lp.disconnect();
+        out.disconnect();
+        panner.disconnect();
+      } catch {
+        /* Already gone. */
+      }
+    }, (def.tailS + (def.slap ?? 0) + 0.3) * 1000);
+  }
+
+  /** The sounds of a reload: the magazine out and in for most guns, shells one by one and a pump for the shotgun. */
+  private reloadClicks(id: WeaponId, durationS: number, at: { x: number; z: number } | null) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const { gain, pan } = this.spatial(at);
+    if (gain < 0.05) return;
+    const out = ctx.createGain();
+    out.gain.value = 0.55 * gain;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    out.connect(panner).connect(this.master);
+    const now = ctx.currentTime;
+    const tick = (t: number, hz: number, dur: number, lvl: number) => this.noiseHit(now + t, dur, 'bandpass', hz, 2.5, out, lvl);
+    if (id === 'shotgun') {
+      const n = Math.max(2, Math.floor(durationS / 0.55));
+      for (let i = 0; i < n; i++) tick(0.2 + i * 0.5, 1500 + (i % 2) * 250, 0.03, 0.8);
+      tick(durationS - 0.3, 700, 0.07, 1);
+      tick(durationS - 0.18, 1100, 0.05, 0.9);
+    } else {
+      tick(durationS * 0.18, 2100, 0.025, 0.9);
+      tick(durationS * 0.2, 900, 0.05, 0.6);
+      tick(durationS * 0.62, 1500, 0.03, 1);
+      tick(durationS * 0.66, 600, 0.06, 0.7);
+      tick(durationS * 0.9, 2400, 0.02, 0.8);
+    }
+    window.setTimeout(() => {
+      try {
+        out.disconnect();
+        panner.disconnect();
+      } catch {
+        /* Already gone. */
+      }
+    }, (durationS + 0.4) * 1000);
+  }
+
+  /** The empty click of a trigger pulled on no rounds, or a weapon being drawn. */
+  private dryClick(at: { x: number; z: number } | null, level = 0.7) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const { gain, pan } = this.spatial(at);
+    const out = ctx.createGain();
+    out.gain.value = level * gain;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    out.connect(panner).connect(this.master);
+    this.noiseHit(ctx.currentTime, 0.02, 'bandpass', 3000, 3, out, 1);
+    window.setTimeout(() => {
+      try {
+        out.disconnect();
+        panner.disconnect();
+      } catch {
+        /* Already gone. */
+      }
+    }, 200);
   }
 
   /** A car horn: two square tones a third apart, a short blast. */
@@ -362,6 +552,7 @@ export class AudioSystem implements System {
     this.siren = null;
     this.engine?.dispose();
     this.squeal?.dispose();
+    this.rotor?.dispose();
     this.engine = null;
     this.squeal = null;
     this.noise = null;
@@ -372,6 +563,14 @@ export class AudioSystem implements System {
     if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => {});
   }
 }
+
+/** The voice of each gun: crack (Hz, seconds), body (falling sine, Hz and seconds), tail (seconds, low-pass Hz, late slap delay) and loudness. */
+const GUN_SOUND: Record<WeaponId, { crackHz: number; crackS: number; bodyHz: [number, number]; bodyS: number; tailS: number; tailHz: number; slap?: number; level: number }> = {
+  pistol: { crackHz: 3200, crackS: 0.022, bodyHz: [190, 62], bodyS: 0.1, tailS: 0.34, tailHz: 1500, level: 0.6 },
+  smg: { crackHz: 3700, crackS: 0.015, bodyHz: [210, 85], bodyS: 0.07, tailS: 0.2, tailHz: 1700, level: 0.46 },
+  shotgun: { crackHz: 1900, crackS: 0.05, bodyHz: [130, 36], bodyS: 0.2, tailS: 0.7, tailHz: 850, slap: 0.09, level: 0.9 },
+  rifle: { crackHz: 2700, crackS: 0.03, bodyHz: [150, 45], bodyS: 0.15, tailS: 0.85, tailHz: 750, slap: 0.12, level: 0.8 },
+};
 
 /** Two seconds of white noise, shared by every noise source. */
 function makeNoise(ctx: AudioContext): AudioBuffer {
@@ -438,6 +637,66 @@ class Engine {
 }
 
 /** Tyre squeal: band-passed noise whose level follows slip. */
+/** A helicopter overhead: filtered noise chopped at the blade-pass rate (about 21 Hz) with a low thrum under it. */
+class Rotor {
+  private readonly src: AudioBufferSourceNode;
+  private readonly chop: GainNode;
+  private readonly level: GainNode;
+  private readonly pan: StereoPannerNode;
+  private readonly lfo: OscillatorNode;
+  private readonly thrum: OscillatorNode;
+  private readonly thrumGain: GainNode;
+
+  constructor(ctx: AudioContext, dest: AudioNode, noise: AudioBuffer) {
+    this.src = ctx.createBufferSource();
+    this.src.buffer = noise;
+    this.src.loop = true;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 260;
+    band.Q.value = 0.8;
+    this.chop = ctx.createGain();
+    this.chop.gain.value = 0.5;
+    this.lfo = ctx.createOscillator();
+    this.lfo.type = 'sawtooth';
+    this.lfo.frequency.value = 21;
+    const depth = ctx.createGain();
+    depth.gain.value = 0.5;
+    this.lfo.connect(depth).connect(this.chop.gain);
+    this.thrum = ctx.createOscillator();
+    this.thrum.type = 'sine';
+    this.thrum.frequency.value = 58;
+    this.thrumGain = ctx.createGain();
+    this.thrumGain.gain.value = 0;
+    this.level = ctx.createGain();
+    this.level.gain.value = 0;
+    this.pan = ctx.createStereoPanner();
+    this.src.connect(band).connect(this.chop).connect(this.level);
+    this.thrum.connect(this.thrumGain).connect(this.level);
+    this.level.connect(this.pan).connect(dest);
+    this.src.start();
+    this.lfo.start();
+    this.thrum.start();
+  }
+
+  set(level: number, pan: number, now: number) {
+    this.level.gain.setTargetAtTime(0.5 * level, now, 0.15);
+    this.thrumGain.gain.setTargetAtTime(0.35 * level, now, 0.15);
+    this.pan.pan.setTargetAtTime(pan, now, 0.1);
+  }
+
+  dispose() {
+    for (const n of [this.src, this.lfo, this.thrum]) {
+      try {
+        n.stop();
+      } catch {
+        /* Not started. */
+      }
+    }
+    this.level.disconnect();
+  }
+}
+
 class Squeal {
   private readonly src: AudioBufferSourceNode;
   private readonly filter: BiquadFilterNode;

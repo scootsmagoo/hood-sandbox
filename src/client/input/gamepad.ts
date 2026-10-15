@@ -5,6 +5,9 @@
  * On foot the left stick moves and the right stick turns the camera. In a car the triggers are
  * throttle and brake (analog), the left stick steers, and B is the handbrake. X punches on foot, and LB stands the car back up. Buttons hold actions
  * directly, so rebinding the keyboard never breaks the pad.
+ *
+ * Guns: on foot LT aims and RT fires; X reloads while LT is held (the sim turns a punch into a reload while aiming); the D-pad
+ * left and right change weapon; B takes cover. In a car LT and RT stay brake and throttle, so a drive-by aims with RB and fires with X.
  */
 import type { Action } from './bindings';
 import type { Input, InputSource } from './Input';
@@ -26,8 +29,15 @@ export const PAD_ACTIONS: Readonly<Partial<Record<number, Action>>> = {
   [PAD.L3]: 'sprint',
   [PAD.R3]: 'lookBack',
   [PAD.UP]: 'toggleView',
+  [PAD.LEFT]: 'weaponPrev',
+  [PAD.RIGHT]: 'weaponNext',
   [PAD.VIEW]: 'debug',
   [PAD.MENU]: 'help',
+};
+
+/** Buttons that hold a second action besides the one in `PAD_ACTIONS`. */
+export const PAD_ALSO: Readonly<Partial<Record<number, Action>>> = {
+  [PAD.B]: 'cover',
 };
 
 export const STICK = { moveDead: 0.16, lookDead: 0.12, lookCurve: 2, steerCurve: 1.4, yawRate: 3.2, pitchRate: 2.0 };
@@ -50,6 +60,7 @@ export function padButtonLabel(button: number, family: PadFamily): string {
 /** The button that does an action (undefined when none does). */
 export function padButtonFor(action: Action): number | undefined {
   for (const [b, a] of Object.entries(PAD_ACTIONS)) if (a === action) return Number(b);
+  for (const [b, a] of Object.entries(PAD_ALSO)) if (a === action) return Number(b);
   return undefined;
 }
 
@@ -81,6 +92,7 @@ export class GamepadSource implements InputSource {
       this.heldButtons.set(Number(i), down);
       if (down) used = true;
     }
+    for (const [i, action] of Object.entries(PAD_ALSO) as [string, Action][]) wanted.set(action, !!btn(Number(i))?.pressed);
     for (const [action, down] of wanted) input.holdAction(action, down);
 
     // Triggers: analog throttle and brake.
@@ -90,6 +102,10 @@ export class GamepadSource implements InputSource {
     this.rtHeld = triggerHeld(rt, this.rtHeld);
     input.setTriggers(rt > 0.04 ? rt : 0, lt > 0.04 ? lt : 0);
     if (lt > 0.1 || rt > 0.1) used = true;
+    // The gun: LT and RT on foot, RB and X from a car (where the triggers are the pedals).
+    const car = input.inVehicle;
+    input.holdAction('aim', car ? !!btn(PAD.RB)?.pressed : this.ltHeld);
+    input.holdAction('fire', car ? !!btn(PAD.X)?.pressed : this.rtHeld);
 
     // Left stick: move on foot, steer in a car.
     shapeStick(pad.axes[0] ?? 0, pad.axes[1] ?? 0, STICK.moveDead, 1.0, tmp);
@@ -107,7 +123,7 @@ export class GamepadSource implements InputSource {
   }
 
   private release(input: Input) {
-    for (const action of new Set(Object.values(PAD_ACTIONS) as Action[])) input.holdAction(action, false);
+    for (const action of new Set([...Object.values(PAD_ACTIONS), ...Object.values(PAD_ALSO), 'aim', 'fire'] as Action[])) input.holdAction(action, false);
     input.setTriggers(0, 0);
     input.setAnalogMove('pad', 0, 0);
     this.heldButtons.clear();
