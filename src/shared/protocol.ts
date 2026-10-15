@@ -81,6 +81,11 @@ export type SimEvent =
   | { type: 'vehicle:impact'; tick: number; vehicleId: EntityId; strength: number }
   | { type: 'vehicle:reset'; tick: number; vehicleId: EntityId }
   | { type: 'entity:respawn'; tick: number; id: EntityId; reason: 'out-of-world' }
+  /**
+   * The unstick safety net moved someone who was inside a wall, overlapping static geometry, or making no progress
+   * while trying to move (`from` to `to`; `to` is the same place for a despawn).
+   */
+  | { type: 'ped:unstuck'; tick: number; pedId: EntityId; reason: 'inside' | 'overlap' | 'no-progress' | 'fell'; action: 'depenetrate' | 'snap-node' | 'teleport' | 'rollback' | 'despawn'; fromX: number; fromZ: number; toX: number; toZ: number }
   /** An entity came to exist. Carries its definition (see shared/entityDefs.ts). */
   | { type: 'entity:spawn'; tick: number; def: EntityDef }
   | { type: 'entity:despawn'; tick: number; id: EntityId }
@@ -110,8 +115,10 @@ export type SimEvent =
   | { type: 'vehicle:explode'; tick: number; vehicleId: EntityId; x: number; y: number; z: number }
   /** A crime was committed (before anyone reports it). */
   | { type: 'crime'; tick: number; crime: CrimeId; severity: number; heat: number; x: number; y: number; z: number; perpetratorId: EntityId; victimId: EntityId; vehicleId: EntityId; witnesses: number; /** How many of the witnesses only heard it (gunfire). */ heard?: number; description: CrimeDescription }
-  /** A witness called it in, or police saw it. */
-  | { type: 'crime:reported'; tick: number; crime: CrimeId; reporterId: EntityId; police: boolean; x: number; z: number }
+  /** A witness called it in, or police saw it. `duplicate`: the crime had been reported already (by another caller or an officer), so the call raised nothing. */
+  | { type: 'crime:reported'; tick: number; crime: CrimeId; reporterId: EntityId; police: boolean; x: number; z: number; duplicate?: boolean }
+  /** A witness who was going to call hung up: they lost sight of the culprit, or ran off. */
+  | { type: 'witness:gave-up'; tick: number; pedId: EntityId; crime: CrimeId; reason: 'lost-sight' | 'ran-off' }
   /** A witness who was going to call was knocked down or killed first. */
   | { type: 'witness:silenced'; tick: number; pedId: EntityId; crime: CrimeId }
   /** The heat level or its phase changed. `phase`: none, reported (hollow stars), seen (solid), lost (flashing). */

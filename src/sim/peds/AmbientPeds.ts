@@ -26,6 +26,7 @@ import { PED } from '../character/locomotion';
 import { PedEntity, type VehicleEntity } from '../entities';
 import type { PedBrain } from '../npc/brain';
 import type { Simulation } from '../Simulation';
+import { EdgeClearance } from './clearance';
 import { cellKey, PAVEMENT_KINDS, WalkGraph } from './graph';
 import { RoadMask } from './roadMask';
 import { slotOf, zoneAt, type PedGroup, type PopulationData, type PopSlot } from './population';
@@ -103,6 +104,8 @@ export class AmbientPeds {
   private readonly rng: Rng;
   private readonly junctionOf = new Map<string, SignalJunction>();
   private readonly roadMask: RoadMask;
+  /** How far off the middle of each edge a person can walk (measured against the real walls and props as edges are first used). */
+  readonly clearance: EdgeClearance;
   private inbox: SimEvent[] = [];
   private pois: Poi[] = [];
   private filled = false;
@@ -130,6 +133,8 @@ export class AmbientPeds {
     this.rng = sim.rng.fork('ambient');
     for (const j of opts.junctions?.junctions ?? []) this.junctionOf.set(j.id, j);
     this.roadMask = new RoadMask(opts.roads, opts.junctions);
+    this.clearance = new EdgeClearance(opts.graph, sim.physics);
+    opts.graph.passable = (e) => !this.clearance.isBlocked(e);
   }
 
   get count(): number {
@@ -386,7 +391,9 @@ export class AmbientPeds {
       const a = g.ea[e], b = g.eb[e];
       const x = g.x[a] + (g.x[b] - g.x[a]) * t, z = g.z[a] + (g.z[b] - g.z[a]) * t;
       const y = g.yAt(e, t);
-      if (!ok(x, y, z)) continue;
+      if (!ok(x, y, z) || !this.standable(x, y, z, true)) continue;
+      // not on an edge a pole, a low deck or a wall blocks, nor in a pocket of the network that is cut off by one
+      if (this.clearance.isBlocked(e) || !g.hasRoom(e)) continue;
       const forward = this.rng.chance(0.5);
       this.makePed(gid, group, x, y, z, forward ? a : b, forward ? b : a, null);
       return 1;
@@ -406,12 +413,36 @@ export class AmbientPeds {
     if (node < 0) return 0;
     this.scenarios.take(i, n);
     const dur = this.rng.range(60, 240);
+    let made = 0;
     for (let s = 0; s < n; s++) {
       const sp = slotPosition(pt, s, n, chat);
-      const ped = this.makePed(gid, group, sp.x, pt.y, sp.z, node, -1, { yaw: sp.yaw + this.rng.range(-0.15, 0.15), point: i, slot: s, count: n, action, dur: dur * this.rng.range(0.8, 1.25), type: pt.type });
+      // a slot beside a wall may be inside it: nudge it clear, or leave that place empty
+      let { x: sx, z: sz } = sp;
+      let sy = pt.y;
+      if (!this.standable(sx, sy, sz, false)) {
+        const near = this.sim.physics.clearSpot(sx, sy, sz, 1.0, { props: false });
+        if (!near || !this.standable(near.x, near.y, near.z, false)) {
+          this.scenarios.release(i);
+          continue;
+        }
+        sx = near.x; sy = near.y; sz = near.z;
+      }
+      const ped = this.makePed(gid, group, sx, sy, sz, node, -1, { yaw: sp.yaw + this.rng.range(-0.15, 0.15), point: i, slot: s, count: n, action, dur: dur * this.rng.range(0.8, 1.25), type: pt.type });
       if (!ped) this.scenarios.release(i);
+      else made++;
     }
-    return n;
+    return made;
+  }
+
+  /**
+   * Whether somebody can be put at (x, y, z): not in a building, clear of walls (and of the street furniture, unless they are to sit or
+   * stand at it), with the ground under their feet. Every spawn is checked; nobody is made in a wall.
+   */
+  standable(x: number, y: number, z: number, props: boolean): boolean {
+    const phys = this.sim.physics;
+    const floor = phys.floorBelow(x, y + 0.6, z, 1.6);
+    if (Number.isNaN(floor) || Math.abs(floor - y) > 0.6) return false;
+    return !phys.blockedAt(x, y, z, { props });
   }
 
   private actionFor(type: ScenarioType, n: number, group: string): ScenarioAction {
@@ -559,18 +590,40 @@ export class AmbientPeds {
     }
   }
 
-  /** Far-off walkers and anyone standing still skip the character controller (the walk network is clear of walls). */
+  /** Far-off walkers and anyone standing still skip the character controller (the walk network is clear of walls, and the move keeps out of the ones it is not). */
   private chooseLite(ped: PedEntity, a: AmbientState) {
     const c = ped.controller;
     const me = this.sim.playerPosition();
     const d = Math.hypot(c.x - me.x, c.z - me.z);
     if (a.mode !== 'scenario' && d < (a.lite ? 38 : 46)) return;
-    const gy = this.sim.groundAt(c.x, c.z);
-    const g = this.graph;
-    const n = a.next >= 0 ? a.next : a.node;
-    const ny = n >= 0 ? g.y[n] - 0.1 : gy;
-    a.liteY = ny - gy > 1.5 || gy - ny > 1.5 ? ny : gy;
+    if (!a.lite || (this.n + ped.id) % 6 === 0) {
+      // the floor under the feet (ground, deck, a step up onto one), asked of the physics world a few times a second; the network's heights are the guide
+      const est = a.mode === 'scenario' ? c.y : this.surfaceY(c, a);
+      const f = this.sim.physics.floorBelow(c.x, Math.max(c.y, est) + 0.5, c.z, 1.8);
+      a.liteY = !Number.isNaN(f) && Math.abs(f - est) < 1.5 ? f : est;
+    }
     a.lite = true;
+  }
+
+  /**
+   * The height somebody walking the network stands at: the ground, or, on a deck (a footbridge, a bridge's sidewalk), the deck,
+   * read off the edge they are on at the point they have got to.
+   */
+  private surfaceY(c: { x: number; z: number; y: number }, a: AmbientState): number {
+    const g = this.graph;
+    const gy = this.sim.groundAt(c.x, c.z);
+    const from = a.node >= 0 ? a.node : a.prev;
+    const to = a.next >= 0 ? a.next : a.node;
+    let ny: number;
+    if (from >= 0 && to >= 0 && from !== to) {
+      const ax = g.x[from], az = g.z[from], dx = g.x[to] - ax, dz = g.z[to] - az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((c.x - ax) * dx + (c.z - az) * dz) / l2)) : 0;
+      ny = g.y[from] + (g.y[to] - g.y[from]) * t;
+    } else if (to >= 0) ny = g.y[to];
+    else return gy;
+    // network heights are the sidewalk's (the ground plus 10 cm) or a deck's
+    return Math.abs(ny - 0.1 - gy) > 0.15 ? ny : gy;
   }
 
   /** The brain is running or fighting this person: note it, and let the brain do it. */
@@ -650,7 +703,13 @@ export class AmbientPeds {
     const ex = tx - (from >= 0 ? g.x[from] : c.x), ez = tz - (from >= 0 ? g.z[from] : c.z);
     const el = Math.hypot(ex, ez) || 1;
     const onCrossing = a.crossAttr >= 0;
-    const lane = onCrossing ? 0 : a.lane;
+    let lane = onCrossing ? 0 : a.lane;
+    if (lane !== 0 && from >= 0) {
+      // keep to where the edge is clear of walls and poles
+      let e = a.edge;
+      if (e < 0 || !((g.ea[e] === from && g.eb[e] === n) || (g.eb[e] === from && g.ea[e] === n))) e = a.edge = g.edgeBetween(from, n);
+      if (e >= 0) lane = this.clearance.lane(e, from, lane);
+    }
     tx += (ez / el) * lane;
     tz += (-ex / el) * lane;
     const dx = tx - c.x, dz = tz - c.z;
@@ -693,6 +752,7 @@ export class AmbientPeds {
         a.stuckN++;
         if (a.stuckN === 1 && a.prev >= 0) {
           // turn round
+          a.edge = -1;
           a.next = a.prev;
           a.prev = a.node;
           a.crossAttr = -1;
@@ -731,6 +791,9 @@ export class AmbientPeds {
       let w = 1;
       if (m === a.prev && t - s > 1) w = 0.03;
       if (e === a.avoidEdge && t - s > 1) w = 0;
+      // a pole, a low deck or a wall across the middle of an edge: never that way (unless it is the only way)
+      const shut = this.clearance.isBlocked(e);
+      if (shut) w = 0;
       const kind = g.kindOf(e);
       if (kind === 'crossing') w *= 0.6;
       else if (kind === 'steps') w *= 0.4;
@@ -744,8 +807,13 @@ export class AmbientPeds {
       sum += w;
     }
     if (sum <= 0) {
-      ws.fill(1);
-      sum = ws.length;
+      // nowhere they like: the way back, or any way that is open, or any way
+      for (let k = s; k < t; k++) ws[k - s] = this.clearance.isBlocked(g.adjEdges[k]) ? 0 : 1;
+      sum = ws.reduce((x, y) => x + y, 0);
+      if (sum <= 0) {
+        ws.fill(1);
+        sum = ws.length;
+      }
     }
     let pick = this.rng.next() * sum;
     let k = 0;
@@ -769,6 +837,7 @@ export class AmbientPeds {
     }
     if (!meta) a.crossAttr = -1;
     a.next = m;
+    a.edge = e;
     return true;
   }
 

@@ -16,7 +16,15 @@ import type { EntityId } from './entities';
 export const HEADER_WORDS = 24;
 export const ENTITY_WORDS = 36;
 export const MAX_ENTITIES = 256;
-export const SNAPSHOT_BYTES = (HEADER_WORDS + ENTITY_WORDS * MAX_ENTITIES) * 4;
+/**
+ * Ragdolls (shared/ragdoll.ts) follow the entity records: `H.Ragdolls` records of `RAG_WORDS` words each, the active ones
+ * first and then the most recently frozen bodies. A record is the ped's id, its pelvis centre (three f32) and the eleven
+ * part rotations packed into two words each (`packQuat`); the client rebuilds the part positions from the joints.
+ */
+export const RAG_WORDS = 26;
+export const MAX_RAGDOLL_RECORDS = 16;
+export const RG = { Id: 0, Px: 1, Py: 2, Pz: 3, Rot: 4 } as const;
+export const SNAPSHOT_BYTES = (HEADER_WORDS + ENTITY_WORDS * MAX_ENTITIES + RAG_WORDS * MAX_RAGDOLL_RECORDS) * 4;
 
 const E_WHEELS = 16;
 
@@ -51,6 +59,8 @@ export const H = {
   Helicopters: 20,
   Strips: 21,
   Chasers: 22,
+  /** u32: how many ragdoll records follow the entity records (see `RAG_WORDS`). */
+  Ragdolls: 23,
 } as const;
 
 export const HeatPhase = { None: 0, Reported: 1, Seen: 2, Lost: 3 } as const;
@@ -137,6 +147,12 @@ export const PedFlag = {
   Firing: 1 << 20,
   /** An officer who has the player in sight right now (the minimap draws their vision cone brighter). */
   Sees: 1 << 21,
+  /** A witness with a call to the police under way (`E.Aux2` is how far through it, 0 to 1): the client draws a phone over their head. */
+  Dialling: 1 << 22,
+  /** The body is a ragdoll (thrown, slumped, lying, or getting up): draw it from its ragdoll record, or from the last one seen. */
+  Ragdoll: 1 << 23,
+  /** Staggering from a shove or a car's nudge, catching their balance. */
+  Stumble: 1 << 24,
 } as const;
 
 /**
@@ -317,6 +333,26 @@ export class SnapshotView {
   /** Word offset of record `i`. */
   at(i: number): number {
     return HEADER_WORDS + i * ENTITY_WORDS;
+  }
+
+  get ragdollCount(): number {
+    return this.u32[H.Ragdolls];
+  }
+
+  /** Word offset of ragdoll record `i` (after the entity records). */
+  ragdollAt(i: number): number {
+    return HEADER_WORDS + this.count * ENTITY_WORDS + i * RAG_WORDS;
+  }
+
+  /** Index of the ragdoll record of a ped, or -1. */
+  ragdollIndexOf(id: EntityId): number {
+    for (let i = 0, n = this.ragdollCount; i < n; i++) if (this.u32[this.ragdollAt(i) + RG.Id] === id) return i;
+    return -1;
+  }
+
+  /** Bytes in use: the header, the entity records and the ragdoll records (what a transport needs to send). */
+  get usedBytes(): number {
+    return (HEADER_WORDS + this.count * ENTITY_WORDS + this.ragdollCount * RAG_WORDS) * 4;
   }
 
   /** Index of the record for an entity, or -1. */

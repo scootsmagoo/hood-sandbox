@@ -23,11 +23,11 @@ describe('the dispatch ladder, from jurisdictions.json', () => {
   const row = (id: string, heat: number) => dispatchFor(atlanta, id, heat);
 
   it('gives each agency the table row for its heat level, inheriting the nearest lower one', () => {
-    expect(row('acp', 1)).toMatchObject({ maxUnits: 1, spawnIntervalS: 25, unitsPerSpawn: 1, loadout: 'pistol' });
-    expect(row('acp', 3)).toMatchObject({ maxUnits: 2, spawnIntervalS: 15, loadout: 'shotgun' });
+    expect(row('acp', 1)).toMatchObject({ maxUnits: 1, spawnIntervalS: 40, unitsPerSpawn: 1, loadout: 'pistol' });
+    expect(row('acp', 3)).toMatchObject({ maxUnits: 2, spawnIntervalS: 22, loadout: 'shotgun' });
     expect(row('acp', 6)).toMatchObject({ maxUnits: 3, spawnIntervalS: 10, loadout: 'rifle' });
-    expect(row('ghp', 1)).toMatchObject({ maxUnits: 2, spawnIntervalS: 15, loadout: 'pistol' });
-    expect(row('ghp', 3)).toMatchObject({ maxUnits: 4, spawnIntervalS: 8, unitsPerSpawn: 2, loadout: 'shotgun' });
+    expect(row('ghp', 1)).toMatchObject({ maxUnits: 1, spawnIntervalS: 40, loadout: 'pistol' });
+    expect(row('ghp', 3)).toMatchObject({ maxUnits: 3, spawnIntervalS: 12, unitsPerSpawn: 1, loadout: 'shotgun' });
     expect(row('ghp', 5)).toMatchObject({ maxUnits: 4, spawnIntervalS: 6, loadout: 'rifle' });
     expect(row('tap', 2)).toMatchObject({ maxUnits: 1, spawnIntervalS: 40 }); // no row for 2: heat 1's
     expect(row('gtf', 3)).toBe(null);

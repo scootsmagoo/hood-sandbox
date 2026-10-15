@@ -4,6 +4,10 @@ import type { SimEvent } from '../src/shared/protocol';
 import type { RoadData, TileData } from '../src/shared/tile';
 import { Simulation } from '../src/sim/Simulation';
 import { Button, cmd, flatTile, gridRoads, ped, run, vehicle } from './helpers';
+import { quickResponse } from './quickResponse';
+
+// These helpers serve the tests about what the police do once they are there: no radio delay, no 30 s wait for the helicopter.
+quickResponse();
 
 /** The Atlanta pack, as the game reads it. */
 export const atlanta: LawData = parseJurisdictions(JSON.parse(readFileSync('data/cities/atlanta/jurisdictions.json', 'utf8')));

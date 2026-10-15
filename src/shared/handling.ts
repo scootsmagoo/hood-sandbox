@@ -1,9 +1,13 @@
 /**
- * Vehicle handling data, in the spirit of GTA's handling.meta (mass, drive force, traction curve,
- * low-speed traction loss, suspension, anti-roll) but in SI units so the numbers mean something:
- * forces are accelerations in m/s^2 (multiplied by the mass in the sim), speeds are m/s, angles
- * are degrees in the file and radians in the sim. Axes are the model's: +Z forward, +Y up,
- * +X to the left.
+ * Vehicle handling data, in the spirit of GTA's handling.meta but in SI units so the numbers mean
+ * something: masses in kg, lengths in m, speeds in m/s, forces as accelerations in m/s^2 (multiplied
+ * by the mass in the sim), angles in degrees in the file and radians in the sim. Axes are the
+ * model's: +Z forward, +Y up, +X to the left.
+ *
+ * The model behind the numbers (docs/physics.md): a sprung body on four long-travel raycast
+ * wheels, tyres with a load-sensitive slip curve that peaks and falls off, a friction ellipse shared
+ * between cornering and driving or braking, and no assists that hold a slide. The feel comes from
+ * mass, the height of the centre of mass, the springs and the tyres.
  */
 import raw from './data/handling.json';
 
@@ -16,9 +20,9 @@ export interface HandlingData {
   body: string;
   /** kg. */
   mass: number;
-  /** Relative to the body origin (the chassis box's anchor). Lower is steadier. */
+  /** Relative to the body origin (the chassis box's anchor). The body origin rides about 0.3 m above the road, so y 0.2 is a centre of mass about half a metre up. */
   centreOfMass: V3;
-  /** Scales the inertia of a box of the chassis' size (pitch x, yaw y, roll z). Below 1 turns quicker. */
+  /** Scales the inertia of a box of the chassis' size (pitch x, yaw y, roll z). Above 1 is lazier to turn, pitch or roll. */
   inertiaScale: V3;
   chassis: { halfExtents: V3; offset: V3; cabin: { halfExtents: V3; offset: V3 } };
   wheels: {
@@ -38,24 +42,35 @@ export interface HandlingData {
     travel: number;
     /** Where the spring is relaxed, as a fraction of the travel from the compressed end. */
     restRatio: number;
-    /** Sprung natural frequency, Hz. */
+    /** Sprung natural frequency, Hz: about 1.1 a soft truck, 1.4 a soft sedan, 1.8 a sports car. */
     frequencyHz: number;
-    dampingRatio: number;
-    /** Anti-roll bar: m/s^2 of the sprung mass per metre of left/right difference. */
-    antiRoll: number;
+    /** Damping ratio while the spring compresses (bump) and while it extends (rebound). Low numbers float and wallow. */
+    bumpDamping: number;
+    reboundDamping: number;
+    /** Anti-roll bars, front and rear: m/s^2 of the wheel's sprung mass per metre of left/right difference. More at one end moves grip away from it. */
+    antiRollFront: number;
+    antiRollRear: number;
+    /** Roll centre heights above the road, m, front and rear: the cornering force acts on the body there. Lower rolls more. */
+    rollCentreFront: number;
+    rollCentreRear: number;
   };
   drive: {
-    /** Full-throttle acceleration at a standstill, m/s^2. */
+    /** Full-throttle acceleration from rest (the gearing's low-speed push), m/s^2. */
     driveForce: number;
-    /** Speed at which the engine runs out of push, m/s. */
+    /** Engine power at the wheels per kg, W/kg: above a few m/s the push is this over the speed. */
+    powerPerKg: number;
+    /** Speed at which the engine runs out of push (the rev limiter in top gear), m/s. */
     maxFlatVel: number;
     /** 0 rear-wheel drive, 1 front-wheel drive, 0.5 all-wheel drive. */
     driveBiasFront: number;
     reverseMaxVel: number;
+    /** Brake demand at full pedal, m/s^2 (the tyres limit what arrives), and the share on the front axle. */
     brakeForce: number;
-    handbrakeForce: number;
+    brakeBiasFront: number;
     /** Deceleration with the foot off the throttle, m/s^2. */
     engineBrake: number;
+    /** Rolling resistance, m/s^2. */
+    rolling: number;
     /** Quadratic air drag, in m/s^2 per (m/s)^2. */
     drag: number;
   };
@@ -65,52 +80,44 @@ export interface HandlingData {
     /** Full lock at `lockRefSpeed` and above. */
     lockHighSpeedDeg: number;
     lockRefSpeed: number;
-    /** How fast the wheels turn toward the target, and how fast they come back. */
+    /** How fast the front wheels turn toward the target and back, degrees per second, at a crawl. */
     rateDeg: number;
     returnRateDeg: number;
+    /** The rack's rate at `lockRefSpeed` as a share of the crawl rate: the steering eases off at speed. */
+    rateHighSpeed: number;
+    /** Caster: with the wheel let go, the front wheels trail toward the direction of travel by this share (0 to 1). */
+    selfAlign: number;
   };
   traction: {
-    /** Friction coefficient at the best slip angle, and once sliding. */
-    curveMax: number;
-    curveMin: number;
-    /** Slip angle of the grip peak, degrees. */
-    curveLateralDeg: number;
-    /** How hard a tyre pulls its lateral slip velocity to zero (0 to 1 per step). */
-    lateralStiffness: number;
-    /** Longitudinal grip relative to the curve. */
+    /** Peak friction coefficient at the nominal (static) load. */
+    mu: number;
+    /** Friction left once the tyre slides, as a share of the peak. Below about 0.8 a slide feeds itself. */
+    slideRatio: number;
+    /** Slip angle of the grip peak, degrees: where the slip curve tops out. */
+    peakSlipDeg: number;
+    /** Slip angle (as a multiple of the peak) by which the curve has fallen to the sliding value. */
+    falloff: number;
+    /** Load sensitivity: the friction coefficient falls this share per 100% extra load. Weight transfer costs grip through this. */
+    loadSensitivity: number;
+    /** Grip at the front and rear axles relative to `mu` (tyre widths, compounds). */
+    frontGrip: number;
+    rearGrip: number;
+    /** Longitudinal grip relative to lateral. */
     longitudinalMult: number;
-    /** Lateral grip lost by a spinning driven wheel at a standstill (0 to 1), fading out by `lowSpeedLossSpeed`. */
+    /** A spinning driven wheel keeps this share of its lateral grip (power oversteer). */
+    spinLateral: number;
+    /** Lateral grip lost by a spinning driven wheel at a standstill (0 to 1), fading out by `lowSpeedLossSpeed` (burnouts). */
     lowSpeedLossMult: number;
     lowSpeedLossSpeed: number;
-    /** Rear lateral grip with the handbrake held. */
-    handbrakeGripMult: number;
-    /** Where the tyre forces act: 0 at the ground, 1 at the centre of mass height. Higher rolls less. */
-    forceHeight: number;
+    /** Friction of a rear tyre locked by the handbrake, as a share of the peak. */
+    handbrakeGrip: number;
   };
-  assists: {
-    /** How much the front wheels turn toward the direction of travel in a slide (0 to 1). */
-    counterSteer: number;
-    /** How strongly the drift assist works (0 to 1). */
-    yawAssist: number;
-    /** Slide angle that full steering asks for during a drift, degrees. */
-    maxSlideDeg: number;
-    /** Cap on the yaw rate the assist asks for, rad/s. */
-    yawRateMax: number;
+  extras: {
     /** Extra downward force, m/s^2 per (m/s)^2. */
     downforce: number;
-    /** Donut: yaw rate at full lock (rad/s), the speed it settles at (m/s), the fastest it can start (m/s), rear lateral grip left (0 to 1), and the strongest speed-trimming brake (m/s^2). */
-    donutYawRate: number;
-    donutSpeed: number;
-    donutMaxSpeed: number;
-    donutRearGrip: number;
-    donutBrake: number;
-    /** Front lateral grip left in a donut (0 to 1): the front tyres stop scrubbing the car to a halt. */
-    donutFrontGrip: number;
-    /** Burnout (handbrake, throttle, wheel straight): the front brakes' base deceleration (m/s^2, grows with speed past the creep speed) and the creep speed (m/s). */
+    /** Burnout (throttle with the brake or the handbrake, nearly stopped): the front brakes' base deceleration (m/s^2, more past the creep speed) and the creep speed (m/s). */
     burnoutHold: number;
     burnoutCreep: number;
-    /** Angle between the nose and the direction of travel a donut settles at, degrees. */
-    donutSlideDeg: number;
   };
   /** GTA-style damage multipliers (1 is the sedan) and the health a new car starts with. */
   damage: {
@@ -162,8 +169,12 @@ export function parseHandling(id: string, entry: unknown, base?: HandlingData): 
   need(h.suspension.frequencyHz > 0.3 && h.suspension.frequencyHz < 8, 'suspension frequency out of range');
   need(h.drive.maxFlatVel > 5, 'maxFlatVel too low');
   need(h.drive.driveBiasFront >= 0 && h.drive.driveBiasFront <= 1, 'driveBiasFront must be 0 to 1');
-  need(h.traction.curveMax >= h.traction.curveMin && h.traction.curveMin > 0, 'traction curve must fall from max to min');
-  need(h.traction.lateralStiffness > 0 && h.traction.lateralStiffness <= 1, 'lateralStiffness must be in (0, 1]');
+  need(h.traction.mu > 0.2 && h.traction.mu < 3, 'traction.mu out of range');
+  need(h.traction.slideRatio > 0 && h.traction.slideRatio <= 1, 'traction.slideRatio must be in (0, 1]');
+  need(h.traction.peakSlipDeg > 1 && h.traction.peakSlipDeg < 30, 'traction.peakSlipDeg out of range');
+  need(h.traction.falloff > 1, 'traction.falloff must be above 1');
+  need(h.suspension.bumpDamping > 0 && h.suspension.reboundDamping > 0, 'damping must be positive');
+  need(h.steering.rateHighSpeed > 0 && h.steering.rateHighSpeed <= 1, 'steering.rateHighSpeed must be in (0, 1]');
   need(h.damage.bodyHealth > 0 && h.damage.engineHealth > 0, 'damage health must be positive');
   need(h.damage.collisionMult >= 0 && h.damage.engineMult >= 0, 'damage multipliers cannot be negative');
   return h;

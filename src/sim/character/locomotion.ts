@@ -9,16 +9,22 @@ export const PED = {
   walkSpeed: 1.5,
   runSpeed: 3.3,
   sprintSpeed: 5.5,
-  groundAccel: 48,
-  groundDecel: 60,
+  /**
+   * GTA IV's character has weight: about a third of a second to get up to a jog, a step or so to stop from a walk, and a
+   * short slide (about a metre) when a sprint is let go. `groundDecel` is the stop from a walk; from a sprint it eases to
+   * `sprintDecel`.
+   */
+  groundAccel: 15,
+  groundDecel: 30,
+  sprintDecel: 13,
   airAccel: 9,
   jumpSpeed: 6.6,
   gravity: 22,
   /** Grace after leaving a ledge, and how early a jump press is remembered, s. */
   coyoteTime: 0.12,
   jumpBuffer: 0.12,
-  /** Turn rate toward the movement direction, rad/s. */
-  turnRate: 14,
+  /** Turn rate toward the movement direction, rad/s (a half turn in about a third of a second). */
+  turnRate: 9,
   /** Capsule: radius and half the straight part, m. */
   radius: 0.32,
   halfHeight: 0.55,
@@ -76,8 +82,11 @@ export function approachVelocity(v: { x: number; z: number }, wx: number, wz: nu
   const dist = Math.hypot(dx, dz);
   if (dist < 1e-6) return;
   const wishSpeed = Math.hypot(wx, wz);
-  const speeding = wishSpeed < Math.hypot(v.x, v.z);
-  const rate = grounded ? (speeding ? PED.groundDecel : PED.groundAccel) : PED.airAccel;
+  const speed = Math.hypot(v.x, v.z);
+  const speeding = wishSpeed < speed;
+  // slowing from a run takes longer than from a walk (the body's momentum), and so does turning hard at one
+  const decel = PED.groundDecel + (PED.sprintDecel - PED.groundDecel) * Math.min(1, Math.max(0, (speed - PED.walkSpeed) / (PED.sprintSpeed - PED.walkSpeed)));
+  const rate = grounded ? (speeding ? decel : PED.groundAccel) : PED.airAccel;
   const step = Math.min(dist, rate * dt);
   v.x += (dx / dist) * step;
   v.z += (dz / dist) * step;

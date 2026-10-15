@@ -36,6 +36,17 @@ let maxIdx = 0;
 for (const i of col.indices) if (i > maxIdx) maxIdx = i;
 check(maxIdx < tile.collision.vertexCount, `collision indices in range (${col.indices.length / 3} triangles)`);
 check(col.positions.every((v) => Number.isFinite(v)), 'collision positions are finite');
+{
+  // the buildings come first in the mesh (the sim recovers the footprints from their roofs); every one of those triangles is a wall or a roof, so none is under the floor of a deck
+  const bt = tile.collision.buildingTriangles;
+  check(Number.isInteger(bt) && bt > 0 && bt * 3 <= col.indices.length, `collision says how many of its triangles are buildings (${bt})`);
+  let horizontalRoofs = 0;
+  for (let t = 0; t < bt; t++) {
+    const y = [0, 1, 2].map((k) => col.positions[col.indices[t * 3 + k] * 3 + 1]);
+    if (Math.abs(y[0] - y[1]) < 1e-3 && Math.abs(y[1] - y[2]) < 1e-3) horizontalRoofs++;
+  }
+  check(horizontalRoofs > bt * 0.15 && horizontalRoofs < bt * 0.6, `the building triangles are walls and flat roofs (${horizontalRoofs} roof triangles)`);
+}
 
 for (const key of ['ground', 'roads', 'buildings'] as const) {
   const bytes = readFileSync(path.join(dir, tile.meshes[key]));

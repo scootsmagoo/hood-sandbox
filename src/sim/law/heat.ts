@@ -8,7 +8,11 @@
  *   lost      they had you and lost you (flashing stars)
  *
  * Heat cools down after a number of seconds out of police sight, longer at higher heat, and clears
- * all at once. A new crime raises the level to at least its own; it never lowers it.
+ * all at once. A new crime raises the level to at least its own; it never lowers it. Escalation is
+ * earned: a crime's own level (`CRIMES[id].heat`) is what a single report can give, and reports that
+ * pile up in one run of heat add their points: enough of them reach heat 2 ("repeated crimes"), and
+ * enough violent ones heat 3 ("sustained violence"), see `LawRules.escalation`. Nothing raises the
+ * level by itself with time.
  */
 import { MAX_HEAT, type LawRules } from '../../shared/law';
 import type { HeatPhaseName } from '../../shared/protocol';
@@ -33,6 +37,11 @@ export class HeatModel {
   /** Seconds out of police sight toward clearing, and since the last sighting. */
   coolT = 0;
   sightT = 0;
+  /** Seconds since the last report while nobody has seen the player (hollow stars do not cool before `reportedHoldS`). */
+  reportedT = 0;
+  /** What the reports of this run of heat add up to (see `LawRules.escalation`). */
+  points = 0;
+  violence = 0;
 
   constructor(
     private readonly rules: Readonly<LawRules>,
@@ -69,12 +78,27 @@ export class HeatModel {
     return this.level === 0 || this.phase === 'seen' ? 0 : Math.min(1, this.coolT / this.cooldownS);
   }
 
-  /** A witness reported a crime (or an officer saw it). */
-  report(heat: number, severity: number, x: number, z: number, police = false) {
+  /** The level the points of this run of heat reach on their own. */
+  private get pointsLevel(): number {
+    const E = this.rules.escalation;
+    return this.violence >= E.heat3ViolencePoints ? 3 : this.points >= E.heat2Points ? 2 : 0;
+  }
+
+  /**
+   * A witness reported a crime (or an officer saw it). `heat` is the crime's own level; `offence` is what
+   * it adds to the run's totals. Each crime is reported once: the caller (`Law`) does not report a second
+   * call about the same crime, so calls never stack.
+   */
+  report(heat: number, severity: number, x: number, z: number, police = false, offence?: { points: number; violent: boolean }) {
     if (this.level === 0) this.anchor = { x, z };
-    const level = Math.min(MAX_HEAT, Math.max(this.level, heat));
+    if (offence) {
+      this.points += offence.points;
+      if (offence.violent) this.violence += offence.points;
+    }
+    const level = Math.min(MAX_HEAT, Math.max(this.level, heat, this.pointsLevel));
     this.severity = Math.max(this.severity, severity);
     this.coolT = 0;
+    this.reportedT = 0;
     if (police) {
       this.sightT = 0;
       this.lastKnown = { x, z };
@@ -97,13 +121,20 @@ export class HeatModel {
 
   /**
    * Advances the clocks. `seen` says whether the police see you now (call `sight` as well). `coolRate`
-   * scales how fast the cooldown runs (the police slow it while the search is still on top of you).
+   * scales how fast the cooldown runs (the police slow it while the search is still on top of you), and
+   * `unitEnRoute` says a police car is still on its way to the scene.
    */
-  step(dt: number, seen: boolean, coolRate = 1) {
+  step(dt: number, seen: boolean, coolRate = 1, unitEnRoute = false) {
     if (this.level === 0 || seen) return;
     this.sightT += dt;
     if (this.phase === 'seen') {
       if (this.sightT >= this.rules.seenGraceS) this.set(this.level, 'lost', 'lost');
+      return;
+    }
+    // A report nobody has acted on yet: the police are still on their way, so the stars hold, for a
+    // while at least and as long as a car is still driving to the scene (up to `reportedMaxHoldS`).
+    if (this.phase === 'reported' && (this.reportedT < this.rules.reportedHoldS || (unitEnRoute && this.reportedT < this.rules.reportedMaxHoldS))) {
+      this.reportedT += dt;
       return;
     }
     this.coolT += dt * coolRate;
@@ -112,6 +143,9 @@ export class HeatModel {
 
   clear(reason: 'cooldown' | 'busted' | 'wasted') {
     this.severity = 0;
+    this.points = 0;
+    this.violence = 0;
+    this.reportedT = 0;
     this.coolT = 0;
     this.sightT = 0;
     this.lastKnown = null;

@@ -1,5 +1,12 @@
 {
   "_comment": "Engine table for the police escalation ladder (docs/contracts/law-data.md, 'Escalation rules'). Arrays indexed by heat level 0 to 6 (index 0 unused). The city pack decides who sends what (jurisdictions.json); this says what each heat level adds: roles, PIT, ramming, roadblocks, spike strips, helicopters, gunfire and how a search wears off. Distances in metres, speeds in m/s, times in seconds.",
+  "dispatch": {
+    "_comment": "Where the first cars come from and how long dispatch takes, by heat level. A report raises the level and the radio takes delayS (min, max) to put a car on the road, which then appears spawnMinM to spawnMaxM from the player, out of view: far out at low heat (a car takes 25 to 45 s to reach you), close at high heat. A city pack's dispatch row may set its own spawnMinM and spawnMaxM.",
+    "spawnMinM": [0, 250, 210, 160, 130, 120, 120],
+    "spawnMaxM": [0, 330, 290, 240, 200, 200, 200],
+    "delayS": [[0, 0], [6, 12], [4, 9], [2, 5], [1, 3], [0, 2], [0, 2]],
+    "routeFactorMax": 1.5
+  },
   "roles": {
     "reassignEveryS": 1.5,
     "holdS": 4,
@@ -51,6 +58,7 @@
   },
   "helicopter": {
     "minHeat": 3,
+    "delayS": [26, 34],
     "count": [0, 0, 0, 1, 1, 2, 2],
     "altitudeM": [60, 90],
     "speed": 42,

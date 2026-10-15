@@ -56,6 +56,10 @@ export class PedEntity implements EntityBase {
   cover: CoverState | null = null;
   /** Seconds left of flinching from a bullet (drawn as a stagger). */
   flinchT = 0;
+  /** Seconds left of staggering from a shove (a car's nudge, a body in a crowd): little control until they have their balance. */
+  stumbleT = 0;
+  /** How far through a 911 call this witness is, 0 to 1; -1 when they are not calling (the law sets it; the snapshot shows it). */
+  dial = -1;
 
   constructor(
     readonly id: EntityId,

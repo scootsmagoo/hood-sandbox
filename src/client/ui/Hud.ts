@@ -187,18 +187,10 @@ export class Hud implements System {
       case 'vehicle:reset':
         this.toast('Car reset');
         break;
-      case 'carjack':
-        this.toast('Carjacked', 2200);
-        break;
       case 'ped:attack':
         if (e.targetId === this.game.view.ped?.id) this.toast('Hit');
         break;
-      case 'witness:silenced':
-        this.toast('Witness silenced', 1600);
-        break;
-      case 'crime:reported':
-        if (!e.police) this.toast('Someone called it in', 1800);
-        break;
+      // (A witness's 911 call and a stopped call are shown by `LawHud`: the stars and the marker over the caller, not a toast.)
       case 'vehicle:fire':
         if (e.vehicleId === this.game.view.vehicle?.id && this.game.view.inVehicle) this.toast('Car on fire. Get out!', 2600);
         break;

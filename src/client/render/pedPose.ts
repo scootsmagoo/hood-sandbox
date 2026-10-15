@@ -47,6 +47,8 @@ export interface PoseExtra {
   firing?: boolean;
   /** 0 to 1 through a reload; 0 when not reloading. */
   reload?: number;
+  /** Staggering to keep their balance (a shove, a car's nudge): 1 at the worst of it. */
+  stumble?: number;
 }
 
 export function newJoints(): PedJoints {
@@ -106,6 +108,19 @@ function applyExtra(j: PedJoints, mode: PedMode, time: number, x: PoseExtra) {
     j.armR = -1.1;
     j.armL = -1.0 + Math.sin(time * 14) * 0.18;
     j.armLz = -0.5;
+  }
+  if (x.stumble && x.stumble > 0) {
+    // Arms thrown out for balance, the body pitched back over the feet, one leg stepping out to catch it.
+    const k = x.stumble;
+    const w = Math.sin(time * 17) * 0.15;
+    j.armL = -1.0 * k + w;
+    j.armR = -0.7 * k - w;
+    j.armLz = 0.9 * k;
+    j.armRz = -0.9 * k;
+    j.torsoX -= 0.3 * k;
+    j.torsoY += w * k;
+    j.legL = -0.45 * k;
+    j.legR = 0.25 * k;
   }
   if (x.flinch && x.flinch > 0) {
     const f = x.flinch;

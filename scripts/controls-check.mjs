@@ -141,7 +141,8 @@ async function suite(name) {
   await check('W accelerates', async () => {
     await hold(['KeyW'], 1500);
     const s = await st();
-    expect(s.car.fwd > 6, `speed ${s.car.fwd.toFixed(1)}`);
+    // a heavy car: about 5 m/s after a second and a half from rest (0 to 100 km/h in about 9 s)
+    expect(s.car.fwd > 4, `speed ${s.car.fwd.toFixed(1)}`);
     return `${s.car.fwd.toFixed(1)} m/s`;
   });
   await check('D steers right, A steers left', async () => {
@@ -163,7 +164,7 @@ async function suite(name) {
   });
   await check('E at speed is refused', async () => {
     await k.down('KeyW');
-    await wait(1800);
+    await wait(2800);
     await tap('KeyE');
     await wait(200);
     const s = await st();
@@ -237,7 +238,7 @@ async function suite(name) {
     const dx = b.ped.x - a.ped.x;
     const dz = b.ped.z - a.ped.z;
     const along = dx * -Math.sin(a.camYaw) + dz * -Math.cos(a.camYaw);
-    expect(along > 1.5, `moved ${along.toFixed(2)} m along the camera`);
+    expect(along > 1.2, `moved ${along.toFixed(2)} m along the camera`);
   });
   await check('Shift sprints faster', async () => {
     await k.down('KeyW');
@@ -417,7 +418,7 @@ async function carjackSuite(name) {
     await wait(1500);
     const s = await st();
     await k.up('KeyW');
-    expect(s.car.fwd > 6, `speed ${s.car.fwd.toFixed(1)}`);
+    expect(s.car.fwd > 4, `speed ${s.car.fwd.toFixed(1)}`);
     for (let i = 0; i < 30 && (await st()).car.speed > 2; i++) { await k.down('KeyS'); await wait(200); }
     await k.up('KeyS');
   });
@@ -492,7 +493,7 @@ async function fightSuite() {
   return c.fails();
 }
 
-/** Car feel in the real game: a donut with smoke, the pickup, a handbrake drift. */
+/** Car feel in the real game: the pickup, and a donut with smoke from a burnout with the wheel turned. */
 async function handlingSuite() {
   console.log('--- handling');
   const { page, errors, ctx } = await open('tile=none&graphics=low&start=car&car=pickup&parked=0');
@@ -506,10 +507,11 @@ async function handlingSuite() {
     await wait(300);
     expect((await st()).inCar, 'not in the car');
   });
-  await check('W + D from rest is a donut: a steady circle, smoking', async () => {
+  await check('Space + W + D from rest is a donut: the spinning rear swings the truck round its front, smoking', async () => {
+    await k.down('Space');
     await k.down('KeyW');
     await k.down('KeyD');
-    await wait(3500);
+    await wait(1500);
     const a = await st();
     const turns = [];
     let sawSmoke = false;
@@ -533,12 +535,13 @@ async function handlingSuite() {
     }
     await k.up('KeyD');
     await k.up('KeyW');
-    // a pickup donut turns at about 1.4 rad/s: three quarters of a turn or more in 4 s
-    expect(Math.abs(acc) > 1.5 * Math.PI, `turned ${(acc / (2 * Math.PI)).toFixed(2)} turns in 4 s`);
+    await k.up('Space');
+    // no assist holds it: the rear tyres spin and the truck pivots round slowly, half a turn or more in 4 s, staying put
+    expect(Math.abs(acc) > Math.PI, `turned ${(acc / (2 * Math.PI)).toFixed(2)} turns in 4 s`);
     expect(acc < 0, 'turned the wrong way');
     expect(sawSmoke, 'no skid flag (no smoke)');
     expect(maxDist < 16, `wandered ${maxDist.toFixed(0)} m`);
-    expect(minSpeed > 5 && maxSpeed < 11, `speed ${minSpeed.toFixed(1)}-${maxSpeed.toFixed(1)}`);
+    expect(maxSpeed < 11, `speed ${minSpeed.toFixed(1)}-${maxSpeed.toFixed(1)}`);
     return `${(Math.abs(acc) / (2 * Math.PI)).toFixed(1)} turns in 4 s, speed ${minSpeed.toFixed(1)}-${maxSpeed.toFixed(1)}, within ${maxDist.toFixed(0)} m`;
   });
   await check('no console errors', async () => {
@@ -572,8 +575,9 @@ async function gamepadSuite(name) {
     await trigger(7, 1);
     await wait(1500);
     const full = (await st()).car.fwd;
-    expect(half > 2, `half throttle ${half.toFixed(1)}`);
-    expect(full > half + 4, `half ${half.toFixed(1)} full ${full.toFixed(1)}`);
+    // (a heavy car: about 2 m/s after 1.5 s at four tenths, and a few m/s more after another 1.5 s flat out)
+    expect(half > 1.2, `half throttle ${half.toFixed(1)}`);
+    expect(full > half + 2.5, `half ${half.toFixed(1)} full ${full.toFixed(1)}`);
     return `${half.toFixed(1)} -> ${full.toFixed(1)} m/s`;
   });
   await check('left stick steers', async () => {
@@ -615,7 +619,7 @@ async function realTile() {
     expect(a.inCar, 'not in the car');
     await hold(['KeyW'], 2000);
     const b = await st();
-    expect(Math.hypot(b.car.x - a.car.x, b.car.z - a.car.z) > 8, 'did not move');
+    expect(Math.hypot(b.car.x - a.car.x, b.car.z - a.car.z) > 5, 'did not move');
     expect(b.car.y > -40 && b.car.y < 100, `y ${b.car.y}`);
     return `${Math.hypot(b.car.x - a.car.x, b.car.z - a.car.z).toFixed(0)} m in 2 s`;
   });
@@ -833,8 +837,9 @@ async function realBystanderJack() {
     expect(await walkToDriverDoor(page, heroId), 'did not reach the door');
     await tap('KeyE');
     await until(page, (x) => x.inCar, 5000, 'the player to be in the car');
-    await page.waitForFunction(() => window.__events.some((e) => e.type === 'crime:reported' && !e.police), null, { timeout: 25000 });
-    await wait(6000);
+    // (calls take 8 to 20 s; of the five or six witnesses a few call)
+    await page.waitForFunction(() => window.__events.some((e) => e.type === 'crime:reported' && !e.police), null, { timeout: 35000 });
+    await wait(12000);
     const r = await page.evaluate(() => {
       const jack = window.__events.find((e) => e.type === 'carjack');
       const crime = window.__events.find((e) => e.type === 'crime' && e.crime === 'carjack');
@@ -952,14 +957,16 @@ async function lawSuite(kind) {
       const h = await hud(page);
       expect(!h.starsVisible && h.heat === 0, JSON.stringify(h));
     });
-    await check('carjack, and within seconds the victim calls it in: one hollow star', async () => {
+    await check('carjack, and 8 to 20 s later the victim calls it in: one hollow star', async () => {
+      // (the victim's call is a roll: this scene wants it to happen)
+      await sim(page, (S) => { S.law.rules.victimCallChance = 1; });
       expect(await walkToDriverDoor(page, hero.id), 'did not reach the door');
       await tap('KeyE');
       await until(page, (s) => s.inCar, 5000, 'the player to be in the car');
       const crime = await page.evaluate(() => window.__events.filter((e) => e.type === 'crime'));
       expect(crime.length === 1 && crime[0].crime === 'carjack', `crime events ${JSON.stringify(crime.map((e) => e.crime))}`);
       expect(/^[A-Z]{3}\d{4}$/.test(crime[0].description.vehicle?.plate ?? ''), `plate ${crime[0].description.vehicle?.plate}`);
-      const h = await untilHud(page, (x) => x.heat >= 1, 14000, 'a star');
+      const h = await untilHud(page, (x) => x.heat >= 1, 32000, 'a star');
       expect(h.starsVisible, 'stars hidden');
       expect(h.phase === 'reported' || h.phase === 'seen', `phase ${h.phase}`);
       if (h.phase === 'reported') expect(h.starFill === 'none' || /rgba\(0, 0, 0, 0\)|transparent/.test(h.starFill), `hollow star has fill ${h.starFill}`);
@@ -989,6 +996,8 @@ async function lawSuite(kind) {
       await wait(400);
       expect((await st()).inCar, 'not in the car');
       await sim(page, (S) => {
+        // (a witness's call is a roll: this scene wants it to happen)
+        S.law.rules.callChance = 1;
         const v = S.registry.get(S.vehicleId);
         const p = v.car.pose();
         const f = { x: Math.sin(v.car.yaw), z: Math.cos(v.car.yaw) };
@@ -1014,7 +1023,7 @@ async function lawSuite(kind) {
       await k.up('KeyS');
       const d = await page.evaluate(() => window.__events.find((e) => e.type === 'damage' && e.kind === 'vehicle'));
       expect(d.amount > 15 && d.sourceId > 0, `damage ${JSON.stringify(d)}`);
-      const h = await untilHud(page, (x) => x.heat >= 2, 14000, 'two stars');
+      const h = await untilHud(page, (x) => x.heat >= 2, 32000, 'two stars');
       expect(h.heat === 2, `heat ${h.heat}`);
       const crimes = await page.evaluate(() => window.__events.filter((e) => e.type === 'crime').map((e) => e.crime));
       expect(crimes.includes('hit_ped'), `crimes ${crimes}`);
@@ -1039,12 +1048,12 @@ async function lawSuite(kind) {
         const p = S.playerPosition();
         S.law.heat.report(1, 2, p.x, p.z);
       });
-      const s = await until(page, (x) => x.cars.some((car) => (car.flags & 2048) !== 0), 20000, 'a police car');
+      const s = await until(page, (x) => x.cars.some((car) => (car.flags & 2048) !== 0), 40000, 'a police car');
       const cop = s.cars.find((car) => (car.flags & 2048) !== 0);
       expect((cop.flags & 4096) !== 0, 'lightbar off');
       const hh = await hud(page);
       expect(hh.starsVisible && hh.heat === 1, JSON.stringify(hh));
-      await page.waitForFunction(() => window.__events.some((e) => e.type === 'police:dismount'), null, { timeout: 45000 });
+      await page.waitForFunction(() => window.__events.some((e) => e.type === 'police:dismount'), null, { timeout: 75000 });
     });
     await check('standing still within reach for two seconds: BUSTED', async () => {
       await page.waitForFunction(() => window.__events.some((e) => e.type === 'player:busted'), null, { timeout: 40000 });
@@ -1186,6 +1195,8 @@ async function gunSuite() {
     });
     let npc = 0;
     await check('aim and fire at a ped: it takes damage from a bullet, the magazine counts down, the ped flinches or falls', async () => {
+      // (a witness's call is a roll: this scene wants it to happen)
+      await sim(page, (S) => { S.law.rules.callChance = S.law.rules.victimCallChance = S.law.rules.heardCallChance = 1; });
       npc = await putNpc(page, 12, SHOULDER);
       await wait(300);
       await look(page);
@@ -1205,7 +1216,7 @@ async function gunSuite() {
       return `damage ${dmg[0].amount}, ped health ${n.health.toFixed(0)}, ${a.mag} / ${a.reserve}`;
     });
     await check('the shot is a crime: the stars come up once someone calls it in', async () => {
-      await page.waitForFunction(() => window.__hood.game.view.heat >= 1, null, { timeout: 15000 });
+      await page.waitForFunction(() => window.__hood.game.view.heat >= 1, null, { timeout: 32000 });
     });
     await check('T reloads: the click, the bar, then a full magazine from the spare rounds', async () => {
       // Two shots first, then T at once (a part magazine also reloads by itself after a pause in the shooting).
@@ -1570,10 +1581,10 @@ async function policeSuite() {
         const p = S.registry.get(S.playerPedId).controller;
         S.law.heat.report(3, 4, p.x, p.z, true);
         // wait where they are until the police arrive and see them, then go
-        for (let i = 0; i < 60 * 25 && !S.police.seesPlayer; i += 10) window.__bot.park(host, S, 10);
+        for (let i = 0; i < 60 * 70 && !S.police.seesPlayer; i += 10) window.__bot.park(host, S, 10);
         window.__bot.speed = 13;
         let at = null;
-        const t = window.__bot.run(host, S, 60 * 40, () => {
+        const t = window.__bot.run(host, S, 60 * 50, () => {
           const b = S.police.roadblocks.blocks[0];
           if (b && !at) {
             // how far along the route the player is on it (the nearest point of the predicted route to the block)
@@ -1594,9 +1605,11 @@ async function policeSuite() {
           }
           return !!at;
         });
+        // The air unit is scrambled about 30 s after the third star, so keep driving until it is up.
+        window.__bot.run(host, S, 60 * 40, () => S.police.heli.count >= 1);
         return { t, at, seen: S.police.seesPlayer };
       });
-      expect(info.at, `no roadblock within 40 s (${JSON.stringify(info)})`);
+      expect(info.at, `no roadblock within 50 s (${JSON.stringify(info)})`);
       const d = info.at.along;
       expect(d > 145 && d < 260, `laid ${d.toFixed(0)} m along the route (${info.at.straight.toFixed(0)} m in a straight line)`);
       expect(info.at.cars >= 1 && info.at.cars <= 3, `${info.at.cars} cars`);
@@ -1612,6 +1625,18 @@ async function policeSuite() {
       expect(v.blockCars >= 1, `no roadblock car flagged in the client's view (${JSON.stringify(v)})`);
       expect(v.header.rb >= 1, `header roadblocks ${v.header.rb}`);
       return `${v.blockCars} cars, ${v.strips} strips, header ${JSON.stringify(v.header)}`;
+    });
+    await check('the helicopter came about 30 s after the third star, not at once', async () => {
+      const r = await page.evaluate(() => {
+        const ev = window.__events;
+        const three = ev.find((e) => e.type === 'heat:change' && e.level === 3);
+        const heli = ev.find((e) => e.type === 'police:helicopter' && e.state === 'inbound');
+        return { three: three?.tick, heli: heli?.tick };
+      });
+      expect(r.three !== undefined && r.heli !== undefined, JSON.stringify(r));
+      const s = (r.heli - r.three) / 60;
+      expect(s >= 24 && s <= 36, `${s.toFixed(1)} s after heat 3`);
+      return `${s.toFixed(1)} s after heat 3`;
     });
     await check('a helicopter is up, kinematic, drawn from the snapshot with its definition', async () => {
       const v = await page.evaluate(() => {

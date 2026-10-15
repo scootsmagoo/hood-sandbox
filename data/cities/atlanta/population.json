@@ -163,7 +163,7 @@
   "zones": [
     {
       "id": "transit",
-      "name": "Five Points transit plaza",
+      "name": "Five Points",
       "kind": "transit",
       "polygon": [
         [
@@ -523,7 +523,7 @@
     },
     {
       "id": "venue",
-      "name": "Stadium, arena and convention centre",
+      "name": "Stadium District",
       "kind": "venue",
       "polygon": [
         [
@@ -867,7 +867,7 @@
     },
     {
       "id": "centennial",
-      "name": "Centennial Olympic Park and the attractions",
+      "name": "Centennial Park",
       "kind": "park",
       "polygon": [
         [
@@ -1211,7 +1211,7 @@
     },
     {
       "id": "georgia-state",
-      "name": "Georgia State University",
+      "name": "South Downtown",
       "kind": "students",
       "polygon": [
         [
@@ -1555,7 +1555,7 @@
     },
     {
       "id": "capitol",
-      "name": "State Capitol and government",
+      "name": "Capitol Square",
       "kind": "government",
       "polygon": [
         [
@@ -2247,7 +2247,7 @@
     },
     {
       "id": "edgewood",
-      "name": "Edgewood Ave nightlife",
+      "name": "Edgewood",
       "kind": "nightlife",
       "polygon": [
         [
@@ -2587,7 +2587,7 @@
     },
     {
       "id": "gulch",
-      "name": "Gulch rail yards and Castleberry",
+      "name": "The Gulch",
       "kind": "industrial",
       "polygon": [
         [
@@ -2919,7 +2919,7 @@
     },
     {
       "id": "five-points",
-      "name": "Five Points and the Peachtree towers",
+      "name": "Downtown",
       "kind": "business",
       "default": true,
       "weekday": [

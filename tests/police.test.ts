@@ -12,6 +12,9 @@ import { RoadGraph, densify, polyLength } from '../src/sim/police/roadGraph';
 import { Simulation } from '../src/sim/Simulation';
 import { LIFE } from '../src/sim/combat/systems';
 import { driverSim, cmd, gridRoads, gridTile, makeSim, ofType, ped, run, runLog, vehicle, addNpc, Button } from './helpers';
+import { quickResponse } from './quickResponse';
+
+quickResponse();
 
 const atlanta = parseJurisdictions(JSON.parse(readFileSync('data/cities/atlanta/jurisdictions.json', 'utf8')));
 
@@ -25,7 +28,8 @@ describe('dispatch tables', () => {
   it('sends what the table says at each heat level, up to the unit cap', () => {
     const at1 = agenciesWanting(atlanta, 1, state(), 0);
     expect(at1.map((o) => o.agency.id).sort()).toEqual(['acp', 'fcp', 'ghp', 'tap']);
-    expect(at1.find((o) => o.agency.id === 'acp')).toMatchObject({ units: 1, row: { maxUnits: 1, spawnIntervalS: 25 } });
+    // (Heat 1 sends one unit: the first, with the rest of the pacing in `pacing.test.ts`.)
+    expect(at1.find((o) => o.agency.id === 'acp')).toMatchObject({ units: 1, row: { maxUnits: 1, spawnIntervalS: 40 } });
     expect(agenciesWanting(atlanta, 1, state({ acp: 1 }), 0).some((o) => o.agency.id === 'acp')).toBe(false);
     expect(agenciesWanting(atlanta, 2, state({ acp: 1 }), 0).find((o) => o.agency.id === 'acp')?.units).toBe(1);
     expect(agenciesWanting(atlanta, 0, state(), 0)).toEqual([]);
@@ -254,7 +258,7 @@ describe('the first police response', () => {
     expect(ofType(ev1, 'police:spawn')).toHaveLength(1);
     sim.law.heat.report(2, 3, 40, 40);
     const ev2 = runLog(sim, 60 * 4);
-    // heat 2 allows two units, but the agency waits out its 25 s spawn interval: not yet
+    // heat 2 allows two units, but the agency waits out its 30 s spawn interval (from its first car): not yet
     expect(ofType(ev2, 'police:spawn')).toHaveLength(0);
     const ev3 = runLog(sim, 60 * 15);
     expect(ofType(ev3, 'police:spawn')).toHaveLength(1);
@@ -404,6 +408,8 @@ describe('jurisdiction: who chases a car', () => {
     run(sim2, 4, cmd());
     expect(ped(sim2).vehicleId).toBe(v.id);
     sim2.drainEvents();
+    // (These tests are about who chases, not about how soon the heat cools: keep it up for the length of the drive.)
+    sim2.law.rules.cooldownS = [0, 60, 60, 60, 100, 125, 150];
     sim2.law.heat.report(severity >= 3 ? 2 : 1, severity, -100, 0);
     return { sim: sim2, v };
   }

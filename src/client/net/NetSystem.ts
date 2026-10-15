@@ -196,7 +196,8 @@ export class NetSystem implements System {
     axes[Axis.CamDist] = g.cameraArm.dist;
     // A pad or a finger gets a strong lock-on, a mouse only a little magnetism.
     axes[Axis.AimAssist] = input.device === 'keyboard' ? 0.12 : 1;
-    const drive = input.driveAxes(Math.min(0.05, (now - this.lastSendAt) / 1000 || dt));
+    const car = g.view.inVehicle ? g.view.vehicle : null;
+    const drive = input.driveAxes(Math.min(0.05, (now - this.lastSendAt) / 1000 || dt), car ? Math.hypot(car.vx, car.vz) : 0);
     axes[Axis.Throttle] = drive.throttle;
     axes[Axis.Brake] = drive.brake;
     axes[Axis.Steer] = drive.steer;

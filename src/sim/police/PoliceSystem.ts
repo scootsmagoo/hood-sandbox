@@ -13,11 +13,11 @@
  * Seeing is a cone plus a clear line (a ray against the static world). It feeds the heat model: any
  * officer (or helicopter) who sees the player makes the stars solid, and when none does they flash.
  */
-import { LAW_RULES, agencyAt, dispatchFor, hasArea, type Agency } from '../../shared/law';
+import { LAW_RULES, agencyAt, dispatchFor, hasArea, type Agency, type DispatchLevel } from '../../shared/law';
 import type { EntityId } from '../../shared/entities';
 import { HANDLING } from '../../shared/handling';
 import { quatFromYaw, wrapAngle, yawFromDir } from '../../shared/math';
-import { POLICE_RULES } from '../../shared/policeRules';
+import { POLICE_RULES, atHeat } from '../../shared/policeRules';
 import { Axis } from '../../shared/protocol';
 import { Rng } from '../../shared/rng';
 import { E, H, PoliceRole, type SnapshotView } from '../../shared/snapshot';
@@ -36,7 +36,7 @@ import { HelicopterDirector } from './helicopter';
 import { PoliceNav, pointAlong, polyline, type Polyline } from './nav';
 import { GOVERNOR, type GovernorOptions } from './pursuit';
 import { RoadblockDirector } from './roadblocks';
-import { RoadGraph } from './roadGraph';
+import { RoadGraph, polyLength } from './roadGraph';
 import { SpikeStrips } from './spikes';
 import { assignRoles, interceptAlong, type Intercept, type Kin, type Role } from './tactics';
 import type { OfficerState, Roadblock, Unit } from './types';
@@ -91,7 +91,11 @@ export class PoliceManager {
   readonly spikes: SpikeStrips;
   readonly roadblocks: RoadblockDirector;
   readonly heli: HelicopterDirector;
-  private readonly nextAt = new Map<string, number>();
+  /** When each agency last put a car on the road (sim time, s): the next one waits out the interval of the row in force. */
+  private readonly lastSpawnAt = new Map<string, number>();
+  /** The heat level dispatch last saw, and the time before which it sends nothing because the radio is still working on a rise. */
+  private dispatchLevel = 0;
+  private holdUntil = 0;
   private dispatchClock = 0;
   private nextUnitId = 1;
   private prevHeading = 0;
@@ -282,6 +286,13 @@ export class PoliceManager {
   private dispatch(dt: number) {
     const sim = this.sim;
     const heat = sim.law.heat;
+    // A rise in the heat (the first report, or a worse one) takes the radio a few seconds to turn into a car.
+    if (heat.level > this.dispatchLevel) {
+      const d = POLICE_RULES.dispatch.delayS[Math.min(heat.level, POLICE_RULES.dispatch.delayS.length - 1)];
+      this.holdUntil = Math.max(this.holdUntil, this.time + this.rng.range(d[0], d[1]));
+    }
+    this.dispatchLevel = heat.level;
+    if (heat.level === 0) this.holdUntil = 0;
     if (heat.level === 0 || this.standingDown || this.nav.empty) return;
     this.dispatchClock += dt;
     if (this.dispatchClock < POLICE.dispatchEvery) return;
@@ -289,9 +300,17 @@ export class PoliceManager {
     const pursuit = this.units.filter((u) => !u.block).length;
     if (pursuit >= POLICE.maxUnits || sim.registry.size > POLICE.entityCap) return;
 
+    if (this.time < this.holdUntil) return;
+
     const counts = new Map<string, number>();
-    for (const a of sim.law.data.agencies) counts.set(a.id, this.liveUnits(a.id));
-    const wanting = agenciesWanting(sim.law.data, heat.level, { nextAt: this.nextAt, counts }, this.time);
+    const nextAt = new Map<string, number>();
+    for (const a of sim.law.data.agencies) {
+      counts.set(a.id, this.liveUnits(a.id));
+      const last = this.lastSpawnAt.get(a.id);
+      const row = dispatchFor(sim.law.data, a.id, heat.level);
+      if (last !== undefined && row) nextAt.set(a.id, last + row.spawnIntervalS);
+    }
+    const wanting = agenciesWanting(sim.law.data, heat.level, { nextAt, counts }, this.time);
     if (wanting.length === 0) return;
 
     // Who sends cars is decided where the police think the player is (a chase onto a freeway is the Highway Patrol's).
@@ -301,13 +320,13 @@ export class PoliceManager {
     for (const order of orders) {
       let spawned = 0;
       for (let i = 0; i < order.units; i++) {
-        const spot = this.spawnSpot(order.agency);
+        const spot = this.spawnSpot(order.agency, order.row);
         if (!spot) break;
         this.spawnUnit(spot, order);
         spawned++;
       }
       // (a failed search tries again at the next check; a spawn starts the interval)
-      if (spawned > 0) this.nextAt.set(order.agency.id, this.time + order.row.spawnIntervalS);
+      if (spawned > 0) this.lastSpawnAt.set(order.agency.id, this.time);
     }
   }
 
@@ -340,8 +359,43 @@ export class PoliceManager {
     return true;
   }
 
-  /** Candidate spawn points 120 to 200 m out. The agency's own area first where it has one on the road classes; the lanes where the tile has them. */
-  private spawnSpot(agency: Agency): Spot | null {
+  /**
+   * Candidate spawn points out of the player's view, 250 to 330 m away at heat 1 down to 120 to 200 m at
+   * heat 5 (`police.json` dispatch, or the agency's own row). A ring with no road in it widens inward, and
+   * last falls back to the old 120 to 200 m. The agency's own area first where it has one on the road
+   * classes; the lanes where the tile has them.
+   */
+  private spawnSpot(agency: Agency, row: DispatchLevel): Spot | null {
+    const lv = this.sim.law.heat.level;
+    const min = row.spawnMinM ?? atHeat(POLICE_RULES.dispatch.spawnMinM, lv);
+    const max = row.spawnMaxM ?? atHeat(POLICE_RULES.dispatch.spawnMaxM, lv);
+    const rings: [number, number][] = [[min, max], [min * 0.7, max], [POLICE.spawnMin, POLICE.spawnMax], [POLICE.hiddenMin, max]];
+    // A spot far out is only worth it if the streets get a car from there to the scene without a detour
+    // (one-way systems can turn 300 m into a kilometre): of a few candidates take the first with a direct route.
+    const goal = this.sim.law.heat.lastKnown ?? this.playerEye();
+    const direct = POLICE_RULES.dispatch.routeFactorMax;
+    let best: { spot: Spot; len: number } | null = null;
+    for (const [a, b] of rings) {
+      for (let k = 0; k < 5; k++) {
+        const spot = this.spawnSpotIn(agency, a, b);
+        if (!spot) break;
+        const straight = Math.hypot(spot.x - goal.x, spot.z - goal.z);
+        const len = this.routeLength(spot, goal);
+        if (len <= straight * direct) return spot;
+        if (len < Infinity && (!best || len < best.len)) best = { spot, len };
+      }
+      if (best) return best.spot;
+    }
+    return null;
+  }
+
+  /** How far a car at a spawn spot has to drive to reach a point, m (Infinity when the streets do not connect them). */
+  private routeLength(spot: Spot, goal: { x: number; z: number }): number {
+    const pts = this.nav.route({ x: spot.x, z: spot.z }, yawFromDir(spot.dx, spot.dz), { x: goal.x, z: goal.z });
+    return pts && pts.length > 1 ? polyLength(pts) : Infinity;
+  }
+
+  private spawnSpotIn(agency: Agency, ringMin: number, ringMax: number): Spot | null {
     const sim = this.sim;
     const eye = this.playerEye();
     const px = eye.x;
@@ -355,7 +409,7 @@ export class PoliceManager {
     const lanes = this.nav.lanes;
     const tryLanes = (): Spot | null => {
       if (!lanes) return null;
-      const spots = lanes.spotsAround(px, pz, POLICE.spawnMin, POLICE.spawnMax, []);
+      const spots = lanes.spotsAround(px, pz, ringMin, ringMax, []);
       const pt = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
       for (let i = 0; i < 24 && spots.length > 0; i++) {
         const k = this.rng.int(0, spots.length - 1);
@@ -369,7 +423,7 @@ export class PoliceManager {
       return null;
     };
     const tryRoads = (): Spot | null => {
-      const p = this.graph.pickAround(this.rng, px, pz, POLICE.spawnMin, POLICE.spawnMax, accept);
+      const p = this.graph.pickAround(this.rng, px, pz, ringMin, ringMax, accept);
       return p ? { x: p.x, z: p.z, dx: p.dx, dz: p.dz, lane: false, oneway: this.graph.edges[p.edge].oneway } : null;
     };
     // Areas drawn on road classes (the freeways) are not in the lane graph's connected part.
@@ -516,6 +570,9 @@ export class PoliceManager {
     this.seesPlayer = false;
     this.tgt = null;
     this.lastLive = null;
+    this.lastSpawnAt.clear();
+    this.dispatchLevel = 0;
+    this.holdUntil = 0;
     this.roadblocks.clearAll();
     this.spikes.clearAll();
     this.heli.clearAll();
@@ -552,6 +609,18 @@ export class PoliceManager {
       }
     }
     return f;
+  }
+
+  /** Whether a car is still driving to the scene (the first response has not arrived yet): hollow stars do not cool meanwhile. */
+  unitEnRoute(): boolean {
+    const lk = this.sim.law.heat.lastKnown;
+    if (!lk || this.standingDown) return false;
+    for (const u of this.units) {
+      if (u.block || u.mode !== 'drive') continue;
+      const p = (this.sim.registry.get(u.vehicleId) as VehicleEntity | undefined)?.car.pose();
+      if (p && Math.hypot(p.x - lk.x, p.z - lk.z) > 45) return true;
+    }
+    return false;
   }
 
   /** The police half of the snapshot header: where they are searching, and what is out there. */

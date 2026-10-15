@@ -51,7 +51,11 @@ export class WeaponRuntime {
       this.ownerTick = sim.tick;
       this.ownerSize = sim.registry.size;
     }
-    return this.owners.get(bodyHandle);
+    const own = this.owners.get(bodyHandle);
+    if (own) return own;
+    // a part of a ragdoll belongs to its ped
+    const rag = sim.ragdolls.ownerOf(bodyHandle);
+    return rag ? sim.registry.get(rag) : undefined;
   }
 
   /**
@@ -98,8 +102,10 @@ export class WeaponRuntime {
       const body = hit.collider.parent();
       const owner = body ? this.ownerOf(body.handle) : undefined;
       if (owner instanceof PedEntity && owner.life === 'dead') {
-        // A corpse: the bullet goes on through it.
+        // A corpse: the bullet goes on through it (all of it, when it is a ragdoll).
         ignore.add(body!.handle);
+        const rag = sim.ragdolls.ragdollOf(owner.id);
+        if (rag) for (const b of rag.bodies) ignore.add(b.handle);
         travelled = t + 0.05;
         ox = origin.x + dir.x * travelled;
         oy = origin.y + dir.y * travelled;

@@ -15,10 +15,11 @@ import { probeFrom } from './npc/probe';
 import { GROUPS } from './physics/rapier';
 import { damagePed } from './combat/damage';
 import { AimPoseSystem, WeaponSystem, playerWeaponInput } from './combat/weapons/WeaponSystem';
-import { DownedSystem, FallSystem, LifeSystem, MeleeSystem, VehicleDamageSystem, VehicleHitSystem, startMelee } from './combat/systems';
+import { BalanceSystem, DownedSystem, FallSystem, LifeSystem, MeleeSystem, RagdollSystem, VehicleDamageSystem, VehicleHitSystem, startMelee } from './combat/systems';
 import { LawSystem } from './law/Law';
 import { PoliceSystem } from './police/PoliceSystem';
 import { TrafficManager } from './traffic/TrafficManager';
+import { UnstickSystem } from './character/unstick';
 import type { Simulation } from './Simulation';
 import { IDLE_INPUT } from './vehicles/RaycastCar';
 
@@ -167,7 +168,7 @@ export class PedSystem implements SimSystem {
         c.yaw = v.car.yaw;
       } else {
         // Far or standing ambient people skip the character controller (see AmbientPeds.step).
-        if (e.amb?.lite && e.life === 'alive') c.glide(dt, e.input, e.amb.liteY);
+        if (e.amb?.lite && e.life === 'alive') c.glide(dt, e.input, e.amb.liteY, sim.physics.wallClearance);
         else c.step(dt, e.life === 'alive' ? e.input : NO_INPUT);
       }
     }
@@ -375,7 +376,7 @@ export class TrafficSystem implements SimSystem {
 }
 
 export function defaultSystems(): SimSystem[] {
-  return [new PlayerControlSystem(), new WeaponSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new AimPoseSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem()].sort(
+  return [new PlayerControlSystem(), new WeaponSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new AimPoseSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem(), new UnstickSystem(), new RagdollSystem(), new BalanceSystem()].sort(
     (a, b) => a.priority - b.priority,
   );
 }

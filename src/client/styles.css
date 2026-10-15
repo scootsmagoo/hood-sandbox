@@ -68,6 +68,29 @@ html, body { margin: 0; height: 100%; background: #0b0d10; color: var(--ink); fo
 .hud-stars .cool { position: absolute; left: 0; bottom: -6px; height: 3px; background: rgba(255, 210, 74, 0.8); border-radius: 2px; transition: width 0.3s linear; }
 .has-touch .hud-stars { top: 88px; }
 
+/* A witness's 911 call went through: the stars pulse and a phone tag shows under them for about two seconds (LawHud.ts). */
+.law-call { position: absolute; right: 0; top: calc(100% + 10px); display: flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 999px; background: rgba(12, 14, 17, 0.72); border: 1px solid rgba(255, 210, 74, 0.55); color: #ffd24a; font-size: 12px; letter-spacing: 0.04em; white-space: nowrap; opacity: 0; pointer-events: none; }
+.law-call svg { width: 14px; height: 14px; fill: currentColor; }
+.law-call b { font-weight: 800; letter-spacing: 0.08em; }
+.law-call span { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+.law-call[data-call] { animation: law-call-tag 2.2s ease-out both; }
+@keyframes law-call-tag { 0% { opacity: 0; transform: translateY(-4px); } 8% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.hud-stars[data-call] .star.on { transform-box: fill-box; transform-origin: center; animation: law-star-pulse 0.5s ease-out 3; }
+.hud-stars[data-call] .star.on polygon { stroke: #fff2b0; }
+@keyframes law-star-pulse { 0% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255, 210, 74, 0)); } 40% { transform: scale(1.4); filter: drop-shadow(0 0 7px rgba(255, 210, 74, 0.95)); } 100% { transform: scale(1); filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); } }
+@media (prefers-reduced-motion: reduce) { .hud-stars[data-call] .star.on { animation: none; } }
+
+/* A witness who is calling: a phone over their head with a ring that fills as the call nears. */
+.law-dials { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.law-dial { position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(#ffd24a calc(var(--p, 0) * 1turn), rgba(12, 14, 17, 0.7) 0); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); will-change: transform; }
+.law-dial::before { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: rgba(12, 14, 17, 0.88); }
+.law-dial svg { position: relative; width: 13px; height: 13px; fill: #ffd24a; animation: law-ring 0.9s ease-in-out infinite; }
+.law-dial.off { display: none; }
+.law-dial.cut { background: #ff5a4a; }
+.law-dial.cut svg { fill: #ff5a4a; animation: none; }
+@keyframes law-ring { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(12deg); } }
+@media (prefers-reduced-motion: reduce) { .law-dial svg { animation: none; } }
+
 /* WASTED and BUSTED */
 .hud-overlay { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; pointer-events: none; background: radial-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.78)); }
 .hud-overlay.on { opacity: calc(var(--ov, 0) * var(--ov-out, 1)); }

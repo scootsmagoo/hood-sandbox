@@ -4,7 +4,7 @@
  */
 import { SIM_DT, type FromSim, type InputCommand, type SimEvent, type SimInit, type SimStats } from '../shared/protocol';
 import { SnapshotRing } from '../shared/ring';
-import { HEADER_WORDS, ENTITY_WORDS, SNAPSHOT_BYTES, SnapshotView } from '../shared/snapshot';
+import { SNAPSHOT_BYTES, SnapshotView } from '../shared/snapshot';
 import { loadTileOrFallback } from '../shared/tile';
 import { Simulation } from './Simulation';
 
@@ -152,7 +152,7 @@ export class SimHost {
     const sim = this.sim;
     if (!sim) return;
     sim.writeSnapshot(this.view);
-    const used = (HEADER_WORDS + this.view.count * ENTITY_WORDS) * 4;
+    const used = this.view.usedBytes;
     if (this.ring) {
       this.ring.write(new Uint8Array(this.view.buffer, 0, used));
     } else {

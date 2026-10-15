@@ -231,7 +231,7 @@ describe('tile data', () => {
     expect(without.manifest.id).toBe(t.manifest.id);
   });
 
-  it('reads heights bilinearly and clamps at the edges', () => {
+  it('reads heights off the triangles the ground is cut into (south-west to north-east diagonal), and clamps at the edges', () => {
     const t = generateProceduralTile(1);
     const { cols, rows } = t.manifest.heightmap;
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) t.heights[r * cols + c] = c * 0.5 + r;
@@ -240,6 +240,13 @@ describe('tile data', () => {
     expect(heightAt(t, -1000, -1000 + 4)).toBeCloseTo(1, 6);
     expect(heightAt(t, -1000 + 2, -1000 + 2)).toBeCloseTo(0.25 + 0.5, 6);
     expect(heightAt(t, 5000, 5000)).toBeCloseTo((cols - 1) * 0.5 + (rows - 1), 6);
+    // a twisted cell (north-west and south-east high): the middle is on the diagonal, the average of south-west and north-east, not of all four
+    t.heights.fill(0);
+    t.heights[0] = 4;
+    t.heights[cols + 1] = 4;
+    expect(heightAt(t, -1000 + 2, -1000 + 2)).toBeCloseTo(0, 6);
+    expect(heightAt(t, -1000 + 1, -1000 + 1)).toBeCloseTo(2, 6);
+    expect(heightAt(t, -1000 + 3, -1000 + 3)).toBeCloseTo(2, 6);
   });
 });
 

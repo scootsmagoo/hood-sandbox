@@ -11,7 +11,8 @@ import { weaponByIndex } from '../../shared/weapons';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
 import { OUTFIT_COUNT } from '../../shared/entityDefs';
-import { buildPedModel, buildVehicleModel, glowTex, OUTFITS, setHeadlights, type PedMode, type PedModel, type VehicleModel } from './models';
+import { buildPedModel, buildVehicleModel, glowTex, OUTFITS, setHeadlights, type PedLook, type PedMode, type PedModel, type VehicleModel } from './models';
+import { RagdollFigures } from './RagdollFigures';
 import { TrafficInstances } from './TrafficInstances';
 import { newJoints, solvePose, type PoseExtra } from './pedPose';
 import { PedCrowd, varyLook } from './PedCrowd';
@@ -39,8 +40,10 @@ interface PedView {
   /** Differs per person, so a crowd does not sway in step. */
   seed: number;
   phase: number;
-  /** How far toppled, eased toward the sim's state: 1 on its back, -1 face down. */
+  /** How far toppled, eased toward the sim's state: 1 on its back, -1 face down (when there is no ragdoll pose to draw). */
   lie: number;
+  /** The colours it wears (a ragdoll is drawn in them). */
+  look: PedLook;
 }
 interface VehicleView {
   kind: 'vehicle';
@@ -74,6 +77,8 @@ export class EntityViews implements System {
   private readonly extra: PoseExtra = {};
   /** Ambient traffic cars away from the camera, drawn as instances. */
   readonly traffic = new TrafficInstances();
+  /** Bodies that are ragdolls, drawn from their ragdoll records. */
+  readonly ragdolls = new RagdollFigures(24);
 
   constructor(private readonly game: Game) {
     game.views = this;
@@ -82,6 +87,9 @@ export class EntityViews implements System {
     this.group.add(this.crowd.group);
     this.crowd.setShadows(game.tier.shadowMap > 0);
     game.onTierChange((t) => this.crowd.setShadows(t.shadowMap > 0));
+    this.group.add(this.ragdolls.group);
+    this.ragdolls.setShadows(game.tier.shadowMap > 0);
+    game.onTierChange((t) => this.ragdolls.setShadows(t.shadowMap > 0));
     this.group.add(this.traffic.group);
     this.traffic.setShadows(game.tier.shadowMap > 0);
     game.onTierChange((t) => this.traffic.setShadows(t.shadowMap > 0));
@@ -112,6 +120,8 @@ export class EntityViews implements System {
     const night = this.game.clockView?.night ?? 0;
     setHeadlights(0.8 + 1.6 * night);
     this.traffic.begin();
+    this.ragdolls.begin();
+    const sample = this.game.view.sample;
     for (const [id, st] of entities) {
       if (st.kind === EntityKind.Helicopter || st.kind === EntityKind.SpikeStrip) {
         this.updateProp(id, st, dt, night);
@@ -152,6 +162,20 @@ export class EntityViews implements System {
       }
       if (v.kind === 'ped') {
         const f = st.flags;
+        // A ragdoll: drawn from its record (or the last one seen) in place of the figure.
+        if (f & PedFlag.Ragdoll && this.ragdolls.update(sample, id)) {
+          if (v.model) v.model.root.visible = false;
+          else this.crowd.hide(id);
+          this.ragdolls.place(id, v.look);
+          v.lie = f & PedFlag.Dead ? -1 : 1;
+          continue;
+        }
+        if (!(f & PedFlag.Ragdoll) && this.ragdolls.has(id)) {
+          // up again: straight to the standing figure, the get-up blend has already played
+          this.ragdolls.forget(id);
+          v.lie = 0;
+          if (v.model) v.model.root.visible = true;
+        }
         v.phase += dt * (3.5 + st.speed * 1.5);
         const mode: PedMode =
           f & PedFlag.Dragged ? 'dragged' : f & PedFlag.InVehicle ? 'seated' : f & PedFlag.Fighting ? 'fighting' : f & PedFlag.Fleeing ? 'fleeing' : 'normal';
@@ -173,14 +197,16 @@ export class EntityViews implements System {
           x.flinch = f & PedFlag.Flinch ? 1 : 0;
           x.firing = (f & PedFlag.Firing) !== 0;
           x.reload = f & PedFlag.Reloading ? 1 : 0;
-          v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time + v.seed, f & (PedFlag.Aiming | PedFlag.Crouched | PedFlag.InCover | PedFlag.Flinch | PedFlag.Reloading) ? x : undefined);
+          x.stumble = f & PedFlag.Stumble ? 1 : 0;
+          v.model.pose(st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time + v.seed, f & (PedFlag.Aiming | PedFlag.Crouched | PedFlag.InCover | PedFlag.Flinch | PedFlag.Reloading | PedFlag.Stumble) ? x : undefined);
         } else {
           const x = this.extra;
           x.aim = undefined;
           x.crouch = x.cover = x.firing = false;
           x.flinch = f & PedFlag.Flinch ? 1 : 0;
           x.reload = 0;
-          solvePose(this.joints, st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time, v.lie, v.seed, x.flinch ? x : undefined);
+          x.stumble = f & PedFlag.Stumble ? 1 : 0;
+          solvePose(this.joints, st.speed, (f & PedFlag.Grounded) !== 0, v.phase, mode, st.aux1, pedPose, this.time, v.lie, v.seed, x.flinch || x.stumble ? x : undefined);
           this.crowd.place(id, st.x, st.y, st.z, st.q, this.joints);
         }
       } else {
@@ -193,6 +219,7 @@ export class EntityViews implements System {
     }
     this.time += dt;
     this.traffic.end();
+    this.ragdolls.end();
     for (const [id, v] of this.views) {
       if (!entities.has(id) || !defs.has(id)) this.dropView(id, v);
     }
@@ -274,6 +301,7 @@ export class EntityViews implements System {
 
   /** Removes an entity's own model (its meshes and GPU buffers go with it). */
   private dropView(id: EntityId, v: View) {
+    if (v.kind === 'ped') this.ragdolls.forget(id);
     if (v.kind === 'ped' && !v.model) this.crowd.remove(id);
     else {
       this.group.remove(v.model!.root);
@@ -290,8 +318,9 @@ export class EntityViews implements System {
         ? { jacket: def.police.uniform, jeans: shade(def.police.uniform, 0.55), skin: base.skin, cap: shade(def.police.uniform, 0.7) }
         : base;
       // Officers and the player keep their own models; everyone else is drawn in the crowd.
-      if (!def.police && !def.player && this.crowd.add(def.id, varyLook(look, def.id))) return { kind: 'ped', model: null, seed: def.id * 1.7, phase: def.id * 0.9, lie: 0 };
-      return { kind: 'ped', model: buildPedModel(look), seed: def.id * 1.7, phase: 0, lie: 0 };
+      const varied = varyLook(look, def.id);
+      if (!def.police && !def.player && this.crowd.add(def.id, varied)) return { kind: 'ped', model: null, seed: def.id * 1.7, phase: def.id * 0.9, lie: 0, look: varied };
+      return { kind: 'ped', model: buildPedModel(look), seed: def.id * 1.7, phase: 0, lie: 0, look };
     }
     // (helicopters and spike strips are drawn by `updateProp`)
     if (def.kind !== EntityKind.Vehicle) throw new Error(`no view for entity kind ${def.kind}`);
@@ -362,6 +391,7 @@ export class EntityViews implements System {
     for (const [id, p] of [...this.props]) this.dropProp(id, p);
     this.traffic.dispose();
     this.crowd.dispose();
+    this.ragdolls.dispose();
     this.smoke.dispose();
     this.engineSmoke.dispose();
     this.fire.dispose();

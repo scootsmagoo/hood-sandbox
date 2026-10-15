@@ -131,11 +131,11 @@ export class Input {
     return { x, z };
   }
 
-  /** Throttle, brake and steering for a vehicle. Call once per frame: the steering key is smoothed. */
-  driveAxes(dt: number): { throttle: number; brake: number; steer: number } {
+  /** Throttle, brake and steering for a vehicle. Call once per frame: the steering key is smoothed (more gently at `speed`, m/s). */
+  driveAxes(dt: number, speed = 0): { throttle: number; brake: number; steer: number } {
     const on = this.enabled;
     const keySteerTarget = on ? (this.down('right') ? 1 : 0) - (this.down('left') ? 1 : 0) : 0;
-    this.keySteer = rampSteer(this.keySteer, keySteerTarget, dt);
+    this.keySteer = rampSteer(this.keySteer, keySteerTarget, dt, speed);
     let sx = 0;
     let sz = 0;
     let driveY = false;

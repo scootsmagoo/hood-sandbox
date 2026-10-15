@@ -6,14 +6,16 @@ import { HeatModel, type HeatChange } from '../src/sim/law/heat';
 import { loadLawForTile, GENERIC_LAW } from '../src/sim/law/cityPack';
 import { Simulation } from '../src/sim/Simulation';
 import { damagePed, knockDown } from '../src/sim/combat/damage';
-import { addNpc, Button, cmd, flatTile, makeSim, ofType, ped, run, runLog, vehicle } from './helpers';
+import { addNpc, Button, cmd, everyoneCalls, flatTile, makeSim, ofType, ped, run, runLog, vehicle } from './helpers';
 
 describe('the crime table', () => {
   it('matches the contract and validates', () => {
     expect(Object.keys(CRIMES).sort()).toEqual(['assault', 'assault_officer', 'carjack', 'discharge', 'hit_ped', 'kill_ped', 'shoot_ped', 'vehicle_theft']);
-    expect(CRIMES.carjack).toEqual({ severity: 2, heat: 1, witnessRadius: 35 });
+    expect(CRIMES.carjack).toEqual({ severity: 2, heat: 1, witnessRadius: 35, points: 2, violent: false });
     expect(CRIMES.hit_ped.heat).toBe(2);
-    expect(CRIMES.kill_ped.heat).toBe(3);
+    // A single kill is two stars; three needs sustained violence (see the heat model) or an attack on police.
+    expect(CRIMES.kill_ped.heat).toBe(2);
+    expect(CRIMES.assault_officer.heat).toBe(3);
     // Gunfire carries further than it can be seen.
     expect(CRIMES.discharge).toMatchObject({ severity: 1, heat: 1 });
     expect(CRIMES.discharge.hearRadius!).toBeGreaterThan(CRIMES.discharge.witnessRadius);
@@ -21,6 +23,24 @@ describe('the crime table', () => {
     expect(CRIMES.shoot_ped.hearRadius!).toBeGreaterThan(CRIMES.shoot_ped.witnessRadius);
     expect(LAW_RULES.cooldownS[2]).toBeGreaterThan(LAW_RULES.cooldownS[1]);
     expect(() => parseCrimes({ crimes: { x: { severity: 9, heat: 1, witnessRadius: 5 } } })).toThrow(/severity/);
+    // The escalation rules are checked when the table loads: heat 2 and up needs a severity of 3, heat 3 and up a violent crime.
+    expect(() => parseCrimes({ crimes: { x: { severity: 2, heat: 2, witnessRadius: 5 } } })).toThrow(/severity of 3/);
+    expect(() => parseCrimes({ crimes: { x: { severity: 4, heat: 3, witnessRadius: 5 } } })).toThrow(/violent/);
+    for (const [id, c] of Object.entries(CRIMES)) {
+      if (c.heat >= 2) expect(c.severity, id).toBeGreaterThanOrEqual(3);
+      if (c.heat >= 3) expect(c.violent, id).toBe(true);
+    }
+    // Witnesses: about half to two thirds call, it takes 8 to 20 s, and hearing it from behind a wall is less likely to get a call.
+    expect(LAW_RULES.callChance).toBeGreaterThanOrEqual(0.5);
+    expect(LAW_RULES.callChance).toBeLessThanOrEqual(0.7);
+    expect(LAW_RULES.heardCallChance).toBeLessThanOrEqual(LAW_RULES.callChance);
+    expect(LAW_RULES.callDelayS).toEqual([8, 20]);
+    // Cooling a star or two out of sight: 15 to 25 s for one, 30 to 40 s for two; higher heat stays sticky.
+    expect(LAW_RULES.cooldownS[1]).toBeGreaterThanOrEqual(15);
+    expect(LAW_RULES.cooldownS[1]).toBeLessThanOrEqual(25);
+    expect(LAW_RULES.cooldownS[2]).toBeGreaterThanOrEqual(30);
+    expect(LAW_RULES.cooldownS[2]).toBeLessThanOrEqual(40);
+    for (let i = 3; i <= 6; i++) expect(LAW_RULES.cooldownS[i]).toBeGreaterThanOrEqual(LAW_RULES.cooldownS[i - 1]);
     expect(() => parseCrimes({})).toThrow();
   });
 });
@@ -38,6 +58,7 @@ describe('the jurisdiction tables', () => {
   });
   it('lets dispatch levels inherit the nearest lower one', () => {
     expect(dispatchFor(atlanta, 'acp', 2)?.maxUnits).toBe(2);
+    expect(dispatchFor(atlanta, 'acp', 1)?.maxUnits).toBe(1);
     expect(dispatchFor(atlanta, 'tap', 2)?.heat).toBe(1);
     expect(dispatchFor(atlanta, 'gtf', 3)).toBe(null);
     expect(dispatchFor(atlanta, 'gtf', 5)?.heat).toBe(5);
@@ -117,7 +138,8 @@ describe('the heat model', () => {
     for (const level of [1, 2, 3, 6]) {
       const { h, changes } = make();
       h.report(level, 2, 0, 0);
-      const need = LAW_RULES.cooldownS[level];
+      // Hollow stars wait out the report hold (the police are still coming) before they begin to cool.
+      const need = LAW_RULES.reportedHoldS + LAW_RULES.cooldownS[level];
       let t = 0;
       for (; h.level > 0 && t < 300; t += 0.1) h.step(0.1, false);
       expect(t).toBeGreaterThanOrEqual(need - 0.2);
@@ -148,14 +170,17 @@ describe('the heat model', () => {
     const { h } = make();
     expect(h.cooldownFrac).toBe(0);
     h.report(1, 2, 0, 0);
+    h.step(LAW_RULES.reportedHoldS, false);
+    expect(h.cooldownFrac).toBe(0);
     h.step(LAW_RULES.cooldownS[1] / 2, false);
     expect(h.cooldownFrac).toBeCloseTo(0.5, 2);
   });
 });
 
 /** The player at (100, 100) facing +Z, a victim 1.2 m ahead, and a helper to punch. */
-async function assaultScene(extra: (sim: Simulation) => void = () => {}, tile = flatTile()) {
+async function assaultScene(extra: (sim: Simulation) => void = () => {}, tile = flatTile(), rules: (sim: Simulation) => void = everyoneCalls) {
   const sim = await makeSim(tile);
+  rules(sim);
   const p = ped(sim);
   p.controller.teleport(100, 0, 100, 0);
   const victim = addNpc(sim, 100, 101.2);
@@ -179,8 +204,9 @@ describe('crimes and witnesses', () => {
     expect(crimes[0].witnesses).toBe(1); // the bystander; the victim is on the ground
     expect(crimes[0].description.clothes).toBe(0);
     expect(sim.law.heat.level).toBe(0); // nobody has called yet
-    // the bystander runs
-    expect(bystander.brain!.state).toBe('flee');
+    // the bystander is calling: the phone is out and the snapshot says so (they do not run)
+    expect(bystander.brain!.state).toBe('idle');
+    expect(bystander.dial).toBeGreaterThanOrEqual(0);
     const t0 = sim.tick;
     const later = runLog(sim, 60 * 10);
     const rep = ofType(later, 'crime:reported');
@@ -191,12 +217,102 @@ describe('crimes and witnesses', () => {
     expect(heat[0].lastKnown!.x).toBeCloseTo(100, 2);
     expect(heat[0].lastKnown!.z).toBeCloseTo(101.2, 1);
     expect(sim.law.heat.level).toBe(1);
+    expect(bystander.dial).toBe(-1); // the call is over
     void t0;
   });
 
-  it('the delay is a few seconds, seeded: the same run gives the same call tick', async () => {
+  it('not everyone calls: a witness who declines just runs, and is not asked again straight away', async () => {
+    let bystander!: ReturnType<typeof addNpc>;
+    const { sim, events } = await assaultScene(
+      (s) => {
+        bystander = addNpc(s, 112, 100);
+      },
+      flatTile(),
+      (s) => {
+        s.law.rules.callChance = 0;
+      },
+    );
+    const all = [...events, ...runLog(sim, 60 * 25)];
+    expect(ofType(all, 'crime')[0].witnesses).toBe(1);
+    expect(bystander.brain!.state === 'flee' || bystander.brain!.state === 'calm').toBe(true);
+    expect(sim.law.pending).toHaveLength(0);
+    expect(ofType(all, 'crime:reported')).toHaveLength(0);
+    expect(sim.law.heat.level).toBe(0);
+  });
+
+  it('about 50 to 70 percent of witnesses call (the chance is in crimes.json)', async () => {
+    // 40 bystanders in the open watch the same assault; the shares are the table's, give or take chance.
+    const { sim } = await assaultScene((s) => {
+      for (let i = 0; i < 40; i++) addNpc(s, 100 + 6 + (i % 8) * 2.2, 100 - 10 + Math.floor(i / 8) * 4);
+    }, flatTile(), () => {});
+    run(sim, 20, cmd());
+    const calling = sim.law.pending.length;
+    expect(calling).toBeGreaterThanOrEqual(40 * 0.4);
+    expect(calling).toBeLessThanOrEqual(40 * 0.8);
+  });
+
+  it('a caller who loses sight of the culprit hangs up, and one who runs far off does too', async () => {
+    let bystander!: ReturnType<typeof addNpc>;
+    const { sim, events } = await assaultScene((s) => {
+      bystander = addNpc(s, 112, 100);
+    });
+    const all = [...events, ...runLog(sim, 20)];
+    expect(sim.law.pending).toHaveLength(1);
+    expect(bystander.dial).toBeGreaterThanOrEqual(0);
+    // Away from the scene beyond the run-away distance: the call is dropped.
+    bystander.controller.teleport(100 + sim.law.rules.giveUp.runAwayM + 10, 0, 100, 0);
+    const rest = [...all, ...runLog(sim, 60 * 3)];
+    const gave = ofType(rest, 'witness:gave-up');
+    expect(gave).toHaveLength(1);
+    expect(gave[0]).toMatchObject({ pedId: bystander.id, reason: 'ran-off' });
+    expect(sim.law.pending).toHaveLength(0);
+    expect(bystander.dial).toBe(-1);
+    expect(ofType(runLog(sim, 60 * 20), 'crime:reported')).toHaveLength(0);
+  });
+
+  it('a caller who loses sight of the culprit for a few seconds hangs up', async () => {
+    let bystander!: ReturnType<typeof addNpc>;
+    const { sim, events } = await assaultScene(
+      (s) => {
+        bystander = addNpc(s, 112, 100);
+      },
+      flatTile(),
+      (s) => {
+        everyoneCalls(s);
+        s.law.rules.callDelayS = [15, 15];
+      },
+    );
+    const all = [...events, ...runLog(sim, 20)];
+    expect(sim.law.pending).toHaveLength(1);
+    // The culprit leaves the caller's range (a car, a sprint): after lostSightS without a clear line the call is dropped.
+    ped(sim).controller.teleport(100, 0, 100 - sim.law.rules.giveUp.sightRangeM - 40, 0);
+    const rest = [...all, ...runLog(sim, 60 * 8)];
+    const gave = ofType(rest, 'witness:gave-up');
+    expect(gave).toHaveLength(1);
+    expect(gave[0]).toMatchObject({ pedId: bystander.id, reason: 'lost-sight' });
+    expect(ofType(rest, 'crime:reported')).toHaveLength(0);
+    expect(sim.law.heat.level).toBe(0);
+  });
+
+  it('several calls about one crime raise heat once: the first counts, the rest are duplicates', async () => {
+    const { sim, events } = await assaultScene((s) => {
+      for (let i = 0; i < 4; i++) addNpc(s, 108 + i * 1.5, 100);
+    });
+    const all = [...events, ...runLog(sim, 60 * 25)];
+    const reports = ofType(all, 'crime:reported');
+    expect(reports).toHaveLength(4);
+    expect(reports.filter((r) => !r.duplicate)).toHaveLength(1);
+    expect(sim.law.heat.level).toBe(1);
+    // One assault is two points, not eight.
+    expect(sim.law.heat.points).toBe(CRIMES.assault.points);
+  });
+
+  it('the delay is 8 to 20 s, seeded: the same run gives the same call tick', async () => {
     const callTick = async () => {
-      const { sim } = await assaultScene((s) => addNpc(s, 112, 100));
+      const { sim } = await assaultScene((s) => addNpc(s, 112, 100), flatTile(), (s) => {
+        everyoneCalls(s);
+        s.law.rules.callDelayS = LAW_RULES.callDelayS;
+      });
       const ev = runLog(sim, 60 * 10);
       const idx = ev.findIndex((e) => e.type === 'crime:reported');
       return { idx, tick: (ev[idx] as { tick: number }).tick };
@@ -204,8 +320,8 @@ describe('crimes and witnesses', () => {
     const a = await callTick();
     const b = await callTick();
     expect(a).toEqual(b);
-    expect(a.tick).toBeGreaterThanOrEqual(3 * 60);
-    expect(a.tick).toBeLessThanOrEqual(8 * 60 + 40);
+    expect(a.tick).toBeGreaterThanOrEqual(8 * 60);
+    expect(a.tick).toBeLessThanOrEqual(20 * 60 + 40);
   });
 
   it('a lone victim who is knocked down cannot call: no witnesses, no heat', async () => {
@@ -257,7 +373,7 @@ describe('crimes and witnesses', () => {
       collisionIndices: new Uint32Array(mesh.indices),
       manifest: { ...base.manifest, collision: { file: 'collision.bin', vertexCount: mesh.positions.length / 3, indexCount: mesh.indices.length } },
     };
-    const sim = await makeSim(tile);
+    const sim = everyoneCalls(await makeSim(tile));
     ped(sim).controller.teleport(100, 0, 140, 0);
     addNpc(sim, 100, 141.2);
     const behindWall = addNpc(sim, 100, 158);
@@ -292,28 +408,45 @@ describe('crimes and witnesses', () => {
     expect(ofType(ev, 'crime')).toHaveLength(1);
   });
 
-  it('killing someone is a kill_ped at heat 3', async () => {
+  it('killing someone is a kill_ped: two stars, and three only for sustained violence', async () => {
     const { sim } = await assaultScene((s) => addNpc(s, 112, 100));
     const victim = [...sim.peds()].find((p) => p.controller.z > 101 && p.controller.z < 105)!;
     const ev0 = runLog(sim, 30);
     damagePed(sim, victim, 500, 'melee', ped(sim).id);
-    const ev = [...ev0, ...runLog(sim, 60 * 9)];
+    const ev = [...ev0, ...runLog(sim, 60 * 22)];
     const crime = ofType(ev, 'crime').find((c) => c.crime === 'kill_ped')!;
     expect(crime).toBeTruthy();
-    expect(crime.heat).toBe(3);
-    expect(sim.law.heat.level).toBe(3);
+    expect(crime.heat).toBe(2);
+    expect(sim.law.heat.level).toBe(2);
     expect(sim.law.heat.severity).toBe(4);
+    // The assault (2) and the kill (4) are six violent points, short of the seven that make heat 3.
+    expect(sim.law.heat.violence).toBe(CRIMES.assault.points + CRIMES.kill_ped.points);
+    expect(sim.law.heat.violence).toBeLessThan(LAW_RULES.escalation.heat3ViolencePoints);
+  });
+
+  it('a second kill is sustained violence: heat 3', async () => {
+    const { sim } = await assaultScene((s) => {
+      addNpc(s, 112, 100);
+      addNpc(s, 112, 104);
+    });
+    const [a, b] = [...sim.peds()].filter((p) => p.role !== 'player' && p.life === 'alive');
+    runLog(sim, 30);
+    damagePed(sim, a, 500, 'melee', ped(sim).id);
+    runLog(sim, 60 * 7);
+    damagePed(sim, b, 500, 'melee', ped(sim).id);
+    runLog(sim, 60 * 22);
+    expect(sim.law.heat.level).toBe(3);
   });
 
   it('entering an unowned car is a theft only if someone sees it', async () => {
-    const lone = await makeSim();
+    const lone = everyoneCalls(await makeSim());
     ped(lone).controller.teleport(vehicle(lone).car.pose().x - 2.5, 0, vehicle(lone).car.pose().z);
     run(lone, 20, cmd());
     const ev1 = runLog(lone, 6, () => cmd({ buttons: Button.Interact }));
     expect(ped(lone).vehicleId).toBe(vehicle(lone).id);
     expect(ofType(ev1, 'crime')).toHaveLength(0);
 
-    const seen = await makeSim();
+    const seen = everyoneCalls(await makeSim());
     const car = vehicle(seen).car.pose();
     ped(seen).controller.teleport(car.x - 2.5, 0, car.z);
     addNpc(seen, car.x - 10, car.z + 6);
@@ -335,7 +468,7 @@ describe('crimes and witnesses', () => {
 
 describe('a carjacking is a crime', () => {
   it('records the crime with the car and plate, the victim calls it in, and the heat appears', async () => {
-    const sim = await Simulation.create({ seed: 1, tile: generateProceduralTile(1), driverMood: 'flee', parkedCars: 0 });
+    const sim = everyoneCalls(await Simulation.create({ seed: 1, tile: generateProceduralTile(1), driverMood: 'flee', parkedCars: 0 }));
     const hero = vehicle(sim);
     const g = await import('../src/shared/doors');
     const { rotateVec } = await import('../src/shared/math');
@@ -367,6 +500,7 @@ describe('running people over', () => {
   async function runOver(speed: number, withWitness: boolean) {
     const { driverSim } = await import('./helpers');
     const { sim, car } = await driverSim('sedan', generateProceduralTile(1), { x: -40, z: 800 });
+    everyoneCalls(sim);
     car.teleport(-40, 0.4, 800, 0);
     run(sim, 20, cmd());
     const victim = addNpc(sim, -40, 808);
@@ -396,8 +530,67 @@ describe('running people over', () => {
   it('killing with the car is a kill_ped', async () => {
     const r = await runOver(18, true);
     expect(ofType(r.ev, 'crime').map((c) => c.crime)).toEqual(['kill_ped']);
-    expect(r.sim.law.heat.level).toBe(3);
+    expect(r.sim.law.heat.level).toBe(2);
   });
 });
 
 void vehicle;
+
+describe('escalation is earned', () => {
+  const make = () => new HeatModel(LAW_RULES);
+  const rep = (h: HeatModel, id: keyof typeof CRIMES) => h.report(CRIMES[id].heat, CRIMES[id].severity, 0, 0, false, { points: CRIMES[id].points, violent: CRIMES[id].violent });
+
+  it('a minor crime stays at one star, however many times it is reported', () => {
+    const h = make();
+    rep(h, 'vehicle_theft');
+    rep(h, 'discharge');
+    expect(h.level).toBe(1);
+    h.step(100, false); // time alone never raises it
+    expect(h.level === 1 || h.level === 0).toBe(true);
+  });
+
+  it('repeated crimes reach two stars (points), a severity 3 crime does at once', () => {
+    const h = make();
+    rep(h, 'carjack');
+    expect(h.level).toBe(1);
+    rep(h, 'assault');
+    expect(h.level).toBe(1); // 4 points
+    rep(h, 'vehicle_theft');
+    expect(h.level).toBe(2); // 5
+    const hit = make();
+    rep(hit, 'hit_ped');
+    expect(hit.level).toBe(2);
+  });
+
+  it('three stars need killing, an attack on police or sustained violence, never minor crimes alone', () => {
+    const minor = make();
+    for (let i = 0; i < 12; i++) rep(minor, i % 2 ? 'carjack' : 'discharge');
+    expect(minor.level).toBe(2); // plenty of points, no violence
+    const killer = make();
+    rep(killer, 'kill_ped');
+    expect(killer.level).toBe(2);
+    rep(killer, 'hit_ped'); // 4 + 3 violent points
+    expect(killer.level).toBe(3);
+    const cop = make();
+    rep(cop, 'assault_officer');
+    expect(cop.level).toBe(3);
+  });
+
+  it('hollow stars hold while the police are still coming, and only then begin to cool', () => {
+    const h = make();
+    rep(h, 'carjack');
+    h.step(LAW_RULES.reportedHoldS - 1, false);
+    expect(h.cooldownFrac).toBe(0);
+    h.step(1.5, false);
+    h.step(LAW_RULES.cooldownS[1] / 2, false);
+    expect(h.cooldownFrac).toBeGreaterThan(0.3);
+    // Once seen and lost, there is no hold: it cools from the moment they lose you.
+    const s = make();
+    rep(s, 'carjack');
+    s.sight(0, 0);
+    s.step(LAW_RULES.seenGraceS + 0.1, false);
+    expect(s.phase).toBe('lost');
+    s.step(LAW_RULES.cooldownS[1] + 0.2, false);
+    expect(s.level).toBe(0);
+  });
+});

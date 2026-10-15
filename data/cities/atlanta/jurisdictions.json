@@ -95,17 +95,17 @@
   ],
   "dispatch": {
     "acp": [
-      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 25, "unitsPerSpawn": 1, "loadout": "pistol" },
-      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "pistol" },
-      { "heat": 3, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 30, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 2, "spawnIntervalS": 22, "unitsPerSpawn": 1, "loadout": "shotgun" },
       { "heat": 4, "maxUnits": 3, "spawnIntervalS": 12, "unitsPerSpawn": 1, "loadout": "shotgun" },
       { "heat": 5, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "shotgun" },
       { "heat": 6, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "rifle" }
     ],
     "ghp": [
-      { "heat": 1, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "pistol" },
-      { "heat": 2, "maxUnits": 3, "spawnIntervalS": 10, "unitsPerSpawn": 1, "loadout": "shotgun" },
-      { "heat": 3, "maxUnits": 4, "spawnIntervalS": 8, "unitsPerSpawn": 2, "loadout": "shotgun" },
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "shotgun" },
+      { "heat": 3, "maxUnits": 3, "spawnIntervalS": 12, "unitsPerSpawn": 1, "loadout": "shotgun" },
       { "heat": 4, "maxUnits": 4, "spawnIntervalS": 8, "unitsPerSpawn": 1, "loadout": "rifle" },
       { "heat": 5, "maxUnits": 4, "spawnIntervalS": 6, "unitsPerSpawn": 1, "loadout": "rifle" },
       { "heat": 6, "maxUnits": 4, "spawnIntervalS": 6, "unitsPerSpawn": 1, "loadout": "rifle" }

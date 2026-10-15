@@ -44,7 +44,8 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
   },
   "collision": {                             // static world collision, excluding the heightmap
     "file": "collision.bin",                 // little-endian: Float32 positions [x,y,z]*, then Uint32 indices
-    "vertexCount": 0, "indexCount": 0
+    "vertexCount": 0, "indexCount": 0,
+    "buildingTriangles": 0                   // the first this many triangles are buildings (walls, then the flat roof); the rest are decks and piers
   },
   "roads": "roads.json",                     // centrelines for later traffic and minimap work
   "junctions": "junctions.json",             // optional: junction polygons, signals, stop signs, crossings (see below)
@@ -80,7 +81,7 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 
 - The `.glb` files use `EXT_meshopt_compression` and `KHR_mesh_quantization` (16-bit positions). Positions are quantized per mesh, so each mesh node carries a scale and translation. three's `GLTFLoader` needs `setMeshoptDecoder(MeshoptDecoder)`.
 - All meshes carry `COLOR_0` (RGBA, normalized uint8, linear). Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers), `road_markings`; `bld_wall`, `bld_roof`, `bld_glass` (towers of 55 m and up, metallic).
-- `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell, split into chunks with two levels of detail (see "Chunks"). Sampling the heightmap bilinearly differs from the level 0 mesh by a few centimetres at most.
+- `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell, split into chunks with two levels of detail (see "Chunks"). The physics heightfield and `heightAt` (`src/shared/tile.ts`) cut each cell the same way, so they agree with the level 0 mesh exactly; a bilinear patch over the four corners would be up to a metre off on a twisted cell.
 - `road_markings` holds lane lines, crosswalks and stop bars (white and yellow in the vertex colours). The old `road_crosswalk` material is no longer produced: crossings are zebra stripes in `road_markings`.
 - At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, motorways 10 cm, residential streets 6 cm; junction surfaces take the lift of their biggest road), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance, and a stronger one to `road_markings` (the client uses -2 for the roads and -4 for the markings).
 - **Markings** lie 3 cm over the road they are on (14 cm over the ground for crosswalks, which may also lie on a sidewalk). They are one merged mesh per chunk. Centre lines are double yellow on two-way primary, secondary, tertiary and unclassified roads with an even number of lanes (a pair of solid yellow lines round the middle lane when the number of lanes is odd); white dashed lane dividers come from `lanes`; motorways and trunk roads (and their links) get solid white edge lines. Lines stop 5 m short of a junction. Zebra crosswalks are laid on every OSM crossing way (only where it lies on the road) and across every leg of a signalised junction that has no crossing within about 9 m; stop bars are laid on the approaches of signalised and stop-controlled junctions.
@@ -117,7 +118,11 @@ Node names are `<kind>_<cx>_<cz>` (ground: `ground_<cx>_<cz>_L<lod>`). A chunk w
 
 ### `collision.bin` contents
 
-Building walls and roofs (footprints simplified to 0.4 m), plus elevated road decks (closed 1 m slabs, including footbridges and derived bridges) and bridge piers. At-grade roads are not in it; they are the heightmap.
+Building walls and roofs, plus elevated road decks (closed 1 m slabs, including footbridges and derived bridges) and bridge piers. At-grade roads are not in it; they are the heightmap.
+
+- **Footprints are the drawn ones.** Each building is its outer ring *and its courtyards* (`collisionRings` in `tools/pipeline/src/world/collisionRings.ts`), every ring simplified to 0.15 m, so a courtyard is open in the collision mesh as it is in the drawn one (it used to be filled in: an invisible solid, with the inner walls left to walk through). Buildings that stand on a street are cut by it, in the drawn and the collision mesh alike.
+- **Buildings first.** `collision.buildingTriangles` says how many triangles at the start of the mesh are buildings. Each building is its walls and then a flat roof (all three vertices at the roof height), triangulated over the footprint with the courtyards left out, so the sim recovers the footprints from the roofs and the outlines from the roof edges that belong to one triangle only (`src/shared/footprints.ts`). A trimesh has no inside a physics query can report; "is this person in a building" is answered from the footprints. A tile without the field has no footprints (the sim then trusts the physics alone).
+- **Street furniture is not in it.** Signal poles (with their arms and lamp housings), benches and bus stops are solid too, but the sim makes them from `lanes.json` junction heads and `scenarios.json` points with the same functions the client draws them with (`src/shared/props.ts`: one list of boxes per kind and one placement function each), so what is drawn is what is hit. They are in their own collision group (`Group.Prop`): cars, people and bullets hit them, the camera arm and sight lines do not.
 
 ### `roads.json` notes
 

@@ -10,14 +10,17 @@ import { NetSystem } from './client/net/NetSystem';
 import { Atmosphere } from './client/render/Atmosphere';
 import { clockFromParams } from './client/render/timeOfDay';
 import { EntityViews } from './client/render/EntityViews';
+import { loadCollisionDebug } from './client/render/CollisionDebug';
 import { loadScenarioProps } from './client/render/ScenarioProps';
 import { loadSignalHeads } from './client/render/SignalHeads';
 import { createTransport } from './client/transport/createTransport';
 import { Hud } from './client/ui/Hud';
 import { GunHud } from './client/ui/GunHud';
+import { LawHud } from './client/ui/LawHud';
 import { GunFx } from './client/render/GunFx';
 import { AimSystem } from './client/weapons/AimSystem';
 import { Minimap } from './client/ui/minimap';
+import { StreetName } from './client/ui/streetName';
 import { createWorldView, type WorldView } from './world/WorldView';
 
 declare global {
@@ -95,14 +98,22 @@ async function main() {
     const heads = await loadSignalHeads(game, tileBase, game.ready.tile.lanes);
     if (heads) game.addSystem(heads);
     game.addSystem(new NetSystem(game));
+    // ?debug=collision draws the wireframes of everything the sim collides with.
+    if (params.get('debug') === 'collision') {
+      const dbg = await loadCollisionDebug(game, tileBase, game.ready.tile);
+      if (dbg) game.addSystem(dbg);
+    }
     game.addSystem(new AimSystem(game));
     game.addSystem(new EntityViews(game));
     game.addSystem(new GunFx(game));
     game.addSystem(new CameraRig(game));
     game.addSystem(new Atmosphere(game));
+    if (params.get('gfx') === 'next') (await import('./client/render/next')).installGfxNext(game); // graphics spike, docs/graphics-plan.md
     game.addSystem(new Hud(game));
     game.addSystem(new GunHud(game));
+    game.addSystem(new LawHud(game));
     game.addSystem(new Minimap(game, tileBase));
+    game.addSystem(new StreetName(game, tileBase));
     game.addSystem(new AudioSystem(game));
     game.gamepad = new GamepadSource();
     game.input.addSource(game.gamepad);

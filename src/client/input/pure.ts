@@ -115,17 +115,23 @@ export function triggerHeld(value: number, wasHeld: boolean, on = 0.35, off = 0.
 
 /**
  * Smooths a digital steering key into an analog value: it takes time to reach full lock, comes
- * back faster, and swings across centre faster still, so quick corrections do not lag.
+ * back faster, and swings across centre faster still, so quick corrections do not lag. At speed
+ * (m/s, the car being driven) a held key winds on more slowly and stops short of full lock, the
+ * way a GTA IV driver feathers the keys on a highway: a tap is a lane change, not a spin.
  */
-export function rampSteer(current: number, target: number, dt: number): number {
-  const RISE = 3.2;
-  const FALL = 5.5;
-  const CROSS = 8;
+export function rampSteer(current: number, target: number, dt: number, speed = 0): number {
+  const fast = Math.min(1, Math.max(0, (Math.abs(speed) - 6) / 30));
+  const ease = fast * fast * (3 - 2 * fast);
+  const RISE = 3.2 - 1.6 * ease;
+  const FALL = 5.5 - 1.0 * ease;
+  const CROSS = 8 - 2 * ease;
+  const goal = target * (1 - 0.3 * ease);
   let rate: number;
-  if (target === 0) rate = FALL;
-  else if (Math.sign(target) !== Math.sign(current) && current !== 0) rate = CROSS;
+  if (goal === 0) rate = FALL;
+  else if (Math.sign(goal) !== Math.sign(current) && current !== 0) rate = CROSS;
+  else if (Math.abs(goal) < Math.abs(current)) rate = FALL;
   else rate = RISE;
-  return current + clamp(target - current, -rate * dt, rate * dt);
+  return current + clamp(goal - current, -rate * dt, rate * dt);
 }
 
 /** Combines key and analog sources into throttle, brake and steer. Pure. */

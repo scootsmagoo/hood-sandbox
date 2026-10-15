@@ -13,7 +13,8 @@ import { quatFromYaw, rotateVec, yawFromDir, yawFromTileHeading, yawOfQuat } fro
 import { AXIS_COUNT, SIM_DT, type InputCommand, type SimEvent } from '../shared/protocol';
 import type { LawData } from '../shared/law';
 import { MAX_HEALTH } from './entities';
-import { COMBAT, damagePed, knockDown } from './combat/damage';
+import { COMBAT, blastThrow, damagePed, knockDown } from './combat/damage';
+import { RagdollManager } from './ragdoll/RagdollManager';
 import { WeaponRuntime } from './combat/weapons/ballistics';
 import { giveStarterWeapons } from './combat/weapons/api';
 import { gunFlags, writeGunBlock } from './combat/weapons/snapshot';
@@ -132,6 +133,8 @@ export class Simulation {
   readonly traffic: TrafficManager | null = null;
   /** Listeners that see every event as it is emitted. */
   private readonly eventTaps: ((e: SimEvent) => void)[] = [];
+  /** Bodies that are ragdolls (sim/ragdoll): knocked down, thrown or dead. */
+  readonly ragdolls: RagdollManager;
   readonly fireRng: Rng;
   private readonly plateRng: Rng;
   private readonly starterWeapons: 'default' | 'all' | 'none';
@@ -154,6 +157,8 @@ export class Simulation {
     this.law = new Law(this, opts.law ?? loadedLaw(opts));
     this.police = new PoliceManager(this);
     this.eventTaps.push((e) => this.police.onEvent(e));
+    this.ragdolls = new RagdollManager(this);
+    this.eventTaps.push((e) => this.onRagdollEvent(e));
     this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
     const walk = opts.tile.paths ? new WalkGraph(opts.tile.paths) : undefined;
     if (opts.ambientPeds && walk) {
@@ -226,10 +231,7 @@ export class Simulation {
 
   /** Where the body origin sits above flat ground when the car is at rest on its suspension. */
   restHeight(h: (typeof HANDLING)[string]): number {
-    const sus = h.suspension;
-    const omega = 2 * Math.PI * sus.frequencyHz;
-    const len = sus.travel * sus.restRatio - 9.81 / (omega * omega);
-    return h.wheels.radius + len - h.wheels.mountY;
+    return RaycastCar.restHeight(h);
   }
 
   /** Adds a car resting on the ground at (x, z). `groundY` is the road surface there. */
@@ -313,7 +315,7 @@ export class Simulation {
       const shape = new R.Cuboid(hx + 0.15, 0.7, hz + 0.15);
       const q = quatFromYaw(slot.yaw);
       const blocked = this.physics.world.intersectionWithShape({ x: slot.x, y: gy + 1.05, z: slot.z }, q, shape, undefined, GROUPS.actorQuery);
-      if (blocked) continue;
+      if (blocked || this.physics.footprints.inside(slot.x, gy, slot.z)) continue;
       this.spawnVehicle(typeId, slot.x, gy, slot.z, slot.yaw, PAINTS[rng.int(0, PAINTS.length - 1)]);
       placed++;
     }
@@ -493,8 +495,9 @@ export class Simulation {
       const d = Math.hypot(dx, dz) || 1;
       if (!inside) {
         const r = damagePed(this, ped, WRECK.blastDamage * f, 'explosion', 0, v.id);
-        if (r.fatal) c.launch((dx / d) * 6 * f, 3 * f, (dz / d) * 6 * f);
-        else knockDown(this, ped, 2.5, (dx / d) * 7 * f, (dz / d) * 7 * f, 3.5 * f);
+        const t = blastThrow(f);
+        if (r.fatal) c.launch((dx / d) * t.out, t.up, (dz / d) * t.out);
+        else knockDown(this, ped, 2.5, (dx / d) * t.out, (dz / d) * t.out, t.up);
       } else {
         damagePed(this, ped, WRECK.blastDamage * 2, 'explosion', 0, v.id);
       }
@@ -559,7 +562,7 @@ export class Simulation {
       const gy = this.groundAt(x, z);
       if (Math.abs(gy - this.groundAt(slot.x, slot.z)) > 0.6) continue;
       const capsule = new this.physics.R.Capsule(0.55, 0.32);
-      if (this.physics.world.intersectionWithShape({ x, y: gy + 0.95, z }, { x: 0, y: 0, z: 0, w: 1 }, capsule, undefined, GROUPS.actorQuery)) continue;
+      if (this.physics.blockedAt(x, gy, z, { vehicles: true }) || this.physics.world.intersectionWithShape({ x, y: gy + 0.95, z }, { x: 0, y: 0, z: 0, w: 1 }, capsule, undefined, GROUPS.actorQuery)) continue;
       const ped = this.addPed(x, gy, z, rng.range(-Math.PI, Math.PI), 1 + (placed % (OUTFIT_COUNT - 1)), true);
       ped.brain!.enter('idle');
       placed++;
@@ -575,6 +578,14 @@ export class Simulation {
   respawnPed(p: PedEntity) {
     const sp = this.tile.manifest.spawns.player;
     p.controller.teleport(sp.x, Math.max(sp.y, this.groundAt(sp.x, sp.z)) + 0.1, sp.z);
+  }
+
+  /** A respawn takes the body back from its ragdoll (where the respawn put it); a despawn drops the ragdoll. */
+  private onRagdollEvent(e: SimEvent) {
+    if (e.type === 'player:respawn' || e.type === 'entity:respawn') {
+      const p = this.registry.get(e.type === 'player:respawn' ? e.pedId : e.id);
+      if (p instanceof PedEntity) this.ragdolls.release(p);
+    } else this.ragdolls.onEvent(e);
   }
 
   /** Writes the current state into a snapshot view. */
@@ -611,6 +622,7 @@ export class Simulation {
       else this.police.writeEntity(view, o, e);
     }
     u[H.Count] = n;
+    this.ragdolls.write(view);
     this.police.writeHeader(view);
   }
 
@@ -620,7 +632,9 @@ export class Simulation {
     f[o + E.Px] = c.x;
     f[o + E.Py] = c.y;
     f[o + E.Pz] = c.z;
-    const q = quatFromYaw(c.yaw);
+    // (someone seated leans and rolls with the car)
+    const seat = e.vehicleId ? (this.registry.get(e.vehicleId) as VehicleEntity | undefined) : undefined;
+    const q = seat ? seat.car.body.rotation() : quatFromYaw(c.yaw);
     f[o + E.Qx] = q.x;
     f[o + E.Qy] = q.y;
     f[o + E.Qz] = q.z;
@@ -643,6 +657,9 @@ export class Simulation {
       (b?.state === 'dragged' ? PedFlag.Dragged : 0) |
       (e.busy ? PedFlag.Busy : 0) |
       (e.officer?.sees ? PedFlag.Sees : 0) |
+      (e.dial >= 0 ? PedFlag.Dialling : 0) |
+      this.ragdolls.flags(e.id) |
+      (e.stumbleT > 0 ? PedFlag.Stumble : 0) |
       (e.officer && e.officer.fireT > 0 ? PedFlag.Firing : 0) |
       gunFlags(e, this.tick) |
       ((e.pose & 7) << PedFlag.PoseShift);
@@ -651,6 +668,7 @@ export class Simulation {
     f[o + E.Aux1] = e.melee ? Math.min(1, e.melee.t / COMBAT.swingTime) : (b?.swing ?? 0);
     f[o + E.Health] = e.health;
     f[o + E.Health2] = e.armour;
+    f[o + E.Aux2] = e.dial >= 0 ? e.dial : 0;
     writeGunBlock(view, o, e);
   }
 

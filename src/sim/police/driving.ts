@@ -245,7 +245,8 @@ export function driveUnit(m: PoliceManager, u: Unit, veh: VehicleEntity, player:
           const ahead = (pose.x - t.x) * Math.sin(t.heading) + (pose.z - t.z) * Math.cos(t.heading);
           if (role === 'blocker' && u.blockStage === 0 && ahead < 20) role = 'chaser';
           // Chasing a car: keep after it, no faster than is sensible when close.
-          cruise = Math.min(cap, Math.max(6, t.speed + 5 + dTarget * 0.25));
+          // (a heavy car closes gently: it has to be able to stop the closing speed by the time it is there)
+          cruise = Math.min(cap, Math.max(6, t.speed + 3.5 + dTarget * 0.16));
           stopAtEnd = false;
           goalHeading = t.speed > 3 ? t.heading : null;
           if (role === 'blocker') {
@@ -291,6 +292,9 @@ export function driveUnit(m: PoliceManager, u: Unit, veh: VehicleEntity, player:
             }
           }
           if (role === 'chaser' || role === 'flanker') {
+            // From the ramming heat a chaser closes right up on the target (it brakes for anything else in its lane, not for the car it
+            // is after): heavy cars that take a while to get back up to speed would otherwise hang back out of reach for good.
+            if (role === 'chaser' && sim.law.heat.level >= POLICE_RULES.ram.minHeat && u.ramCool <= 0) ignore = t.veh;
             const near = dTarget < 45;
             if (near && (role === 'chaser' || dTarget < 40)) {
               override = pitStep(m, u, veh, t, dt) ?? ramStep(m, u, veh, t, dTarget, dt);
@@ -387,7 +391,10 @@ export function driveUnit(m: PoliceManager, u: Unit, veh: VehicleEntity, player:
   } else {
     const look = lookaheadDistance(speed);
     aim = f!.lookahead(look);
-    if (f!.remaining < look + 4 && mode === 'drive' && dGoal < 30 && sim.law.clearLine({ x: pose.x, y: pose.y + 0.6, z: pose.z }, { x: goal.x, y: pose.y + 0.6, z: goal.z })) aim = goal;
+    // The last stretch straight at the goal; for someone on foot from further out (a heavy car that overshoots a turn at the end
+    // of its route would otherwise circle the block round them).
+    const onFoot = player.vehicleId === 0;
+    if ((f!.remaining < look + 4 || onFoot) && mode === 'drive' && dGoal < (onFoot ? 45 : 30) && sim.law.clearLine({ x: pose.x, y: pose.y + 0.6, z: pose.z }, { x: goal.x, y: pose.y + 0.6, z: goal.z })) aim = goal;
     // Take the next lane over when something slow is in this one.
     if (mode === 'drive' && !parking) {
       chooseLateral(m, u, veh, dt, ignore);
@@ -413,7 +420,7 @@ export function driveUnit(m: PoliceManager, u: Unit, veh: VehicleEntity, player:
   const gap = clearAhead(m, veh, 0, 14, ignore);
   if (!override) target = u.ramT > 0 ? Math.min(target, 6) : Math.min(target, Math.max(0, gap - 4.5) * 1.6);
   else target = Math.min(target, cap + 8);
-  if (mode === 'drive' && player.vehicleId === 0 && dGoal < 14) target = Math.min(target, 4);
+  if (mode === 'drive' && player.vehicleId === 0 && dGoal < 26) target = Math.min(target, Math.max(3, (dGoal - 10) * 0.6));
 
   // ---- A blocker parking across the road: turn in once slow, then hold.
   if (parking && u.meet) {
@@ -458,7 +465,10 @@ export function driveUnit(m: PoliceManager, u: Unit, veh: VehicleEntity, player:
   if (u.stuckT > 1.6) {
     u.stuckT = 0;
     u.reverseT = 1.3;
-    u.reverseSteer = -steer || 1;
+    // Back out with the wheel toward whatever the nose is against, so the nose swings away from it (a heavy car will not shove a pole).
+    const leftGap = clearAhead(m, veh, 0.75, 4);
+    const rightGap = clearAhead(m, veh, -0.75, 4);
+    u.reverseSteer = Math.abs(leftGap - rightGap) > 0.2 ? (rightGap < leftGap ? 1 : -1) : u.stuckCycles % 2 === 0 ? 1 : -1;
     u.follower = null;
     u.routeAge = 99;
     if (++u.stuckCycles >= 2) {

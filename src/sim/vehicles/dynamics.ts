@@ -1,31 +1,59 @@
 /**
  * The pure maths of the raycast car: no physics engine, no allocation in the hot paths. The car
  * (RaycastCar.ts) feeds these functions with what its ray casts and rigid body report and applies
- * the results as impulses.
+ * the results as impulses. docs/physics.md describes the model and how to tune it.
  *
- * Model: each wheel is a ray. The ray gives a suspension length, a spring and damper turn that into
- * a normal load, and the tyre turns the load and the contact velocity into a force on the ground
- * plane: a lateral force that pulls the slip velocity to zero up to a grip limit, a longitudinal
- * force from the engine and the brakes, and a friction circle that makes them share the limit. The
- * grip limit depends on the slip angle (GTA's traction curve): full at the peak, falling to a lower
- * sliding value, which is what makes a slide possible.
+ * Model (aimed at GTA IV's feel: heavy, soft, catchable): each wheel is a ray. The ray gives a
+ * suspension length; a soft spring and a damper (softer in bump than in rebound) turn that into a
+ * normal load, and the body rolls, dives and squats on those springs because the tyre forces act
+ * low (at the road for driving and braking, at the roll centre for cornering) while the mass sits
+ * high. The tyre turns the load and the contact velocity into a force on the ground plane:
+ *
+ *  - a lateral force from the slip angle along a curve that rises to a peak and falls off to a
+ *    sliding value, so a slide past the peak feeds itself unless the driver catches it;
+ *  - a friction coefficient that falls as the load grows (load sensitivity), so moving weight from
+ *    one axle to the other costs the pair grip: lift off mid-corner and the unloaded rear lets go,
+ *    turn in too fast and the front runs out first;
+ *  - a longitudinal force from the engine and the brakes, sharing the grip with the lateral one
+ *    (friction ellipse); a driven wheel asked for more than it holds spins and keeps little lateral
+ *    grip (power oversteer); a wheel locked by the handbrake slides against its own velocity.
+ *
+ * There is no yaw assist, no drift angle holder and no donut governor. The only help is physical:
+ * caster pulls a released wheel toward the direction of travel, as a real steering rack does.
  */
-import { DEG, clamp, lerp, smoothstep } from '../../shared/math';
+import { DEG, G, clamp, lerp, smoothstep } from '../../shared/math';
 import type { HandlingData } from '../../shared/handling';
 
-/** Slip angle that treats a nearly stopped tyre as gripping instead of dividing by zero (m/s). */
-const SLIP_SPEED_FLOOR = 1.0;
+/** Below this forward speed (m/s) the slip angle is taken against this floor instead, so a nearly stopped tyre does not divide by zero. */
+const SLIP_SPEED_FLOOR = 0.8;
+/** Share of the force that would stop a wheel's slip velocity within one step: a cap that keeps a stiff tyre stable at low speed. */
+const STOP_SHARE = 0.6;
 
-/** Friction coefficient available at a slip angle: `curveMax` up to the peak angle, easing down to `curveMin`. */
-export function tractionCoefficient(slipAngle: number, t: HandlingData['traction']): number {
-  const peak = t.curveLateralDeg * DEG;
-  return lerp(t.curveMax, t.curveMin, smoothstep(peak, peak * 2.5, Math.abs(slipAngle)));
+/**
+ * The slip curve: lateral force as a share of the peak for a slip of `x` peak angles. It rises as
+ * x(2 - x), smooth to the top at x = 1, then falls to `slideRatio` by x = `falloff` and stays there.
+ */
+export function slipCurve(x: number, slideRatio: number, falloff: number): number {
+  const a = Math.abs(x);
+  if (a <= 1) return a * (2 - a);
+  return lerp(1, slideRatio, smoothstep(1, falloff, a));
 }
 
-/** 1 at a standstill, falling to 0 at the engine's flat velocity. */
-export function torqueCurve(speed: number, maxVel: number): number {
-  const r = speed / maxVel;
-  return r >= 1 ? 0 : 1 - r * r;
+/** Friction coefficient at a load: `mu` at the nominal load, falling by `sensitivity` per 100% extra (and rising, less, when unloaded). */
+export function loadedMu(mu: number, load: number, nominal: number, sensitivity: number): number {
+  if (nominal <= 0) return mu;
+  return mu * clamp(1 - sensitivity * (load / nominal - 1), 0.55, 1.2);
+}
+
+/** Engine acceleration (m/s^2, signed) for a demand and the speed along the car's forward axis: the low-gear push, then constant power, then the limiter. */
+export function engineAccel(drive: number, vForward: number, d: HandlingData['drive']): number {
+  if (drive >= 0) {
+    const v = Math.max(0, vForward);
+    const push = Math.min(d.driveForce, d.powerPerKg / Math.max(v, 1));
+    return drive * push * (1 - smoothstep(d.maxFlatVel * 0.9, d.maxFlatVel, v));
+  }
+  const v = Math.max(0, -vForward);
+  return drive * d.driveForce * 0.6 * (1 - smoothstep(d.reverseMaxVel * 0.75, d.reverseMaxVel, v));
 }
 
 /** Steering lock (radians) at a speed: wide when parked, narrow at speed. */
@@ -33,23 +61,39 @@ export function steerLock(speed: number, s: HandlingData['steering']): number {
   return lerp(s.lockDeg, s.lockHighSpeedDeg, smoothstep(0, s.lockRefSpeed, Math.abs(speed))) * DEG;
 }
 
-/** Moves the steering angle toward its target at the handling's rates. All in radians. */
-export function slewSteer(current: number, target: number, dt: number, s: HandlingData['steering']): number {
+/** The rack's rate as a share of the crawl rate: it slows with speed, so a key press at 100 km/h is not a flick. */
+export function steerRateScale(speed: number, s: HandlingData['steering']): number {
+  return lerp(1, s.rateHighSpeed, smoothstep(3, s.lockRefSpeed, Math.abs(speed)));
+}
+
+/** Moves the steering angle toward its target at the handling's rates (slower at speed). All in radians. */
+export function slewSteer(current: number, target: number, dt: number, s: HandlingData['steering'], speed = 0): number {
   const turningAway = Math.abs(target) > Math.abs(current) && Math.sign(target) === Math.sign(current || target);
-  const rate = (turningAway ? s.rateDeg : s.returnRateDeg) * DEG * dt;
+  const rate = (turningAway ? s.rateDeg : s.returnRateDeg) * DEG * dt * steerRateScale(speed, s);
   return current + clamp(target - current, -rate, rate);
 }
 
 /**
- * Extra front-wheel angle that points the wheels where the car is going when it slides. Positive
- * turns left. `vLeft` and `vFwd` are the body's velocity along its own left and forward axes.
- * Quiet in ordinary cornering (the angle must pass 8 degrees) and off when reversing.
+ * Caster: the angle (radians, positive left) a released wheel trails toward, the direction the front
+ * axle is travelling relative to the nose times `selfAlign`. `vLeft` is the front axle's velocity
+ * along the car's left axis and `vFwd` along its nose. Nothing when slow or reversing.
  */
-export function counterSteer(vLeft: number, vFwd: number, assist: number, lock: number): number {
-  if (assist <= 0 || vFwd < 1.5) return 0;
-  const theta = Math.atan2(vLeft, vFwd);
-  const w = smoothstep(8 * DEG, 25 * DEG, Math.abs(theta));
-  return clamp(theta, -lock, lock) * assist * w;
+export function selfAlignAngle(vLeft: number, vFwd: number, selfAlign: number, lock: number): number {
+  if (selfAlign <= 0 || vFwd < 2) return 0;
+  return clamp(Math.atan2(vLeft, vFwd) * selfAlign, -lock, lock) * smoothstep(2, 6, vFwd);
+}
+
+/**
+ * The lock the driver has (radians): the speed-sensitive lock, except that steering into a slide (the
+ * wheels toward where the front axle is going) can always reach that direction and a little past it,
+ * up to the full mechanical lock, the way a driver catches a slide with the wheel.
+ * `steer` is the command (-1 left to +1 right); `travel` the front axle's direction of travel relative
+ * to the nose (radians, positive left).
+ */
+export function driverLock(steer: number, travel: number, speedLock: number, fullLock: number): number {
+  const wheelDir = -Math.sign(steer);
+  if (wheelDir === 0 || Math.sign(travel) !== wheelDir) return speedLock;
+  return Math.min(fullLock, Math.max(speedLock, Math.abs(travel) + 3 * DEG));
 }
 
 export interface DriveRequest {
@@ -85,44 +129,43 @@ export function resolvePedals(throttle: number, brake: number, vForward: number,
   return out;
 }
 
-/** Engine acceleration (m/s^2, signed) for a demand and the speed along the car's forward axis. */
-export function engineAccel(drive: number, vForward: number, d: HandlingData['drive']): number {
-  if (drive >= 0) return drive * d.driveForce * torqueCurve(Math.max(0, vForward), d.maxFlatVel);
-  return drive * d.driveForce * 0.6 * torqueCurve(Math.max(0, -vForward), d.reverseMaxVel);
-}
-
 /**
  * Spring and damper force on one wheel as an acceleration of the mass it carries (m/s^2).
- * `len` is the current suspension length and `prevLen` last step's; `rest` is where the spring is
- * relaxed. A bump stop adds a stiff spring near full compression. Never pulls the body down.
+ * `len` is the current suspension length and `prevLen` last step's (0 is fully compressed);
+ * `rest` is where the spring is relaxed. The damper is softer while the wheel compresses than
+ * while it extends. A bump stop adds a stiff, damped spring near full compression. Never pulls.
  */
-export function suspensionAccel(len: number, prevLen: number, dt: number, rest: number, omega: number, zeta: number, bumpStopAt: number): number {
+export function suspensionAccel(len: number, prevLen: number, dt: number, rest: number, omega: number, zetaBump: number, zetaRebound: number, bumpStopAt: number): number {
   const k = omega * omega;
-  const c = 2 * zeta * omega;
-  let a = k * (rest - len) + (c * (prevLen - len)) / dt;
-  if (len < bumpStopAt) a += k * 6 * (bumpStopAt - len);
-  return clamp(a, 0, 60);
+  const v = (prevLen - len) / dt;
+  const zeta = v > 0 ? zetaBump : zetaRebound;
+  let a = k * (rest - len) + 2 * zeta * omega * v;
+  if (len < bumpStopAt) a += k * 10 * (bumpStopAt - len) + Math.max(0, v) * omega * 1.5;
+  return clamp(a, 0, 90);
 }
 
 export interface TireInput {
   /** Contact point velocity along and across the wheel, m/s. */
   vLong: number;
   vLat: number;
-  /** Normal load, N. */
+  /** Normal load, N, and the load at rest. */
   load: number;
+  nominal: number;
   /** Mass the wheel carries, kg. */
   mass: number;
   dt: number;
   /** Engine force demanded at this wheel, N (signed). */
   driveForce: number;
-  /** Brake force this wheel can apply, N. */
+  /** Brake force this wheel can apply, N (never reverses the wheel). */
   brakeForce: number;
-  /** Scales every grip limit (surface, handbrake lock). */
+  /** Locked by the handbrake: the tyre slides against its velocity. */
+  locked: boolean;
+  /** Scales every grip limit (the axle's grip, a flat tyre, the surface). */
   gripMult: number;
-  /** Scales only the lateral limit (a spinning wheel, a locked rear). */
+  /** Scales only the lateral limit (a burnout). */
   lateralMult: number;
-  /** Scales only the longitudinal limit (a donut lets the rear tyres push harder than they grip). Default 1. */
-  longMult?: number;
+  /** Make the wheel spin whatever the demand (a burnout). */
+  forceSpin?: boolean;
 }
 
 export interface TireOutput {
@@ -131,49 +174,66 @@ export interface TireOutput {
   slipAngle: number;
   /** The driven wheel asked for more than the tyre can hold. */
   spinning: boolean;
-  /** 0 to 1: how far into a slide. */
+  /** 0 to 1: how far into a slide (1 for a spinning or locked wheel). */
   slip: number;
+  /** The friction coefficient the tyre had at its load. */
+  mu: number;
 }
 
 export function newTireOutput(): TireOutput {
-  return { fLong: 0, fLat: 0, slipAngle: 0, spinning: false, slip: 0 };
+  return { fLong: 0, fLat: 0, slipAngle: 0, spinning: false, slip: 0, mu: 0 };
 }
 
 export function tireForce(s: TireInput, t: HandlingData['traction'], out: TireOutput): TireOutput {
-  out.fLong = out.fLat = out.slipAngle = out.slip = 0;
+  out.fLong = out.fLat = out.slipAngle = out.slip = out.mu = 0;
   out.spinning = false;
   if (s.load <= 0) return out;
 
+  const mu = loadedMu(t.mu, s.load, s.nominal, t.loadSensitivity) * s.gripMult;
+  out.mu = mu;
+  const fMax = mu * s.load;
+  const fxMax = fMax * t.longitudinalMult;
   const alpha = Math.atan2(Math.abs(s.vLat), Math.abs(s.vLong) + SLIP_SPEED_FLOOR);
   out.slipAngle = alpha;
-  const muLat = tractionCoefficient(alpha, t) * s.gripMult * s.lateralMult;
-  const muLong = t.curveMax * t.longitudinalMult * s.gripMult * (s.longMult ?? 1);
-  const maxLong = muLong * s.load;
+  const x = alpha / (t.peakSlipDeg * DEG);
 
-  // Longitudinal: engine, then brakes (which can stop the wheel but not reverse it within a step).
-  let fLong = s.driveForce;
-  const spinning = Math.abs(fLong) > maxLong * 0.92;
-  if (spinning) fLong = Math.sign(fLong) * (t.curveMin / t.curveMax) * maxLong;
-  if (s.brakeForce > 0 && s.vLong !== 0) {
-    const stopForce = (Math.abs(s.vLong) * s.mass) / s.dt;
-    fLong -= Math.sign(s.vLong) * Math.min(s.brakeForce, stopForce);
+  if (s.locked) {
+    // A locked wheel: kinetic friction against the contact's velocity, whatever the steering.
+    const v = Math.hypot(s.vLong, s.vLat);
+    if (v > 1e-4) {
+      const mag = Math.min(fMax * t.handbrakeGrip, (v * s.mass * STOP_SHARE) / s.dt);
+      out.fLong = (-s.vLong / v) * mag;
+      out.fLat = (-s.vLat / v) * mag;
+    }
+    out.slip = smoothstep(0.5, 2, v);
+    return out;
   }
-  fLong = clamp(fLong, -maxLong, maxLong);
 
-  // Lateral: pull the slip velocity to zero, up to the limit the traction curve allows.
-  const maxLat = muLat * s.load;
-  let fLat = ((-s.vLat * s.mass) / s.dt) * t.lateralStiffness;
-  fLat = clamp(fLat, -maxLat, maxLat);
+  // Longitudinal: the engine (which spins the wheel past the limit), then the brakes (which can stop it but not reverse it within a step).
+  let fx = s.driveForce;
+  const spinning = s.forceSpin === true || Math.abs(fx) > fxMax;
+  if (spinning) fx = Math.sign(fx || 1) * fxMax * t.slideRatio;
+  if (s.brakeForce > 0 && s.vLong !== 0) {
+    const stop = (Math.abs(s.vLong) * s.mass) / s.dt;
+    fx -= Math.sign(s.vLong) * Math.min(s.brakeForce, stop);
+  }
+  fx = clamp(fx, -fxMax, fxMax);
 
-  // Friction circle: hard braking or driving leaves less for cornering (never less than half).
-  const use = maxLong > 0 ? Math.abs(fLong) / maxLong : 0;
-  fLat *= Math.sqrt(1 - Math.min(1, use * 0.85) ** 2);
+  // Lateral: the slip curve, capped by what would stop the slip within the step (stable at a crawl).
+  const curve = fMax * slipCurve(x, t.slideRatio, t.falloff) * s.lateralMult * (spinning ? t.spinLateral : 1);
+  const stop = (Math.abs(s.vLat) * s.mass * STOP_SHARE) / s.dt;
+  let fy = -Math.sign(s.vLat) * Math.min(curve, stop);
 
-  const peak = t.curveLateralDeg * DEG;
-  out.fLong = fLong;
-  out.fLat = fLat;
+  // Friction ellipse: what driving or braking uses is gone from cornering. An ABS-like floor keeps some steering under full
+  // braking; a driven wheel that still grips gives up less (the engine's push is spread over the contact patch's slip).
+  const use = Math.min(1, Math.abs(fx) / Math.max(fxMax, 1e-6));
+  const braking = s.brakeForce > 0 && Math.sign(fx) === -Math.sign(s.vLong);
+  fy *= Math.sqrt(1 - use * use * (braking ? 0.9 : 0.6));
+
+  out.fLong = fx;
+  out.fLat = fy;
   out.spinning = spinning;
-  out.slip = spinning ? 1 : smoothstep(peak, peak * 2.5, alpha);
+  out.slip = spinning ? 1 : smoothstep(1, t.falloff, x);
   return out;
 }
 
@@ -186,96 +246,24 @@ export function lowSpeedGrip(speed: number, spinning: boolean, t: HandlingData['
   return 1 - t.lowSpeedLossMult * (1 - smoothstep(0, t.lowSpeedLossSpeed, Math.abs(speed)));
 }
 
-/**
- * Drift assist: an angular acceleration about the vertical axis (rad/s^2, positive turns left)
- * that holds the slide angle where the driver's steering asks for it. Active while the handbrake is
- * held or the car is already sliding past about 8 degrees, and off in ordinary driving.
- *
- * `slideAngle` is the direction of travel relative to the nose (positive when the car travels to the
- * left of where it points), `velTurnRate` how fast the direction of travel is turning. For the
- * slide angle to stay put the nose must turn at that same rate, so the target yaw rate is the
- * travel's turn rate plus a correction toward the angle the steering asks for (right steering
- * asks for the car to travel left of its nose, up to `maxSlideDeg`).
- */
-export function driftAssistAccel(
-  steer: number,
-  yawRate: number,
-  velTurnRate: number,
-  slideAngle: number,
-  speed: number,
-  handbrake: boolean,
-  a: HandlingData['assists'],
-): number {
-  if (a.yawAssist <= 0) return 0;
-  const active = Math.max(smoothstep(8 * DEG, 20 * DEG, Math.abs(slideAngle)), handbrake ? 1 : 0) * smoothstep(3, 8, speed);
-  if (active <= 0) return 0;
-  const wanted = clamp(steer, -1, 1) * a.maxSlideDeg * DEG;
-  const target = clamp(velTurnRate + 2.5 * (slideAngle - wanted), -a.yawRateMax, a.yawRateMax);
-  return clamp((target - yawRate) * 10, -16, 16) * a.yawAssist * active;
+/** Whether the pedals ask for a burnout: the throttle with the brake or the handbrake, nearly stopped. */
+export function burnoutWanted(throttle: number, brake: number, handbrake: boolean, vForward: number): boolean {
+  return throttle > 0.5 && (brake > 0.5 || handbrake) && vForward > -1 && vForward < 4;
 }
 
 /**
- * Donut: full throttle with the wheel hard over at low speed. The rear tyres break loose and the car
- * circles on a steady radius instead of spiralling into a spin or crawling to a stop.
- *
- * Whether the driver is asking for one. Entering takes the handbrake, or a launch from nearly
- * standstill with the wheel flat to the stop; once going it holds until throttle or steering is
- * eased well off, or the car runs out of the speed range where a donut makes sense.
+ * Front-axle brake demand (m/s^2, positive slows the car) for a burnout. The rear tyres spin and
+ * smoke; the front brakes hold the car to a slow creep instead of letting it launch.
  */
-export function donutWanted(throttle: number, steer: number, speed: number, handbrake: boolean, active: boolean, a: HandlingData['assists']): boolean {
-  if (a.donutYawRate <= 0) return false;
-  const s = Math.abs(steer);
-  if (active) return throttle > 0.35 && s > 0.3 && speed < a.donutMaxSpeed + 3;
-  const entry = handbrake || (s > 0.75 && speed < 3.5);
-  return entry && throttle > 0.6 && s > 0.5 && speed < a.donutMaxSpeed;
+export function burnoutHold(speedForward: number, x: HandlingData['extras']): number {
+  return clamp(x.burnoutHold * (1 + Math.max(0, speedForward - x.burnoutCreep) * 2), 0, 12);
 }
 
-/** Moves the donut blend toward 0 or 1: quick to take hold, slower to let go (so grip returns smoothly). */
-export function donutRamp(current: number, on: boolean, dt: number): number {
-  return clamp(current + (on ? dt / 0.15 : -dt / 0.5), 0, 1);
-}
+/** Static load of a wheel carrying `share` kg, N. */
+export const nominalLoad = (share: number) => share * G;
 
-/** Yaw rate a donut turns at (rad/s, positive turns left). Steering right turns right. Builds up with speed so a launch is not a spin on the spot. */
-export function donutYawTarget(steer: number, speed: number, a: HandlingData['assists']): number {
-  const s = clamp(steer, -1, 1);
-  return -Math.sign(s) * Math.abs(s) ** 1.3 * a.donutYawRate * lerp(0.4, 1, smoothstep(0, 5, speed));
-}
-
-/** Speed the donut settles at: a tighter wheel circles slower. */
-export function donutTargetSpeed(steer: number, a: HandlingData['assists']): number {
-  return a.donutSpeed * lerp(0.7, 1, Math.min(1, Math.abs(steer)));
-}
-
-/**
- * Engine demand (m/s^2, signed) that holds the donut's speed: the throttle is a request, and the
- * governor feeds in just what keeps the car on the circle, or brakes the rear tyres when it is too fast.
- */
-export function donutAccel(speed: number, steer: number, maxAccel: number, a: HandlingData['assists']): number {
-  const err = donutTargetSpeed(steer, a) - speed;
-  return clamp(err * 3, -a.donutBrake, maxAccel);
-}
-
-/** Angular acceleration (rad/s^2) that takes the yaw rate toward the donut's. */
-export function donutYawAccel(yawRate: number, target: number): number {
-  return clamp((target - yawRate) * 9, -14, 14);
-}
-
-/**
- * How fast the car's direction of travel should turn (rad/s, positive left) in a donut. If it turns
- * at the nose's rate the slide angle stays where it is; this bends the rate so the slide angle
- * settles at `donutSlideDeg`, with the tail out on the outside of the circle. `slide` is the
- * direction of travel relative to the nose (positive when travelling to the left of it).
- */
-export function donutTurnRate(yawTarget: number, yawRate: number, slide: number, a: HandlingData['assists']): number {
-  const want = -Math.sign(yawTarget) * a.donutSlideDeg * DEG;
-  return yawRate + 3 * (want - slide) * (yawTarget === 0 ? 0 : 1);
-}
-
-/**
- * Front-axle brake demand (m/s^2, positive slows the car) for a burnout: handbrake and throttle
- * with the wheel (nearly) straight. The rear tyres spin and smoke; the front brakes hold the car to a
- * slow creep instead of letting it launch, and letting go of the handbrake releases it.
- */
-export function burnoutHold(speedForward: number, a: HandlingData['assists']): number {
-  return clamp(a.burnoutHold * (1 + Math.max(0, speedForward - a.burnoutCreep) * 2), 0, 12);
+/** The car's static stability factor (half track over the centre of mass height above the road): the lateral g that would tip it on flat ground. */
+export function staticStability(h: HandlingData, rideHeight: number): number {
+  const track = (h.wheels.trackFront + h.wheels.trackRear) / 2;
+  return track / (2 * (rideHeight + h.centreOfMass[1]));
 }

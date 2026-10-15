@@ -72,7 +72,12 @@ export async function walkTo(page, target, { tol = 0.7, timeoutMs = 20000, sprin
       await set('KeyD', r > 0.3);
       await set('KeyA', r < -0.3);
       await set('ShiftLeft', sprint && d > 3);
-      await page.waitForTimeout(40);
+      if (d < 1.4) {
+        // close in with taps, as a player would: the body has weight (it takes a moment to start and to stop), so a held key overshoots
+        await page.waitForTimeout(70);
+        for (const k of [...held]) await set(k, false);
+        await page.waitForTimeout(160);
+      } else await page.waitForTimeout(40);
     }
   } finally {
     for (const k of [...held]) await set(k, false);

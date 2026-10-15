@@ -92,9 +92,15 @@ export class Game {
     for (const f of this.tierListeners) f(t);
   }
 
+  /** The canvas size in CSS pixels, measured on resize. Read these rather than `clientWidth` in a frame: a layout read after the HUD's writes forces a synchronous reflow. */
+  viewW = 1;
+  viewH = 1;
+
   resize() {
     const w = Math.max(1, this.canvas.clientWidth || window.innerWidth);
     const h = Math.max(1, this.canvas.clientHeight || window.innerHeight);
+    this.viewW = w;
+    this.viewH = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

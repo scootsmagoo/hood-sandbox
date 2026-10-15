@@ -32,6 +32,8 @@ export class HelicopterDirector {
   readonly helis: HelicopterEntity[] = [];
   private readonly brains = new Map<number, Brain>();
   private nextAt = 0;
+  /** When the heat first reached the helicopter's level the dispatch took this long to put one up; the time it comes (sim s), or -1 while the heat is below that level. */
+  private comesAt = -1;
   /** True when any helicopter has the player in its cone and a clear line. */
   sees = false;
   /** Off: none comes (scripted scenes and tests that want one feature alone). */
@@ -55,8 +57,17 @@ export class HelicopterDirector {
   private wanted(): number {
     const sim = this.sim;
     const heat = sim.law.heat.level;
-    if (!this.enabled || heat < POLICE_RULES.helicopter.minHeat || sim.police.standingDown) return 0;
-    return atHeat(POLICE_RULES.helicopter.count, heat);
+    if (!this.enabled || heat < POLICE_RULES.helicopter.minHeat || sim.police.standingDown) {
+      this.comesAt = -1;
+      return 0;
+    }
+    // Not instantly: the air unit is scrambled when the heat reaches its level and takes about 30 s.
+    const time = sim.tick / 60;
+    if (this.comesAt < 0) {
+      const d = POLICE_RULES.helicopter.delayS;
+      this.comesAt = time + this.rng.range(d[0], d[1]);
+    }
+    return time >= this.comesAt ? atHeat(POLICE_RULES.helicopter.count, heat) : 0;
   }
 
   update(dt: number) {
@@ -135,6 +146,7 @@ export class HelicopterDirector {
   clearAll() {
     for (const h of [...this.helis]) this.remove(h);
     this.sees = false;
+    this.comesAt = -1;
   }
 
   /** The tallest roof under the helicopter and a little ahead of it. */

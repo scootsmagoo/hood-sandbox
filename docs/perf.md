@@ -83,7 +83,7 @@ What a crowd costs, measured on the same tree with `?ambient=0` against the defa
 How it stays cheap:
 
 - **Drawing.** A per-ped model is thirteen meshes, so 60 people would have been about 800 draws. Everyone except the player and officers is drawn by `PedCrowd` (`src/client/render/PedCrowd.ts`): five instanced meshes (torso, head, arms, legs, cap), 192 people at most, one set of matrices a person per frame from the shared pose solver (`pedPose.ts`). Benches and bus stops are two more instanced meshes for the whole tile (`ScenarioProps.ts`). Nothing is allocated or disposed when people come and go (a swap-remove in the instance arrays), so churn cannot leak.
-- **The sim.** A person near the player costs a character-controller step (27 us); 60 of them were 1.6 ms of a 1.8 ms tick in Node. People standing still, and walkers more than 46 m away, skip it (`PedController.glide`; the walk network is clear of walls by construction), which brings 60 people to 0.17 ms a tick on top of 0.24 for the rest of the sim. The ambient logic itself is 0.05 ms a tick.
+- **The sim.** A person near the player costs a character-controller step (27 us); 60 of them were 1.6 ms of a 1.8 ms tick in Node. People standing still, and walkers more than 46 m away, skip it (`PedController.glide`; the move keeps out of walls: see "Collision and stuck people"), which brings 60 people to 0.17 ms a tick on top of 0.24 for the rest of the sim. The ambient logic itself is 0.05 ms a tick.
 - **The snapshot.** The director never fills the 256 entities: it keeps 28 slots free for police, traffic and the player, and counts every entity that is not one of its own.
 - `blendEntity` found each entity in the snapshot by scanning (O(n^2) a frame with a crowd); `NetSystem` now passes the record index it is already at.
 
@@ -162,6 +162,43 @@ The expensive parts are the A* searches (lane graph, up to four candidate goals 
 So a heat 5 response is about 280 draws on High and 200 on Low: a police car is a full 28-mesh stand-in model (traffic is instanced, the police are not, because each car flashes its own lightbar in its own livery), an officer on foot 13 meshes. Two things keep it from being worse: an officer seated in a car is not drawn once the car is 40 m away, and a police car's wheels, lamps and trim do not cast shadows of their own (the body does). The helicopter's beam is three additive cones and a disc, not a light, so it adds no shader variants. **Next:** draw police cars from the instanced path (a per-instance lightbar phase) and officers from the crowd's meshes when they are not carrying a gun.
 
 **Snapshot.** The header grew from 16 to 24 words (96 bytes a snapshot) for the search area and the police counts; helicopters and spike strips are ordinary 36-word records.
+
+## Collision and stuck people (2026-10-15)
+
+What it costs for every drawn solid to be solid, and for nobody to stay in a wall. Real Five Points tile, in Node, 60 people and traffic at 0.75, the player walking, 1800 ticks, the same seed with and without the furniture (`lanes.json` heads and the benches and stops of `scenarios.json` taken out):
+
+| | Without | With |
+|---|---|---|
+| Colliders for street furniture | 0 | 1150 (319 signal poles with their arms and lamp housings, 44 benches, 15 bus stops: 378 props) |
+| `world.step()`, mean | 0.08 ms | 0.20 ms (+0.12 ms, 0.7% of a 16.7 ms tick) |
+| Whole sim step, mean | 1.06 ms | 1.21 to 1.34 ms |
+| Building the physics world | 150 ms | 170 to 260 ms (once) |
+
+The rest of the new work, per tick: the unstick check is one capsule overlap and one footprint lookup for a tenth of the people each tick (a person every 0.1 s: about 6 queries a tick at 60 people); a person who glides makes two or three lookups in a grid of footprint outlines per move, no physics query (about 1 us); the width of a walk edge is measured once, the first time anyone walks it (9 capsule sweeps; 15 757 edges take 0.5 s if all were measured, spread over the first minutes); a lite person asks for the floor under their feet six times a second. `PhysicsWorld` holds a footprint index (5493 roof triangles, 6525 outline segments, built from `collision.bin` in a few ms). `npm run audit:collision` (below) runs 10 sim minutes in 30 to 40 s.
+
+### `npm run audit:collision` (10 sim minutes of Downtown in Node)
+
+`tests/audit/collision-audit.audit.ts`: the real tile, ambient people (budget 60) and traffic (0.75), a scripted player who walks the sidewalks, jumps to somewhere else every 90 s, fires a shot's worth of fear every 25 s and shoves four people every 40 s, so people run. Every 0.5 s it checks everybody on foot against the footprints (taken from `AUDIT_TRUTH`'s `collision.bin`, courtyards open) and counts people who tried to move and got no further than 0.6 m from where a 5 s window began. `AUDIT_TILE=<dir>` runs another tile, `AUDIT_MINUTES`, `AUDIT_SEED`, `AUDIT_OUT=<file>`, `AUDIT_TRACE=<pedId>` (a ped's state twice a second) tune it.
+
+| Seeds 7, 11, 23 (10 sim minutes each) | Before (db7cc1a, the old tile) | After |
+|---|---|---|
+| People ever inside a footprint | 15, 9, 9 | 0, 0, 0 |
+| Person-seconds inside | 363, 130, 268 | 0, 0, 0 |
+| People standing at a wall (centre within 20 cm) | 15, 5, 12 | 0, 0, 0 |
+| Stuck for 5 s or more (trying to move) | 6, 20, 6 | 0, 1, 2 |
+| Safety-net fixes (`ped:unstuck` events) | none exist | 14, 4, 9 (the world's edge, where fleeing people run off the map; a pocket of the network cut off by a low deck) |
+| Sim step, mean | 1.03, 1.27, 0.94 ms | 1.08, 1.19, 0.94 ms |
+
+## Physics and ragdolls (2026-10-15)
+
+The GTA IV physics pass (docs/physics.md). Cars cost what they did (four rays and a few impulses each). The new cost is the ragdolls: up to 6 at once with 11 bodies and 10 joints each. A frozen ragdoll has no bodies.
+
+- **Sim step** (baked tile, traffic 0.75, 40 pedestrians, Node, 20 s each): 1.14 ms mean (1.50 p95) without ragdolls, and 1.42 ms (1.84 p95) with 6 kept active. That is about 0.05 ms per active ragdoll.
+- **Snapshot.** Ragdoll records follow the entity records: 26 words each, at most 16, and only the ones in use are sent. `SNAPSHOT_BYTES` grew by 1.6 KB.
+- **Client.** One instanced mesh per body part kind (12 in all), made at boot. Their count is 0 and they are hidden while nobody is down.
+- **`npm run leaks`.** A new `ragdoll` phase (`--phases ragdoll --query transport=loopback`, 20 cycles) throws eight people round the player and removes them. Geometries went 235 -> 236 (unused 0), objects 925 -> 925, heap 84.6 -> 84.8 MB, and physics joints 0 -> 0: flat.
+- **Default phases.** All flat, including `drive` with the new car.
+- **`npm run perf-budget`.** desktop-high and desktop-medium passed. On desktop-low, the `drive.cpuP95` and `walk.cpuP95` tripwires (2.2 and 2.3 ms) were over by 0.1 to 0.3 ms in the first run on a loaded machine, then passed on a repeat (2.0 and 2.2 ms).
 
 ## Road markings: first-visit uploads (2026-10-14)
 
@@ -261,3 +298,17 @@ Touch devices start on Medium and the governor steps down after 3 s above 24 ms;
 - Bigger chunks (512 m) for roads and buildings if draws bite.
 - Far building and road impostors (README: "impostors for far buildings"): they are the next triangle cost once towers get detail.
 - Real-device numbers, then re-baseline `phone-low`.
+
+### Round 6 timing tripwires (2026-10-15)
+
+The GTA IV physics, the ragdolls, solid props, the police pacing HUD and the street-name label together put desktop-low and phone-low over their p95 tripwires. Measured the same day on the same machine:
+
+| | db7cc1a (before) | round 6 |
+|---|---|---|
+| phone-low cpuMean, by phase | 2.2 to 2.4 ms | 2.4 to 2.6 ms |
+| phone-low cpuP95, worst phase | 5.4 ms (already over its 4.9 drive budget that day) | 6.0 to 7.3 ms |
+| desktop-low drive.cpuP95 | | 2.3 to 2.5 ms (budget 2.2) |
+
+So the round costs about 0.2 ms of main-thread time on average on the throttled phone, plus spikier p95 tails. Only the failing `cpuP95` lines were raised, to the worst seen that day x1.25 (desktop-low idle, walk, drive; phone-low every phase). Means, draws, triangles and heap are unchanged. `--write-budget` was not used: it doubles a noisy p95 (phone-low look would have gone 5.4 -> 14.2), which would make the tripwire useless.
+
+`LawHud` and `GunHud` now read the viewport size from `game.viewW` / `game.viewH` (set on resize), not `canvas.clientWidth` in a frame: a layout read after the HUD's writes forces a synchronous reflow. The dialling markers do nothing in a frame with nobody dialling.

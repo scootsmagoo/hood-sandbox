@@ -19,7 +19,8 @@ export interface TileManifest {
   meshes: { ground?: string; roads?: string; buildings?: string };
   /** The square chunks the .glb meshes are split into (see "Chunks" in the contract). Absent in older bakes. */
   chunks?: { size: number; minX: number; minZ: number; cols: number; rows: number };
-  collision: { file: string; vertexCount: number; indexCount: number };
+  /** `buildingTriangles`: the first this many triangles of the mesh are buildings (walls and roofs); the rest are decks and piers. */
+  collision: { file: string; vertexCount: number; indexCount: number; buildingTriangles?: number };
   roads?: string;
   /** `junctions.json`: junction polygons with their legs, signals, stop signs and crossings (see the contract). */
   junctions?: string;
@@ -258,7 +259,11 @@ export async function loadTileOrFallback(baseUrl: string | null, seed: number, f
   return generateProceduralTile(seed);
 }
 
-/** Bilinear ground height at (x, z); clamps to the tile's edge samples. */
+/**
+ * Ground height at (x, z), clamped to the tile's edge samples. The ground is triangles, not a bilinear patch: each cell is split
+ * by the diagonal from its south-west corner to its north-east one, which is how both the drawn ground mesh and the physics
+ * heightfield are cut, so this is the height people and cars stand at (a bilinear patch is up to a metre off on a twisted cell).
+ */
 export function heightAt(tile: Pick<TileData, 'manifest' | 'heights'>, x: number, z: number): number {
   const { cols, rows, cellSize, minX, minZ } = tile.manifest.heightmap;
   const fx = Math.min(cols - 1, Math.max(0, (x - minX) / cellSize));
@@ -268,9 +273,11 @@ export function heightAt(tile: Pick<TileData, 'manifest' | 'heights'>, x: number
   const tx = fx - c0;
   const tz = fz - r0;
   const h = tile.heights;
-  const a = h[r0 * cols + c0];
-  const b = h[r0 * cols + c0 + 1];
-  const c = h[(r0 + 1) * cols + c0];
-  const d = h[(r0 + 1) * cols + c0 + 1];
-  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+  // north-west, north-east, south-west, south-east (south is +z)
+  const nw = h[r0 * cols + c0];
+  const ne = h[r0 * cols + c0 + 1];
+  const sw = h[(r0 + 1) * cols + c0];
+  const se = h[(r0 + 1) * cols + c0 + 1];
+  if (tx + tz <= 1) return nw + (ne - nw) * tx + (sw - nw) * tz;
+  return se + (sw - se) * (1 - tx) + (ne - se) * (1 - tz);
 }

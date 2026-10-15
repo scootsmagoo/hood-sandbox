@@ -15,11 +15,29 @@ export interface CrimeDef {
   witnessRadius: number;
   /** How far a witness hears it, m, with no line needed (gunfire). Absent: it makes no sound. */
   hearRadius?: number;
+  /** What a reported crime adds to the run of heat: repeated crimes reach heat 2 (`LawRules.escalation`). */
+  points: number;
+  /** Counts toward the violence total that reaches heat 3. */
+  violent: boolean;
 }
 
 export interface LawRules {
-  /** A witness calls it in this long after the crime, s (min, max). */
+  /** A witness who calls does so this long after the crime, s (min, max). */
   callDelayS: [number, number];
+  /** The share of witnesses who saw it that call (the rest only run), of those who only heard it, and of the victim. */
+  callChance: number;
+  heardCallChance: number;
+  victimCallChance: number;
+  /** A witness who decided not to call is not asked again for this long, s. */
+  declineMemoryS: number;
+  /** A caller hangs up: `lostSightS` seconds without a clear line to the culprit within `sightRangeM` (those who only heard are exempt), or farther than `runAwayM` from the scene. The victim is slower to give up (`victimLostSightS`), ignores the distance, and gets the call in even if they run off the map. */
+  giveUp: { lostSightS: number; victimLostSightS: number; sightRangeM: number; runAwayM: number };
+  /** Heat by accumulated points over a run of heat: all points reach heat 2, violent points reach heat 3. */
+  escalation: { heat2Points: number; heat3ViolencePoints: number };
+  /** Hollow stars (nobody has seen you yet) do not start to cool until this long after the last report, s: the police need time to arrive. */
+  reportedHoldS: number;
+  /** ...and while a car is still on its way to the scene, they hold up to this long, s. */
+  reportedMaxHoldS: number;
   /** The same crime against the same victim inside this window is one crime, s. */
   dedupeS: number;
   /** After the last sighting the stars keep showing solid for this long, s. */
@@ -41,7 +59,7 @@ const need = (cond: unknown, msg: string): void => {
 };
 
 export function parseCrimes(json: unknown): { crimes: Record<CrimeId, CrimeDef>; rules: LawRules } {
-  const j = json as { crimes?: Record<string, CrimeDef>; rules?: Partial<LawRules> };
+  const j = json as { crimes?: Record<string, Omit<CrimeDef, 'points' | 'violent'> & { points?: number; violent?: boolean }>; rules?: Partial<LawRules> };
   need(j?.crimes && typeof j.crimes === 'object', 'no crimes');
   const crimes = {} as Record<CrimeId, CrimeDef>;
   for (const [id, c] of Object.entries(j.crimes!)) {
@@ -49,15 +67,26 @@ export function parseCrimes(json: unknown): { crimes: Record<CrimeId, CrimeDef>;
     need(Number.isFinite(c.heat) && c.heat >= 1 && c.heat <= 6, `${id}: heat must be 1 to 6`);
     need(Number.isFinite(c.witnessRadius) && c.witnessRadius > 0, `${id}: witnessRadius must be positive`);
     need(c.hearRadius === undefined || (Number.isFinite(c.hearRadius) && c.hearRadius >= 0), `${id}: hearRadius must be zero or positive`);
-    crimes[id as CrimeId] = { severity: c.severity, heat: c.heat, witnessRadius: c.witnessRadius, ...(c.hearRadius ? { hearRadius: c.hearRadius } : {}) };
+    need(c.heat < 2 || c.severity >= 3, `${id}: heat 2 and up needs a severity of 3 or more`);
+    need(c.heat < 3 || !!c.violent, `${id}: heat 3 and up needs a violent crime`);
+    need(c.points === undefined || (Number.isFinite(c.points) && c.points >= 0), `${id}: points must be zero or positive`);
+    crimes[id as CrimeId] = { severity: c.severity, heat: c.heat, witnessRadius: c.witnessRadius, points: c.points ?? c.severity, violent: !!c.violent, ...(c.hearRadius ? { hearRadius: c.hearRadius } : {}) };
   }
   const r = j.rules ?? {};
   const rules: LawRules = {
-    callDelayS: r.callDelayS ?? [3, 8],
+    callDelayS: r.callDelayS ?? [8, 20],
+    callChance: r.callChance ?? 0.6,
+    heardCallChance: r.heardCallChance ?? 0.45,
+    victimCallChance: r.victimCallChance ?? 0.85,
+    declineMemoryS: r.declineMemoryS ?? 25,
+    giveUp: { lostSightS: 5, victimLostSightS: 20, sightRangeM: 70, runAwayM: 90, ...(r.giveUp ?? {}) },
+    escalation: { heat2Points: 5, heat3ViolencePoints: 7, ...(r.escalation ?? {}) },
+    reportedHoldS: r.reportedHoldS ?? 30,
+    reportedMaxHoldS: r.reportedMaxHoldS ?? 90,
     dedupeS: r.dedupeS ?? 6,
     seenGraceS: r.seenGraceS ?? 1.5,
     // Heat 4 and up is hard to shake: the cooldown is long, and `police.json` slows it while the search is still on top of you.
-    cooldownS: r.cooldownS ?? [0, 40, 55, 70, 100, 125, 150],
+    cooldownS: r.cooldownS ?? [0, 20, 35, 70, 100, 125, 150],
     visionRangeM: r.visionRangeM ?? 75,
     visionHalfAngleDeg: r.visionHalfAngleDeg ?? 65,
     closeSenseM: r.closeSenseM ?? 7,
@@ -66,6 +95,7 @@ export function parseCrimes(json: unknown): { crimes: Record<CrimeId, CrimeDef>;
     searchMaxM: r.searchMaxM ?? 320,
   };
   need(rules.callDelayS.length === 2 && rules.callDelayS[0] <= rules.callDelayS[1], 'callDelayS must be [min, max]');
+  for (const [name, p] of [['callChance', rules.callChance], ['heardCallChance', rules.heardCallChance], ['victimCallChance', rules.victimCallChance]] as const) need(p >= 0 && p <= 1, `${name} must be 0 to 1`);
   need(rules.cooldownS.length >= 7, 'cooldownS needs an entry for each heat level 0 to 6');
   need(rules.searchStartM.length >= 7 && rules.searchGrowMps.length >= 7, 'searchStartM and searchGrowMps need an entry for each heat level 0 to 6');
   return { crimes, rules };
@@ -120,6 +150,9 @@ export interface DispatchLevel {
   spawnIntervalS: number;
   unitsPerSpawn: number;
   loadout: string;
+  /** Optional: where this row's units appear (m from the player), overriding `police.json` dispatch for the heat level. */
+  spawnMinM?: number;
+  spawnMaxM?: number;
 }
 
 export interface LawData {

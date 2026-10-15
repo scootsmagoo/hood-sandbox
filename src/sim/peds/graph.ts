@@ -82,6 +82,11 @@ export class WalkGraph {
   /** All edges by every cell they touch, for nearest-edge queries. */
   private readonly touch = new Map<number, number[]>();
   readonly totalLength: number;
+  /**
+   * An edge a person can really walk (the walkers' planner sets it from what the physics world says is in the way: a low
+   * deck, a pole, a cliff). Routing and escape routes leave the others out. Null: every edge is open.
+   */
+  passable: ((edge: number) => boolean) | null = null;
 
   constructor(data: PathsData) {
     this.nodeCount = data.nodes.length;
@@ -228,6 +233,7 @@ export class WalkGraph {
         const e = this.adjEdges[k];
         const m = this.other(e, n);
         if (closed.has(m)) continue;
+        if (this.passable && !this.passable(e)) continue;
         const kind = this.kindOf(e);
         const cost = this.len[e] * (kind === 'crossing' ? 1.8 : kind === 'steps' ? 1.2 : 1) + (kind === 'crossing' ? 6 : 0);
         const ng = gn + cost;
@@ -284,6 +290,7 @@ export class WalkGraph {
         const e = this.adjEdges[k];
         const m = this.other(e, n);
         if (closed.has(m)) continue;
+        if (this.passable && !this.passable(e)) continue;
         const kind = this.kindOf(e);
         const ng = gn + this.len[e] * (kind === 'crossing' ? 4 : kind === 'steps' ? 1.2 : 1) + (kind === 'crossing' ? 10 : 0);
         if (ng > maxCost) continue;
@@ -306,6 +313,30 @@ export class WalkGraph {
       path.push(c);
     }
     return path.reverse();
+  }
+
+  /**
+   * Whether `need` metres of walkable edge can be walked from edge `e` (breadth first over the passable edges). A person put on a
+   * pocket of the network that is cut off by an impassable bit would pace up and down it for ever.
+   */
+  hasRoom(e: number, need = 60): boolean {
+    const seen = new Set<number>([e]);
+    const queue = [e];
+    let total = 0;
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i];
+      total += this.len[cur];
+      if (total >= need) return true;
+      for (const n of [this.ea[cur], this.eb[cur]]) {
+        for (let k = this.adjStart[n]; k < this.adjStart[n + 1]; k++) {
+          const f = this.adjEdges[k];
+          if (seen.has(f) || (this.passable && !this.passable(f))) continue;
+          seen.add(f);
+          queue.push(f);
+        }
+      }
+    }
+    return false;
   }
 
   /** The edge joining two nodes, or -1. */

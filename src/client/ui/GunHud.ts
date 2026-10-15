@@ -95,7 +95,7 @@ export class GunHud implements System {
     // Crosshair: only while the gun is up. Its gap is the spread in pixels.
     this.cross.classList.toggle('on', a.active);
     if (a.active) {
-      const h = g.canvas.clientHeight || window.innerHeight;
+      const h = g.viewH;
       const gap = Math.max(5, Math.round((Math.tan((a.spreadDeg * Math.PI) / 180) * h * 0.5) / Math.tan((g.camera.fov * Math.PI) / 360)));
       if (gap !== this.cache.gap) {
         this.cache.gap = gap;
@@ -108,8 +108,8 @@ export class GunHud implements System {
     const target = a.active && a.lock && g.input.device !== 'keyboard' ? v.entities.get(a.lock) : undefined;
     if (target) {
       this.v.set(target.x, target.y + 1.2, target.z).project(g.camera);
-      const cw = g.canvas.clientWidth || window.innerWidth;
-      const ch = g.canvas.clientHeight || window.innerHeight;
+      const cw = g.viewW;
+      const ch = g.viewH;
       if (this.v.z < 1) {
         this.lock.style.transform = `translate(${((this.v.x * 0.5 + 0.5) * cw).toFixed(1)}px, ${((-this.v.y * 0.5 + 0.5) * ch).toFixed(1)}px) rotate(45deg)`;
         this.lock.classList.add('on');

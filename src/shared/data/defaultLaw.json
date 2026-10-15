@@ -17,9 +17,9 @@
   "areas": [{ "agency": "police", "default": true }],
   "dispatch": {
     "police": [
-      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "pistol" },
-      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 15, "unitsPerSpawn": 1, "loadout": "pistol" },
-      { "heat": 3, "maxUnits": 3, "spawnIntervalS": 12, "unitsPerSpawn": 1, "loadout": "shotgun" }
+      { "heat": 1, "maxUnits": 1, "spawnIntervalS": 40, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 2, "maxUnits": 2, "spawnIntervalS": 30, "unitsPerSpawn": 1, "loadout": "pistol" },
+      { "heat": 3, "maxUnits": 3, "spawnIntervalS": 20, "unitsPerSpawn": 1, "loadout": "shotgun" }
     ]
   }
 }

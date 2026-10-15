@@ -125,3 +125,11 @@ export function runLog(sim: Simulation, ticks: number, c: InputCommand | (() => 
 }
 
 export const ofType = <T extends SimEvent['type']>(events: readonly SimEvent[], type: T) => events.filter((e): e is Extract<SimEvent, { type: T }> => e.type === type);
+
+/** Every witness calls, 3 to 8 s after the crime: the old, simple rules, for tests about something other than who calls and when. */
+export function everyoneCalls(sim: Simulation): Simulation {
+  const r = sim.law.rules;
+  r.callChance = r.heardCallChance = r.victimCallChance = 1;
+  r.callDelayS = [3, 8];
+  return sim;
+}

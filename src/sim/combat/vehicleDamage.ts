@@ -8,8 +8,12 @@ import type { HandlingData } from '../../shared/handling';
 export const WRECK = {
   /** A step that changes the car's velocity by less than this (m/s) is not a crash. */
   minDv: 2.0,
-  /** Body damage per (m/s)^2 of velocity change above the minimum: damage follows the energy of the hit. */
-  bodyPerDv2: 1.5,
+  /**
+   * Body damage per (m/s)^2 of velocity change above the minimum: damage follows the energy of the hit. (A crash bounces back
+   * at about a fifth of the speed in, so the velocity change of a hit is about 1.2 times the impact speed: a head-on into a
+   * wall smokes the engine from about 60 km/h, kills it from about 80 and can set it alight from about 90.)
+   */
+  bodyPerDv2: 1.05,
   /** The engine takes a bit more than the body from a head-on. */
   engineBoost: 1.3,
   /** Share of that damage the engine takes: head-on, from the side, from behind. */

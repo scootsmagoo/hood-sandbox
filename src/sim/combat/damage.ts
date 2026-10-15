@@ -28,6 +28,9 @@ export const COMBAT = {
   swingCooldown: 0.55,
   /** Cars hurt peds above this closing speed, m/s. */
   carMinSpeed: 3,
+  /** A car closing on a ped faster than this (m/s) knocks them off their feet into a ragdoll; slower than that, from `carStumbleSpeed`, they stagger and catch their balance. */
+  carRagdollSpeed: 4,
+  carStumbleSpeed: 1.2,
   /** Damage per m/s above the minimum. */
   carDamagePerMps: 8.5,
   /** Falls hurt above this landing speed, m/s, per m/s above it. */
@@ -118,13 +121,17 @@ export function killPed(sim: Simulation, ped: PedEntity, sourceId: EntityId, kin
   ped.input.sprint = ped.input.jump = false;
   if (ped.brain) ped.brain.enter('calm');
   if (ped.vehicleId) sim.ejectPed(ped);
+  ped.stumbleT = 0;
+  // The body goes limp: a ragdoll with whatever momentum it had (the blow that killed adds its own through `launch`).
+  if (!ped.vehicleId && !ped.busy) sim.ragdolls.knock(ped, 0, 0, 0);
   const c = ped.controller;
   sim.emit({ type: 'ped:dead', tick: sim.tick, pedId: ped.id, sourceId, kind, x: c.x, y: c.y, z: c.z });
 }
 
 /**
- * Knocks a ped to the ground for `seconds`, shoved by (shoveX, shoveZ) m/s and kicked up by `up`.
- * A ped in a car, or in the middle of a scripted moment, is not moved. A downed ped hit again stays down longer.
+ * Knocks a ped to the ground for `seconds`, shoved by (shoveX, shoveZ) m/s and kicked up by `up`: the body becomes a
+ * ragdoll (sim/ragdoll) carrying the ped's own momentum plus the shove, and gets up once it has come to rest and the time
+ * is over. A ped in a car, or in the middle of a scripted moment, is not moved. A downed ped hit again stays down longer.
  */
 export function knockDown(sim: Simulation, ped: PedEntity, seconds: number, shoveX = 0, shoveZ = 0, up = 0) {
   if (ped.life === 'dead' || ped.vehicleId || ped.busy) return;
@@ -132,8 +139,24 @@ export function knockDown(sim: Simulation, ped: PedEntity, seconds: number, shov
   ped.life = 'downed';
   ped.downT = Math.max(ped.downT, seconds);
   ped.melee = null;
+  ped.stumbleT = 0;
   ped.input.moveX = ped.input.moveY = 0;
   ped.input.sprint = ped.input.jump = false;
-  ped.controller.launch(shoveX, up, shoveZ);
+  sim.ragdolls.knock(ped, shoveX, up, shoveZ);
   if (wasUp) sim.emit({ type: 'ped:down', tick: sim.tick, pedId: ped.id, seconds });
+}
+
+/**
+ * A light knock that does not floor someone: they stagger along (dx, dz) m/s for a moment, catching their balance
+ * (a car's nudge at walking pace, a shoulder in a crowd). Their own control comes back as they steady.
+ */
+export function stumble(ped: PedEntity, dx: number, dz: number, seconds = 0.7) {
+  if (ped.life !== 'alive' || ped.vehicleId || ped.busy || ped.controller.ragdolled) return;
+  ped.stumbleT = Math.max(ped.stumbleT, seconds);
+  ped.controller.launch(dx, 0, dz);
+}
+
+/** Blast speed (m/s, away from the centre and up) at a share `f` of the full blast: close up a body is thrown several metres. */
+export function blastThrow(f: number): { out: number; up: number } {
+  return { out: 4 + 11 * f, up: 2 + 7 * f };
 }

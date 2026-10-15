@@ -102,6 +102,22 @@ describe('stick and key shaping', () => {
     expect(0.5 - cross).toBeGreaterThan(1 - back);
   });
 
+  it('winds keyboard steering on more gently at speed, and short of full lock', () => {
+    const dt = 1 / 60;
+    let slow = 0;
+    let fast = 0;
+    for (let i = 0; i < 12; i++) {
+      slow = rampSteer(slow, 1, dt, 3);
+      fast = rampSteer(fast, 1, dt, 38);
+    }
+    expect(fast).toBeLessThan(slow * 0.65);
+    for (let i = 0; i < 120; i++) fast = rampSteer(fast, 1, dt, 38);
+    expect(fast).toBeGreaterThan(0.6);
+    expect(fast).toBeLessThan(0.8);
+    // letting go still centres it quickly
+    expect(rampSteer(fast, 0, dt, 38)).toBeLessThan(fast - 0.05);
+  });
+
   it('mixes keys, triggers and sticks into drive axes', () => {
     const none = { x: 0, z: 0, driveY: false };
     const t0 = { throttle: 0, brake: 0 };

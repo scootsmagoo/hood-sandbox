@@ -7,7 +7,7 @@ import { COVER } from '../src/sim/combat/weapons/cover';
 import type { PedEntity, VehicleEntity } from '../src/sim/entities';
 import { Simulation } from '../src/sim/Simulation';
 import { rotateVec } from '../src/shared/math';
-import { addNpc, Button, cmd, driverSim, makeSim, ofType, ped, run, runLog } from './helpers';
+import { addNpc, Button, cmd, driverSim, everyoneCalls, makeSim, ofType, ped, run, runLog } from './helpers';
 import { pedSim } from './pedHelpers';
 import { crossroads, lanesFor, laneOf, stepAll, trafficSim } from './trafficHelpers';
 import { boxTile } from './weaponHelpers';
@@ -16,7 +16,7 @@ const view = (over: Record<string, number> = {}) => ({ Yaw: Math.PI, Pitch: 0, C
 const awayCar = (sim: Simulation) => (sim.registry.get(sim.vehicleId) as VehicleEntity).car.teleport(400, 0.5, 400, 0);
 
 async function arena(boxes: Parameters<typeof boxTile>[0] = []) {
-  const sim = await makeSim(boxTile(boxes));
+  const sim = everyoneCalls(await makeSim(boxTile(boxes)));
   awayCar(sim);
   const p = ped(sim);
   p.controller.teleport(0, 0, 0, 0);

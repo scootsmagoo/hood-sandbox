@@ -19,6 +19,8 @@ export interface AmbientState {
   node: number;
   prev: number;
   next: number;
+  /** The edge being walked (from `node` or `prev` to `next`), or -1: remembered so the lane can be kept to where the edge is clear. */
+  edge: number;
   /** A planned route (nodes) and how far along it. A runner's route is an escape (`graph.escapeRoute`), replanned as it goes. */
   route: number[] | null;
   routeI: number;
@@ -72,7 +74,7 @@ export interface AmbientState {
 export function newAmbientState(group: string, speed: number, lane: number, tick: number): AmbientState {
   return {
     group, speed, lane, mode: 'walk', persistent: false,
-    node: -1, prev: -1, next: -1, route: null, routeI: 0, fleeT: 0, heading: 0,
+    node: -1, prev: -1, next: -1, edge: -1, route: null, routeI: 0, fleeT: 0, heading: 0,
     crossAttr: -1, waitEdge: -1, waitT: 0, avoidEdge: -1,
     sc: -1, scSlot: 0, scCount: 1, scAction: 'wait', scUntil: 0, scType: null, poseT: 0,
     until: 0, faceX: 0, faceZ: 0,

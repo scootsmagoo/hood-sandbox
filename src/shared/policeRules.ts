@@ -14,6 +14,8 @@ export interface FireLoadout {
 }
 
 export interface PoliceRules {
+  /** Where the first cars appear (m from the player) and how long dispatch takes (s, min and max), by heat level 0 to 6; a spawn spot's route to the scene may be at most `routeFactorMax` times the straight line before another is tried. */
+  dispatch: { spawnMinM: number[]; spawnMaxM: number[]; delayS: [number, number][]; routeFactorMax: number };
   roles: { reassignEveryS: number; holdS: number; maxChasers: number; maxBlockers: number; flankerMinGapM: number };
   pit: {
     minHeat: number;
@@ -44,6 +46,8 @@ export interface PoliceRules {
   spikes: { minHeat: number; maxActive: number[]; intervalS: number[]; lifeS: number; lengthM: number; depthM: number; beforeRoadblockM: number; deployDistanceM: [number, number] };
   helicopter: {
     minHeat: number;
+    /** It comes this long (s, min and max) after the heat first reaches `minHeat`. */
+    delayS: [number, number];
     count: number[];
     altitudeM: [number, number];
     speed: number;
@@ -73,11 +77,13 @@ const need = (cond: unknown, msg: string): void => {
 
 export function parsePoliceRules(json: unknown): PoliceRules {
   const j = json as PoliceRules;
-  for (const k of ['roles', 'pit', 'ram', 'roadblock', 'spikes', 'helicopter', 'fire', 'cooldown'] as const) need(j && typeof j[k] === 'object', `missing "${k}"`);
+  for (const k of ['dispatch', 'roles', 'pit', 'ram', 'roadblock', 'spikes', 'helicopter', 'fire', 'cooldown'] as const) need(j && typeof j[k] === 'object', `missing "${k}"`);
   for (const [name, arr] of [
     ['roadblock.maxActive', j.roadblock.maxActive], ['roadblock.intervalS', j.roadblock.intervalS], ['roadblock.gapChance', j.roadblock.gapChance],
     ['spikes.maxActive', j.spikes.maxActive], ['spikes.intervalS', j.spikes.intervalS], ['helicopter.count', j.helicopter.count],
   ] as const) need(Array.isArray(arr) && arr.length >= 7, `${name} needs an entry for each heat level 0 to 6`);
+  for (const [name, arr] of [['dispatch.spawnMinM', j.dispatch.spawnMinM], ['dispatch.spawnMaxM', j.dispatch.spawnMaxM], ['dispatch.delayS', j.dispatch.delayS]] as const) need(Array.isArray(arr) && arr.length >= 7, `${name} needs an entry for each heat level 0 to 6`);
+  need(j.helicopter.delayS.length === 2 && j.helicopter.delayS[0] <= j.helicopter.delayS[1], 'helicopter.delayS must be [min, max]');
   need(j.roadblock.cars[0] >= 1 && j.roadblock.cars[1] >= j.roadblock.cars[0], 'roadblock.cars must be [min, max]');
   need(j.helicopter.altitudeM[0] > 0 && j.helicopter.altitudeM[1] >= j.helicopter.altitudeM[0], 'helicopter.altitudeM must be [min, max]');
   for (const [id, l] of Object.entries(j.fire.loadouts)) need(l.rangeM > 0 && l.intervalS > 0 && l.burst[1] >= l.burst[0], `fire.loadouts.${id} is malformed`);

@@ -9,11 +9,12 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseLanes, type LaneJunctionData } from '../../shared/lanes';
 import { SIM_DT } from '../../shared/protocol';
+import { SIGNAL_ARM, SIGNAL_BOXES, SIGNAL_POLE_H, signalHeads } from '../../shared/props';
 import { legState, type SignalState } from '../../shared/signals';
 import type { Game, System } from '../Game';
 
-const POLE_H = 5.4;
-const ARM = 2.6;
+const POLE_H = SIGNAL_POLE_H;
+const ARM = SIGNAL_ARM;
 
 const part = (w: number, h: number, d: number, x: number, y: number, z: number, rgb: number): THREE.BufferGeometry => {
   const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z);
@@ -28,14 +29,8 @@ const part = (w: number, h: number, d: number, x: number, y: number, z: number, 
 
 /** Local frame: +Z looks at the approaching cars, the pole stands at the origin, the lane is toward -X. */
 function bodyGeometry(): THREE.BufferGeometry {
-  const grey = 0x3b3f44;
-  const dark = 0x17191b;
-  // the pole, its arm, and the lamp housing hanging from the end of the arm: 36 triangles a head
-  return mergeGeometries([
-    part(0.2, POLE_H, 0.2, 0, POLE_H / 2, 0, grey),
-    part(ARM, 0.12, 0.12, -ARM / 2, POLE_H - 0.3, 0, grey),
-    part(0.44, 1.18, 0.34, -ARM, POLE_H - 0.3, 0.05, dark),
-  ])!;
+  // the pole, its arm, and the lamp housing hanging from the end of the arm (36 triangles a head): the boxes the sim makes solid
+  return mergeGeometries(SIGNAL_BOXES.map((b) => part(b.w, b.h, b.d, b.x, b.y, b.z, b.rgb)))!;
 }
 
 /** One lamp: a flat 8-sided disc facing +Z. */
@@ -88,11 +83,12 @@ export class SignalHeads implements System {
   ) {
     this.group.name = 'signal-heads';
     const list: { j: number; leg: number; x: number; y: number; z: number; yaw: number }[] = [];
-    junctions.forEach((j) => {
-      if (j.control !== 'signals' || !j.legs || !j.heads) return;
-      const ji = this.junctions.push(j) - 1;
-      for (const h of j.heads) list.push({ j: ji, leg: h.leg, x: h.x, y: h.y, z: h.z, yaw: h.yaw });
-    });
+    const index = new Map<LaneJunctionData, number>();
+    for (const h of signalHeads(junctions)) {
+      let ji = index.get(h.junction);
+      if (ji === undefined) index.set(h.junction, (ji = this.junctions.push(h.junction) - 1));
+      list.push({ j: ji, leg: h.leg, x: h.placement.x, y: h.placement.y, z: h.placement.z, yaw: h.placement.yaw });
+    }
     const bodyG = bodyGeometry();
     const lampG = lampGeometry();
     this.geos.push(bodyG, lampG);

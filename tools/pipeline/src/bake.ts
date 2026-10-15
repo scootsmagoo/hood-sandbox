@@ -1,7 +1,7 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadTileConfig, type TileConfig } from './config.js';
-import { simplifyRing, signedArea, type V2 } from './geo.js';
+import { signedArea, type V2 } from './geo.js';
 import { collisionBytes, heightmapBytes } from './io/binary.js';
 import { encodeGlb, type GlbPart, type MaterialSpec } from './io/glb.js';
 import { MeshBuilder } from './mesh/builder.js';
@@ -12,6 +12,7 @@ import { fetchOsm, fetchOsmNodes, fetchOsmPois } from './sources/osm.js';
 import { fetchOvertureBuildings, type OvertureBuilding } from './sources/overture.js';
 import { buildBuildings, styleBuilding } from './world/buildings.js';
 import { clipBuildingsToRoads } from './world/clip.js';
+import { collisionRings } from './world/collisionRings.js';
 import { parseNodeTags } from './world/nodes.js';
 import { parseOsm } from './world/osm.js';
 import { buildRoads, planRoads } from './world/roads.js';
@@ -146,6 +147,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const glassWall = new MeshBuilder();
   const collision = new MeshBuilder();
   let skipped = 0;
+  let holed = 0;
   const kept: V2[][][] = [];
   for (const bd of buildings) {
     const outer = bd.rings[0];
@@ -166,15 +168,18 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       roofColor: style.roof,
     });
     kept.push(bd.rings);
-    const simple = simplifyRing(outer, 0.4);
+    // The collision footprint is the drawn one, courtyards included (a hole left out would be an invisible solid in a
+    // courtyard and leave its inner walls to walk through), simplified a little so the trimesh stays small.
+    const solid = collisionRings(bd.rings);
+    if (solid.length > 1) holed++;
     const scratchRoof = new MeshBuilder();
-    extrudeFootprint([simple], { baseY: minY - 0.3, topY, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
+    extrudeFootprint(solid, { baseY: minY - 0.3, topY, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
     const base = collision.vertexCount;
     for (let i = 0; i < scratchRoof.vertexCount; i++) collision.vertex(scratchRoof.positions[i * 3], scratchRoof.positions[i * 3 + 1], scratchRoof.positions[i * 3 + 2], 0, 1, 0);
     for (const i of scratchRoof.indices) collision.indices.push(base + i);
   }
   const buildingCollisionTris = collision.triangleCount;
-  log(`buildings: ${kept.length} (${skipped} tiny skipped), heights ${JSON.stringify(bstats.heightSources)}`);
+  log(`buildings: ${kept.length} (${skipped} tiny skipped, ${holed} with courtyards), heights ${JSON.stringify(bstats.heightSources)}`);
 
   // collision: buildings then elevated deck slabs and piers
   const cbase = collision.vertexCount;
@@ -255,7 +260,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       rows: grid.rows,
       groundLevels: [{ lod: 0, step: cfg.groundMeshStep }, { lod: 1, step: l1Step, lower: GROUND_LOD1.lower, skirt: GROUND_LOD1.skirt }],
     },
-    collision: { file: 'collision.bin', vertexCount: collision.vertexCount, indexCount: collision.indices.length },
+    collision: { file: 'collision.bin', vertexCount: collision.vertexCount, indexCount: collision.indices.length, buildingTriangles: buildingCollisionTris },
     roads: 'roads.json',
     junctions: 'junctions.json',
     lanes: 'lanes.json',

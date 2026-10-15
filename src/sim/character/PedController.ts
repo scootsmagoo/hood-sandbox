@@ -18,6 +18,12 @@ export interface PedInput {
 
 const wish: WishVelocity = { x: 0, z: 0, magnitude: 0 };
 
+/** How far (x, z) is from the nearest wall, m; negative inside a building. The cheap move uses it to keep out of walls. */
+export type WallClearance = (x: number, z: number, y: number) => number;
+
+/** A gliding person keeps this far from a wall (a capsule's radius, a little under). */
+const GLIDE_CLEAR = PED.radius - 0.03;
+
 export class PedController {
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
@@ -121,10 +127,11 @@ export class PedController {
 
   /**
    * A cheap step for a pedestrian nobody is near: the same velocity model, but no character
-   * controller queries. The position follows `groundY` (the walk network is clear of walls by
-   * construction). Switch back to `step` and the capsule snaps to the real ground within a frame.
+   * controller queries. The position follows `groundY`. With a `clearance` function the move is kept out of walls
+   * (it slides along an axis, or stops, rather than step to a spot nearer a wall than a capsule's radius); without
+   * one it trusts the walk network to be clear. Switch back to `step` and the capsule snaps to the real ground within a frame.
    */
-  glide(dt: number, input: PedInput, groundY: number) {
+  glide(dt: number, input: PedInput, groundY: number, clearance?: WallClearance) {
     if (!this.enabled) return;
     wishVelocity(input.moveX, input.moveY, input.camYaw, false, wish);
     approachVelocity(this.vel, wish.x, wish.z, true, dt);
@@ -133,11 +140,27 @@ export class PedController {
     this.ext.x *= fade;
     this.ext.z *= fade;
     if (Math.abs(this.ext.x) + Math.abs(this.ext.z) < 0.05) this.ext.x = this.ext.z = 0;
-    const mx = (this.vel.x + this.ext.x) * dt, mz = (this.vel.z + this.ext.z) * dt;
+    let mx = (this.vel.x + this.ext.x) * dt, mz = (this.vel.z + this.ext.z) * dt;
     const dy = groundY - this.y;
     this.grounded = true;
     this.vy = 0;
     if (mx === 0 && mz === 0 && Math.abs(dy) < 0.02) return;
+    if (clearance && (mx !== 0 || mz !== 0)) {
+      const here = clearance(this.x, this.z, this.y);
+      const ok = (x: number, z: number) => {
+        const c = clearance(x, z, this.y);
+        return c >= GLIDE_CLEAR || c >= here;
+      };
+      if (!ok(this.x + mx, this.z + mz)) {
+        // slide along the open axis, or stand
+        if (mx !== 0 && ok(this.x + mx, this.z)) mz = 0;
+        else if (mz !== 0 && ok(this.x, this.z + mz)) mx = 0;
+        else {
+          mx = mz = 0;
+          this.vel.x = this.vel.z = this.ext.x = this.ext.z = 0;
+        }
+      }
+    }
     this.x += mx;
     this.z += mz;
     this.y += dy * Math.min(1, dt * 8);
@@ -149,8 +172,38 @@ export class PedController {
     return Math.hypot(this.vel.x, this.vel.z);
   }
 
+  /** A ragdoll has the body (sim/ragdoll): the capsule is out of the world and a throw goes to the ragdoll. */
+  ragdolled = false;
+  private ragdollPush: ((vx: number, vy: number, vz: number) => void) | null = null;
+
+  /** Hands the body to a ragdoll: the capsule leaves the world (like sitting in a car) and `launch` pushes the ragdoll instead. */
+  enterRagdoll(push: (vx: number, vy: number, vz: number) => void) {
+    this.ragdolled = true;
+    this.ragdollPush = push;
+    this.setEnabled(false);
+  }
+
+  /** While a ragdoll: the feet follow the body. */
+  followRagdoll(x: number, y: number, z: number) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }
+
+  /** The ragdoll has got up (or been let go): the capsule comes back standing at the feet position. */
+  exitRagdoll(x: number, y: number, z: number, yaw: number) {
+    this.ragdolled = false;
+    this.ragdollPush = null;
+    this.setEnabled(true);
+    this.teleport(x, y, z, yaw);
+  }
+
   /** Throws the character: a horizontal shove that fades, and an upward kick. */
   launch(vx: number, vy: number, vz: number) {
+    if (this.ragdolled) {
+      this.ragdollPush?.(vx, vy, vz);
+      return;
+    }
     this.ext.x = vx;
     this.ext.z = vz;
     if (vy > 0) {

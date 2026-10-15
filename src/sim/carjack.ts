@@ -12,6 +12,7 @@ import { carjackPhase, doorGeometry, SEAT_DROP, type CarjackPhase } from '../sha
 import { lerp, rotateVec, yawFromDir, wrapAngle } from '../shared/math';
 import { GROUPS } from './physics/rapier';
 import type { PedEntity, VehicleEntity } from './entities';
+import { findExitSpot } from './exit';
 import type { Reaction } from './npc/brain';
 import type { Simulation } from './Simulation';
 
@@ -74,9 +75,11 @@ export function startCarjack(sim: Simulation, jacker: PedEntity, veh: VehicleEnt
   const g = doorGeometry(veh.car.h);
   const pose = veh.car.pose();
   const land = rotateVec(pose.q, g.eject.x, 0, g.eject.z);
-  const lx = pose.x + land.x;
-  const lz = pose.z + land.z;
-  const ly = floorY(sim, lx, pose.y + 1.2, lz);
+  // The driver lands at the door: or, if that is a wall or a pole (the car is parked against one), beside the car somewhere clear.
+  const spot = findExitSpot(sim, veh, { x: pose.x + land.x, z: pose.z + land.z });
+  const lx = spot.x;
+  const lz = spot.z;
+  const ly = spot.y;
   const c = jacker.controller;
   const st: CarjackState = {
     jackerId: jacker.id,

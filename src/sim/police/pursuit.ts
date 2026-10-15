@@ -108,7 +108,11 @@ export interface GovernorOptions {
   horizon: number;
 }
 
-export const GOVERNOR: Readonly<GovernorOptions> = { cruise: 16, lateral: 5.5, brake: 7, minCorner: 3.5, stopAtEnd: false, horizon: 70 };
+/**
+ * Planning numbers for heavy cars on GTA IV-style tyres (about 0.85 g of grip, 0.9 g of brakes, a rack that slows at speed):
+ * corners at about half the grip and brakes at two thirds of the brakes, so a car that is late on the wheel still makes the turn.
+ */
+export const GOVERNOR: Readonly<GovernorOptions> = { cruise: 16, lateral: 4.2, brake: 5.5, minCorner: 3.5, stopAtEnd: false, horizon: 80 };
 
 /** Turn per metre (1/m) at path point k, over a span of about `span` metres either side. */
 function curvatureAt(f: PathFollower, k: number, span = 4): number {

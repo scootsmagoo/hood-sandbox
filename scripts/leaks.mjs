@@ -18,6 +18,8 @@
  *                (tracers, flashes, puffs, sparks, blood, bullet holes, the gunshot sounds): the pooled effects must not grow
  *   police   20  a helicopter and a spike strip appear (heat 3, a strip laid) and are taken away: their models, beam and glow are made and
  *                disposed with the entities. Needs the sim on the main thread: `--query transport=loopback`.
+ *   ragdoll  20  eight people are thrown (killed or knocked down), drawn as ragdolls, then removed: the sim's bodies and joints and the
+ *                client's pooled ragdoll figures must not grow. Needs the sim on the main thread: `--query transport=loopback`.
  * Counted after each cycle: JS heap, renderer geometries, textures, programs, materials and objects in
  * the scene, entities in the client's view, DOM nodes and event listeners (CDP), and the whole
  * agent cluster's memory in MB including the sim worker (`measureUserAgentSpecificMemory`, when the
@@ -36,7 +38,7 @@ const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
 const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire').split(',').filter(Boolean);
-const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20 };
+const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20 };
 const WARM = 2;
 /** Longest a single cycle may take before it is counted as stuck. */
 const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
@@ -166,6 +168,39 @@ const ACTIVITIES = {
       await window.__h.sleep(400);
     });
   },
+  /** Eight people thrown round the player and removed again: ragdoll bodies in the sim, ragdoll figures in the client. */
+  async ragdoll() {
+    const counts = await page.evaluate(async () => {
+      const S = window.__hood.game.transport.host?.simulation;
+      if (!S) throw new Error('the ragdoll phase needs the sim on the main thread: --query transport=loopback');
+      const p = S.playerPosition();
+      const ids = [];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const n = S.addPed(p.x + Math.sin(a) * 5, p.y + 0.1, p.z + Math.cos(a) * 5, a, 1 + (i % 5), true);
+        n.brain.enter('idle');
+        ids.push(n.id);
+      }
+      await window.__h.sleep(200);
+      for (const id of ids) {
+        const n = S.registry.get(id);
+        n.controller.launch(Math.sin(id) * 3, 4, Math.cos(id) * 3);
+        n.health = 1;
+        n.life = 'alive';
+        n.downT = 0;
+        // half are killed, half knocked down (and some of those get up again)
+        if (id % 2) S.ragdolls.knock(n, Math.sin(id) * 4, 4, Math.cos(id) * 4);
+        else n.controller.launch(0, 0, 0), S.ragdolls.knock(n, 0, 5, 3), (n.life = 'dead');
+      }
+      await window.__h.sleep(1500);
+      const active = S.ragdolls.activeCount;
+      for (const id of ids) S.despawn(id);
+      await window.__h.sleep(400);
+      return { active, left: S.ragdolls.count, bodies: S.physics.world.bodies.len(), joints: S.physics.world.impulseJoints.len() };
+    });
+    if (counts.left !== 0) throw new Error(`ragdolls left behind: ${counts.left}`);
+    ragdollWorld.push(counts);
+  },
   async drive() {
     await page.evaluate(async () => {
       const b = window.__h.bot;
@@ -182,7 +217,9 @@ const ACTIVITIES = {
 // `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
 const FROZEN = { pedBudget: 0, traffic: 0 };
 const LIVE = { pedBudget: 40, traffic: 0.75 };
-const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN };
+const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN };
+/** The ragdoll phase's physics world after each cycle: its bodies and joints must come back to the same count. */
+const ragdollWorld = [];
 const setPopulation = (c) => page.evaluate((c) => window.__hood.game.transport.config?.(c), c);
 let population = null;
 const results = [];
@@ -236,6 +273,12 @@ for (const phase of phases) {
     if (first.totalMB && last.totalMB && last.totalMB - first.totalMB > Math.max(25, first.totalMB * 0.15) && last.totalMB > mid.totalMB) grew.push(`total memory +${(last.totalMB - first.totalMB).toFixed(0)} MB`);
   } else grew.push('too few samples (crashed?)');
   if (phase === 'crowd') await setPopulation(LIVE);
+  if (phase === 'ragdoll' && ragdollWorld.length >= 2) {
+    // the physics world: the same bodies and joints after every cycle once the ragdolls are gone
+    const a = ragdollWorld[0], b = ragdollWorld[ragdollWorld.length - 1];
+    console.log(`  ragdolls active at the peak ${Math.max(...ragdollWorld.map((r) => r.active))} · bodies ${a.bodies} -> ${b.bodies} · joints ${a.joints} -> ${b.joints}`);
+    if (b.joints > a.joints || b.bodies > a.bodies + 4) grew.push(`physics bodies ${a.bodies} -> ${b.bodies}, joints ${a.joints} -> ${b.joints}`);
+  }
   results.push({ phase, cycles: n, first, last, grew });
   console.log(`  ${grew.length ? 'GROWTH: ' + grew.join(', ') : 'flat'}`);
 }

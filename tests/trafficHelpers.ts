@@ -36,7 +36,10 @@ export function lanesFor(roads: RoadInput[], junctions: JunctionsInput = { junct
 }
 
 export function laneTile(lanes: LanesData): TileData {
-  return { ...flatTile(), lanes };
+  // The fixtures' stop lines are laid out at the junction's middle, so the signal heads generated from them would stand (solid) in the
+  // road. Real tiles put them on the kerb; these tests are about the cars, not the poles.
+  const bare = { ...lanes, junctions: lanes.junctions.map(({ heads: _heads, ...j }) => j) };
+  return { ...flatTile(), lanes: bare };
 }
 
 export async function trafficSim(lanes: LanesData, opts: { traffic?: number; seed?: number; clockMinutes?: number } = {}): Promise<Simulation> {

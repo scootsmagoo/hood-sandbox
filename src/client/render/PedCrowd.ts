@@ -215,6 +215,21 @@ export class PedCrowd {
     this.limb(m.arms, 2 * i + 1, -0.27, 1.48, j.armR, j.armRz);
   }
 
+  /** Hides one person's figure this frame (their body is drawn as a ragdoll instead). */
+  hide(id: number) {
+    const i = this.index.get(id);
+    if (i === undefined) return;
+    const m = this.meshes;
+    const a = (mesh: THREE.InstancedMesh, slot: number) => this.hidden.toArray(mesh.instanceMatrix.array as Float32Array, slot * 16);
+    a(m.torso, i);
+    a(m.head, i);
+    a(m.cap, i);
+    a(m.arms, 2 * i);
+    a(m.arms, 2 * i + 1);
+    a(m.legs, 2 * i);
+    a(m.legs, 2 * i + 1);
+  }
+
   private limb(mesh: THREE.InstancedMesh, slot: number, px: number, py: number, rx: number, rz: number) {
     this.part.multiplyMatrices(this.m0, this.t.makeTranslation(px, py, 0));
     this.tmp.makeRotationX(rx);
