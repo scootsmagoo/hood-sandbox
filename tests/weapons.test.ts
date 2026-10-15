@@ -332,6 +332,16 @@ describe('the player at the controls', () => {
     expect(b.p.gun!.lock).toBe(0);
   });
 
+  it('fires from the hip on the trigger alone: no lock-on, hip spread, and the gun still goes off', async () => {
+    const { sim } = await range();
+    const npc = addNpc(sim, 3.2, 20);
+    run(sim, 3, cmd());
+    const hip = runLog(sim, 40, () => cmd({ buttons: Button.Fire, axes: view({ AimAssist: 1 }) }));
+    expect(ofType(hip, 'weapon:fire').length).toBeGreaterThan(0);
+    expect(ped(sim).gun!.lock).toBe(0);
+    expect(ofType(hip, 'damage').some((d) => d.targetId === npc.id)).toBe(false);
+  });
+
   it('switches weapons with the slot keys and the cycle keys, and reloads on its key', async () => {
     const sim = await (await import('../src/sim/Simulation')).Simulation.create({ seed: 1, tile: boxTile([]), driver: false, parkedCars: 0, weapons: 'all' });
     const p = ped(sim);

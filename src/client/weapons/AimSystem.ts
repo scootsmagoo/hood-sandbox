@@ -10,7 +10,7 @@ import { WEAPONS, weaponByIndex, type WeaponDef } from '../../shared/weapons';
 import type { Game, System } from '../Game';
 
 export interface AimView {
-  /** Aim or fire is held. */
+  /** The aim button is held (firing alone shoots from the hip, with the camera left as it is). */
   intent: boolean;
   /** The aim camera is up: the player has a gun, wants it up, and the gun can be used from where they are. */
   active: boolean;
@@ -96,7 +96,8 @@ export class AimSystem implements System {
     a.kill = Math.max(0, a.kill - dt);
     a.strip = Math.max(0, a.strip - dt);
     a.empty = Math.max(0, a.empty - dt);
-    a.intent = input.down('aim') || input.down('fire');
+    // The aim camera comes up for the aim button only; the trigger alone fires from the hip.
+    a.intent = input.down('aim');
     if (!ped) {
       a.active = false;
       a.weapon = null;

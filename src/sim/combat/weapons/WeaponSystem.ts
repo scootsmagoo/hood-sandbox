@@ -51,7 +51,7 @@ export interface PlayerAim {
 }
 
 /** Rebuilds the player's aim from the camera angles in their command. Sets `gun.aimYaw`, `aimPitch` and `lock`. */
-export function solvePlayerAim(sim: Simulation, p: PlayerSlot, ped: PedEntity, veh: VehicleEntity | null): PlayerAim {
+export function solvePlayerAim(sim: Simulation, p: PlayerSlot, ped: PedEntity, veh: VehicleEntity | null, assisted = true): PlayerAim {
   const g = ped.gun!;
   const def = WEAPONS[g.weapon];
   const c = ped.controller;
@@ -94,7 +94,8 @@ export function solvePlayerAim(sim: Simulation, p: PlayerSlot, ped: PedEntity, v
   const dir: Vec3 = { x: dx / dl, y: dy / dl, z: dz / dl };
 
   // Soft lock-on.
-  const assist = clamp(axis(p, Axis.AimAssist), 0, 1);
+  // Only while aiming: hip fire (the trigger without the aim button) shoots where the camera looks.
+  const assist = assisted ? clamp(axis(p, Axis.AimAssist), 0, 1) : 0;
   let lock = 0;
   if (assist > 0.02) {
     const { coneDeg, pull } = lockOnFor(assist);
@@ -155,8 +156,9 @@ export function playerWeaponInput(sim: Simulation, p: PlayerSlot, ped: PedEntity
   if (edges & Button.WeaponNext) cycleWeapon(sim, ped, 1, !!veh);
   if (edges & Button.WeaponPrev) cycleWeapon(sim, ped, -1, !!veh);
 
-  // Whether the gun is up.
-  let wantAim = (held & (Button.Aim | Button.Fire)) !== 0;
+  // Whether the gun is up: aiming, or firing from the hip (the trigger alone raises the gun, not the aim camera).
+  const aimHeld = (held & Button.Aim) !== 0;
+  let wantAim = aimHeld || (held & Button.Fire) !== 0;
   if (wantAim && veh && !WEAPONS[g.weapon].driveBy) {
     // From a car only a pistol or an SMG will do: draw the last one in slot order (the SMG, when there is one).
     const alt = carried(ped).filter((w) => WEAPONS[w].driveBy).pop();
@@ -176,12 +178,12 @@ export function playerWeaponInput(sim: Simulation, p: PlayerSlot, ped: PedEntity
     g.buffer = 0;
     return tookMelee;
   }
-  const aim = solvePlayerAim(sim, p, ped, veh);
+  const aim = solvePlayerAim(sim, p, ped, veh, aimHeld);
   const def = WEAPONS[g.weapon];
   if (edges & Button.Fire) g.buffer = TRIGGER_BUFFER_S;
   const intent = def.auto ? (held & Button.Fire) !== 0 : g.buffer > 0;
   if (intent) {
-    const r = pullTrigger(sim, ped, aim, { aimed: true });
+    const r = pullTrigger(sim, ped, aim, { aimed: aimHeld });
     if (r.status === 'fired' || r.status === 'empty') g.buffer = 0;
   }
   return tookMelee;
