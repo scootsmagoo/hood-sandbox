@@ -10,7 +10,7 @@ are still served from the same site for this first device test; moving them to R
   On a fresh clone, bake it first: `cd tools/pipeline && npm run bake`. Without it the game
   falls back to the procedural ground, which is useless for a device test. The deploy scripts
   refuse to run if `dist/tiles/atlanta/m1-five-points/tile.json` is missing.
-- **Wrangler logged in.** `npx wrangler login` once per machine (opens a browser).
+- **Wrangler logged in.** `npx wrangler login` once per machine (opens a browser). Over SSH (VS Code Remote) the browser's callback to `localhost:8976` lands on the wrong machine, so use an API token instead: create one from the **Edit Cloudflare Workers** template, then save it on the dev box with `read -rs -p 'Token: ' T && printf 'CLOUDFLARE_API_TOKEN=%s\n' "$T" > ~/.hood-cloudflare.env && chmod 600 ~/.hood-cloudflare.env && unset T`. Deploy with `set -a; . ~/.hood-cloudflare.env; set +a; npm run deploy`.
 - **Account id.** If wrangler asks which account to use, or you have several, put
   `"account_id"` in `wrangler.jsonc` (the line is commented out there).
 
