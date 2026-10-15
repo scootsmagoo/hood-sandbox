@@ -1,5 +1,7 @@
 # Hood Sandbox
 
+[![CI](https://github.com/scootsmagoo/hood-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/scootsmagoo/hood-sandbox/actions/workflows/ci.yml)
+
 **A GTA-style open-world crime sandbox built from real cities, running in the web browser. The first city is metro Atlanta: Intown, Cobb, Gwinnett and the suburbs between them.**
 
 The engine is city-agnostic. Everything that makes the game *Atlanta* (the map data, districts, police agencies, crews, parody brands and landmarks) lives in a **city pack**, so other cities can be added later with the same rules. See [City packs](#city-packs).
