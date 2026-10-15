@@ -1,12 +1,12 @@
 # Graphics overhaul plan: from white boxes to stylized-realistic GTA IV / V
 
-Status: **proposal for approval**, with a working spike (`?gfx=next`) that shows the direction. Written 2026-10-15 against commit `db7cc1a`.
+Status: **P0 and the cheap parts of P2 are done and are the default look** (2026-10-15, on top of `bbba45a`); the rest is still the plan. The owner chose the reference ("make it look like GTA 4. much beyond that and it'll churn too much") and the floor ("iphone 15 pro is a reasonable cutoff"), which answers the first two decisions in section 7. Section 9 says what shipped, where it lives and what is left for the GTA IV target. The proposal below was written against commit `db7cc1a`; sections 4 and 8 describe the spike it grew from.
 
 The owner's note: "graphics are WAY off, but I assume the graphical overhaul comes later." This is that overhaul: a diagnosis, the techniques (with their cost and the tiers that get them), phased milestones, the pipeline changes they need, and a recommendation for what to do first.
 
 - The look target is the README's decision: **stylized-realistic, GTA-like proportions, procedural and CC0 textures, simplified detail**. Not photoreal; GTA IV / V's trick is strong lighting, believable materials and dense detail at street level, with a soft atmospheric haze, over simple geometry.
 - Everything must fit [docs/perf.md](perf.md): 60 fps on an M-series Mac, 30+ fps on an iPhone 15 Pro, WebGL2.
-- Pictures: `.shots/gfx-before-*.png` (today) and `.shots/gfx-after-*.png` (the spike), same cameras. They are local (the folder is git-ignored); regenerate with `node scripts/gfx-shots.mjs --prefix gfx-before` and `... --prefix gfx-after --query gfx=next`.
+- Pictures: `.shots/gfx-before-*.png` (the old renderer) and `.shots/gfx-after-*.png` (the spike), same cameras, and `.shots/gta4-*.png` (the shipped look). They are local (the folder is git-ignored); regenerate with `node scripts/gfx-shots.mjs --prefix gta4` and `node scripts/gfx-shots.mjs --prefix classic --query gfx=classic`.
 
 ---
 
@@ -135,7 +135,7 @@ Instanced, one `InstancedMesh` per type per near chunk (or `BatchedMesh` when th
 
 ---
 
-## 4. The spike: `?gfx=next` (what exists now)
+## 4. The spike: `?gfx=next` (now the default look, see section 9)
 
 Code: `src/client/render/next/` (`index.ts`, `facade.ts`, `surfaces.ts`, `post.ts`, `glsl.ts`, `uniforms.ts`) and **one guarded line** in `src/main.ts`:
 
@@ -303,3 +303,26 @@ Other costs, exact:
 - **Heap:** +1.7 to +2 MB. **Boot:** +50 to +85 ms (the module, and about 20 ms to derive the wall attributes).
 - **Leaks:** `npm run leaks -- --phases reload --scale 0.5 --query gfx=next` passes (flat heap, geometries 224 -> 224, textures 8 -> 8, objects 912 -> 912), and passes without the flag.
 - **Default path:** with no `?gfx=next` nothing changes: the spike is a separate chunk (`dist/assets/next-*.js`) that is never requested, the hook is one line in `main.ts`, and `npm run perf-budget` reports the same draws, triangles and heap as before. (On this busy box the p95 CPU tripwires of the existing budgets were over on desktop-medium, desktop-low and phone-low, in a run without the flag, so they say nothing about the spike; every count budget passed.)
+
+
+---
+
+## 9. What shipped: the GTA IV look (P0 and the cheap part of P2)
+
+The owner's target is **GTA IV in Atlanta**: muted and slightly desaturated with a grimy yellow-green and brown cast by day; humid, hazy, soft air that fades into warm grey, a diffuse sun and soft pale shadows; at night sodium-vapour orange on the streets with cooler and warmer windows, bloom, a dark but not black sky with a glow at the horizon; dirty asphalt, darker foot of the walls, worn markings; a warm smoggy dusk and dawn. Stylised-realistic and cheap; nothing from GTA V's feature list.
+
+**It is the default.** `?gfx=classic` (or `basic`) is the old flat renderer; `&gfxoff=post,facade,surface,haze,lamps,bloom` turns one part off for an A/B test. The code is in `src/client/render/look/` (the spike's folder, renamed), `Atmosphere.ts`, `timeOfDay.ts` and `graphics.ts`. `?gfx=next` is still accepted and means the default.
+
+| Part | Where | What it does |
+|---|---|---|
+| Tier fx | `graphics.ts` `Tier.fx`, `resolveFx` | `facade`, `surfaces`, `lamps` 0/1/2, `post` 0/1/2 (1 = a single grade pass), `bloom` 0/1/2 levels, `haze`. The table is in docs/perf.md. |
+| Palettes | `timeOfDay.ts` `GTA4`, `CLASSIC` | Anchors for day, dusk and night (sky, sun, sky light, ground bounce, exposure, haze range, shadow darkness and softness) blended by the clock. The sky light tracks the sky colour. |
+| Grade | `timeOfDay.ts` `gradeLook`, `look/post.ts` | Analytic per-time-of-day grade after ACES: saturation, S-curve, lifted blacks, shadow, mid-tone and highlight tints, vignette, bloom. No LUT: ten numbers per anchor cost nothing and need no texture. |
+| Haze | `look/fog.ts` | The fog chunk is replaced once: exponential, so the air is a little hazy from the first block and thickens smoothly, with the range set by the clock (1,700 m by day, 1,300 at dusk, 900 at night; shorter on Low). `fog.near < 0` selects it, so `gfxoff=haze` keeps three's ramp. |
+| Sky | `look/sky.ts` | A dome drawn after the opaque scene (depth at the far plane, so it is shaded only where nothing else is): hazy gradient, a soft sun glare, drifting overcast cloud that the city lights from below at night, stars, a pale moon. |
+| Sun and shadows | `Atmosphere.ts` | By day the sun is weaker (1.55 against 2.2), the shadow intensity 0.72 and the PCF radius 3 texels (2 at dusk), so shadows are pale and soft; at night they are as before. |
+| Facades | `look/facade.ts` | Windows laid out from the pipeline's mesh-format-2 attributes (`TEXCOORD_0`, `_WALL`, `_BLD`, `_BID`): floors and the ground band from the data, and a layout per building kind (glass curtain wall, ribbon office, punched brick and housing, open garage bays, shopfronts, civic piers, small high industrial windows, none on sheds). The baked colours muted and browned, a dirty base, splash and soot, rain streaks under the sills, hazy greenish glass, tungsten and fluorescent rooms, sodium spill on the lower floors. A tile without the attributes gets them derived from the triangles on load (the spike's method, laid out by height alone). |
+| Surfaces | `look/surfaces.ts` | Worn asphalt with repair patches and cracks; **from the baked road UVs** a dark gutter along the kerb, wheel tracks and oil down every lane, a pale kerb stone and dirt behind it and slabs that line up with the walk; **from `_LAND`** lawn, bare earth and paving weights; **from `_SRF`** shingled slopes, parapet caps and metal rooftop boxes. Dull olive lawns, dirty cream markings. Every surface (and the facade) multiplies its sky light by the baked ambient occlusion in the alpha of `COLOR_0` (65%: the street canyon is dark, not black). |
+| Street lamps | `look/lamps.ts` | The 2,087 lamps of `props.json` (yaw, pole height and kind: cobra-head arm, pedestrian post, tall mast), or, for a tile without it, a stand-in placed from `roads.json` and `junctions.json` (one every 34 m on streets, 44 m on small ones, alternating sides). Instanced draws near the camera: a glow card at each head (additive, HDR, so it blooms), a pool card on the road that **multiplies** the surface (so paint and pale slabs glow and dark asphalt stays dark) plus a weak additive twin, and a pole. No real lights. |
+
+**What the look does not do yet, for the GTA IV target:** car and person materials and lighting (the car shader is the Blender lane's), trees (`props.json` has 4,185 anchors and nothing draws them), lamp poles are visual only (the sim has no colliders for `props.json` yet), headlight pools, wet roads and reflections, a real sky reflection in the glass, and the textured detail of P3.

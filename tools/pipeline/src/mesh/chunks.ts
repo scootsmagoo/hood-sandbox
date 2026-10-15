@@ -35,6 +35,7 @@ export function chunkOf(grid: ChunkGrid, x: number, z: number): [number, number]
 export function splitMesh(mb: MeshBuilder, grid: ChunkGrid): Map<number, MeshBuilder> {
   const out = new Map<number, MeshBuilder>();
   const remap = new Map<number, Map<number, number>>();
+  mb.pad();
   const P = mb.positions;
   for (let t = 0; t < mb.indices.length; t += 3) {
     const a = mb.indices[t], b = mb.indices[t + 1], c = mb.indices[t + 2];
@@ -46,6 +47,7 @@ export function splitMesh(mb: MeshBuilder, grid: ChunkGrid): Map<number, MeshBui
     let map = remap.get(key);
     if (!dst || !map) {
       dst = new MeshBuilder();
+      for (const [name, c] of mb.channels) dst.channel(name, c.width, c.fill);
       map = new Map();
       out.set(key, dst);
       remap.set(key, map);
@@ -54,6 +56,7 @@ export function splitMesh(mb: MeshBuilder, grid: ChunkGrid): Map<number, MeshBui
       let n = map.get(src);
       if (n === undefined) {
         n = dst.vertex(P[src * 3], P[src * 3 + 1], P[src * 3 + 2], mb.normals[src * 3], mb.normals[src * 3 + 1], mb.normals[src * 3 + 2], mb.colors[src * 3], mb.colors[src * 3 + 1], mb.colors[src * 3 + 2]);
+        for (const [name, c] of mb.channels) dst.set(name, n, ...c.data.slice(src * c.width, src * c.width + c.width));
         map.set(src, n);
       }
       dst.indices.push(n);

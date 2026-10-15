@@ -3,14 +3,20 @@ import path from 'node:path';
 import { loadTileConfig, type TileConfig } from './config.js';
 import { signedArea, type V2 } from './geo.js';
 import { collisionBytes, heightmapBytes } from './io/binary.js';
-import { encodeGlb, type GlbPart, type MaterialSpec } from './io/glb.js';
+import { encodeGlb, type GlbAttribute, type GlbPart, type MaterialSpec } from './io/glb.js';
 import { MeshBuilder } from './mesh/builder.js';
 import { makeChunkGrid, splitMesh, type ChunkGrid } from './mesh/chunks.js';
 import { extrudeFootprint } from './mesh/extrude.js';
 import { fetchDem, type Dem } from './sources/dem.js';
-import { fetchOsm, fetchOsmNodes, fetchOsmPois } from './sources/osm.js';
-import { fetchOvertureBuildings, type OvertureBuilding } from './sources/overture.js';
-import { buildBuildings, styleBuilding } from './world/buildings.js';
+import { fetchOsm, fetchOsmNodes, fetchOsmPois, fetchOsmProps } from './sources/osm.js';
+import { fetchOvertureBuildings, fetchOvertureParts, type OvertureBuilding, type OvertureBuildingPart } from './sources/overture.js';
+import { buildBuildings } from './world/buildings.js';
+import { OcclusionField } from './world/ao.js';
+import { declareRoofChannels, declareWallChannels, writePiece } from './world/buildingMesh.js';
+import { BUILDING_KINDS } from './world/classify.js';
+import { planBuilding } from './world/plan.js';
+import { buildProps, type PropsRoad } from './world/props.js';
+import { RoadMask } from './world/markings.js';
 import { clipBuildingsToRoads } from './world/clip.js';
 import { collisionRings } from './world/collisionRings.js';
 import { parseNodeTags } from './world/nodes.js';
@@ -20,7 +26,8 @@ import { buildLanes } from './world/lanes.js';
 import { addSyntheticSidewalkMesh, buildPaths } from './world/paths.js';
 import { buildScenarios } from './world/scenarios.js';
 import { pickSpawns } from './world/spawns.js';
-import { buildGroundMesh, heightmapFromDem, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
+import { buildGroundMesh, heightmapFromDem, LAND_CLASSES, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
+import { DEFAULT_DECK_OPTIONS } from './world/decks.js';
 
 const linear = (v: number) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
 const gray = (v: number): [number, number, number, number] => [linear(v), linear(v), linear(v), 1];
@@ -41,13 +48,54 @@ const MAT: Record<string, MaterialSpec> = {
 /** Ground level of detail 1: every Nth heightmap sample, lowered and skirted (see the contract). */
 export const GROUND_LOD1 = { step: 4, lower: 0.5, skirt: 3 };
 
+/** Which builder channels become which glTF attributes, and in what storage type. */
+type AttrSpec = { channel: string; name: string; type: 'f32' | 'u8' | 'u16'; width: 1 | 2 | 3 | 4; snap?: number };
+const BUILDING_WALL_ATTRS: AttrSpec[] = [
+  { channel: 'uv', name: 'TEXCOORD_0', type: 'f32', width: 2, snap: 32 },
+  { channel: 'wall', name: '_WALL', type: 'f32', width: 4, snap: 32 },
+  { channel: 'bld', name: '_BLD', type: 'u8', width: 4 },
+  { channel: 'bid', name: '_BID', type: 'u16', width: 2 },
+];
+const BUILDING_ROOF_ATTRS: AttrSpec[] = [
+  { channel: 'uv', name: 'TEXCOORD_0', type: 'f32', width: 2, snap: 32 },
+  { channel: 'bld', name: '_BLD', type: 'u8', width: 4 },
+  { channel: 'bid', name: '_BID', type: 'u16', width: 2 },
+  { channel: 'srf', name: '_SRF', type: 'u8', width: 4 },
+];
+const ROAD_ATTRS: AttrSpec[] = [
+  { channel: 'uv', name: 'TEXCOORD_0', type: 'f32', width: 2, snap: 32 },
+  { channel: 'uv1', name: 'TEXCOORD_1', type: 'f32', width: 2, snap: 32 },
+];
+
+/** The glTF attributes (and the COLOR_0 alpha) of a finished builder: its channels in their storage types. */
+function attributesOf(mb: MeshBuilder, specs: AttrSpec[]): { attributes: GlbAttribute[]; alpha?: number[] } {
+  mb.pad();
+  const attributes: GlbAttribute[] = [];
+  for (const sp of specs) {
+    const ch = mb.channels.get(sp.channel);
+    if (!ch) continue;
+    const n = ch.data.length;
+    if (sp.type === 'f32') {
+      const a = new Float32Array(n);
+      for (let i = 0; i < n; i++) a[i] = sp.snap ? Math.round(ch.data[i] * sp.snap) / sp.snap : ch.data[i];
+      attributes.push({ name: sp.name, array: a, width: sp.width });
+    } else {
+      const a = sp.type === 'u8' ? new Uint8Array(n) : new Uint16Array(n);
+      const max = sp.type === 'u8' ? 255 : 65535;
+      for (let i = 0; i < n; i++) a[i] = Math.max(0, Math.min(max, Math.round(ch.data[i])));
+      attributes.push({ name: sp.name, array: a, width: sp.width });
+    }
+  }
+  return { attributes, alpha: mb.channels.get('ao')?.data };
+}
+
 /** One glTF node per chunk and material. The chunk is in the node's extras, and the name too. */
-function chunked(kind: string, mat: MaterialSpec, mb: MeshBuilder, grid: ChunkGrid): GlbPart[] {
+function chunked(kind: string, mat: MaterialSpec, mb: MeshBuilder, grid: ChunkGrid, specs: AttrSpec[] = []): GlbPart[] {
   const parts: GlbPart[] = [];
   for (const [key, m] of [...splitMesh(mb, grid)].sort((a, b) => a[0] - b[0])) {
     const cx = key % grid.cols;
     const cz = Math.floor(key / grid.cols);
-    parts.push({ name: `${kind}_${cx}_${cz}`, material: mat, positions: m.positions, normals: m.normals, colors: m.colors, indices: m.indices, extras: { kind, chunk: [cx, cz] } });
+    parts.push({ name: `${kind}_${cx}_${cz}`, material: mat, positions: m.positions, normals: m.normals, colors: m.colors, indices: m.indices, ...attributesOf(m, specs), extras: { kind, chunk: [cx, cz] } });
   }
   return parts;
 }
@@ -96,6 +144,12 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     console.warn(`overture unavailable, falling back to OSM buildings: ${(e as Error).message}`);
   }
 
+  let overtureParts: OvertureBuildingPart[] = [];
+  if (overture) {
+    overtureParts = await fetchOvertureParts(cfg);
+    log(`overture building parts: ${overtureParts.length}`);
+  }
+
   const world = parseOsm(osm, cfg.projector);
   const nodeTags = parseNodeTags(await fetchOsmNodes(cfg), cfg.projector);
   log(`osm nodes: ${nodeTags.size} tagged (signals, stops, crossings)`);
@@ -126,7 +180,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       ];
       levels.forEach((g, lod) => {
         groundTris[lod] += g.indices.length / 3;
-        groundParts.push({ name: `ground_${cx}_${cz}_L${lod}`, material: MAT.ground, positions: g.positions, normals: g.normals, colors: g.colors, indices: g.indices, extras: { kind: 'ground', chunk: [cx, cz], lod } });
+        groundParts.push({ name: `ground_${cx}_${cz}_L${lod}`, material: MAT.ground, positions: g.positions, normals: g.normals, colors: g.colors, indices: g.indices, attributes: [{ name: '_LAND', array: g.land as Uint8Array<ArrayBuffer>, width: 4 }], extras: { kind: 'ground', chunk: [cx, cz], lod } });
       });
     }
   }
@@ -137,18 +191,24 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`junctions: ${roads.junctionStats.built} polygons from ${roads.junctionStats.candidates} junction nodes (${roads.junctionStats.clusters} clusters); not built: ${JSON.stringify(roads.junctionStats.rejected)}`);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
 
-  const built = buildBuildings(overture, world.buildings, cfg.projector, b);
+  const built = buildBuildings(overture, world.buildings, cfg.projector, b, overtureParts);
   const bstats = built.stats;
   const clip = clipBuildingsToRoads(built.buildings, world.roads);
   const buildings = clip.buildings;
   log(`buildings on streets: ${clip.stats.clipped} cut by a road (${Math.round(clip.stats.removedAreaM2)} m2 removed, ${clip.stats.pieces} pieces, ${clip.stats.dropped} slivers dropped)`);
-  const wall = new MeshBuilder();
-  const roof = new MeshBuilder();
-  const glassWall = new MeshBuilder();
+  const wall = declareWallChannels(new MeshBuilder());
+  const roof = declareRoofChannels(new MeshBuilder());
+  const glassWall = declareWallChannels(new MeshBuilder());
   const collision = new MeshBuilder();
   let skipped = 0;
   let holed = 0;
   const kept: V2[][][] = [];
+
+  // pass 1: classify and plan every building (its ground datum, kind, pieces and roofs), and stamp the occlusion field
+  const field = new OcclusionField(b);
+  const planned: { bd: (typeof buildings)[number]; datum: number; plan: ReturnType<typeof planBuilding> }[] = [];
+  const kindCounts: Record<string, number> = Object.fromEntries(BUILDING_KINDS.map((k) => [k, 0]));
+  const bstat = { kindFromData: 0, eraFromData: 0, withParts: 0, pieces: 0, podiums: 0, pitchedBuildings: 0, pitchedPieces: 0, glass: 0, floating: 0 };
   for (const bd of buildings) {
     const outer = bd.rings[0];
     if (Math.abs(signedArea(outer)) < 6) { skipped++; continue; }
@@ -157,29 +217,54 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     const cx = outer.reduce((a, p) => a + p[0], 0) / outer.length;
     const cz = outer.reduce((a, p) => a + p[1], 0) / outer.length;
     minY = Math.min(minY, surfaceHeight(hm, cx, cz));
-    const topY = minY + bd.height;
-    const style = styleBuilding(bd);
-    extrudeFootprint(bd.rings, {
-      baseY: minY - 0.3,
-      topY,
-      wall: style.glass ? glassWall : wall,
-      roof,
-      wallColor: style.wall,
-      roofColor: style.roof,
-    });
+    const plan = planBuilding(bd);
+    planned.push({ bd, datum: minY, plan });
+    kindCounts[plan.cls.kind]++;
+    if (plan.cls.kindFromData) bstat.kindFromData++;
+    if (plan.cls.eraFromData) bstat.eraFromData++;
+    if (plan.stats.parts > 0) bstat.withParts++;
+    bstat.pieces += plan.pieces.length;
+    if (plan.stats.podium) bstat.podiums++;
+    if (plan.stats.pitched > 0) { bstat.pitchedBuildings++; bstat.pitchedPieces += plan.stats.pitched; }
+    if (plan.pieces.some((p) => p.kind === 'glass')) bstat.glass++;
+    for (const pc of plan.pieces) {
+      if (pc.baseH > 2) bstat.floating++;
+      field.addBuilding(pc.rings, minY + pc.topH);
+    }
+  }
+  // the undersides of the decks shade the ground below them
+  for (const r of roads.json) {
+    if (!r.bridge) continue;
+    for (let i = 0; i + 1 < r.points.length; i++) field.addDeck([r.points[i][0], r.points[i][2]], [r.points[i + 1][0], r.points[i + 1][2]], r.width / 2 + 0.5, Math.min(r.points[i][1], r.points[i + 1][1]) - DEFAULT_DECK_OPTIONS.thickness);
+  }
+  const ao = (x: number, y: number, z: number, n?: V2) => field.ao(x, y, z, n);
+
+  // pass 2: the meshes and the collision prisms
+  const equipment: Record<string, number> = {};
+  let wallTris = 0;
+  let roofTris = 0;
+  for (const { bd, datum: minY, plan } of planned) {
+    for (const pc of plan.pieces) {
+      const st = writePiece({ datumY: minY, wall, glass: glassWall, roof, ao }, pc);
+      wallTris += st.wallTris;
+      roofTris += st.roofTris;
+      for (const [k, v] of Object.entries(st.equipment)) equipment[k] = (equipment[k] ?? 0) + v;
+    }
     kept.push(bd.rings);
     // The collision footprint is the drawn one, courtyards included (a hole left out would be an invisible solid in a
-    // courtyard and leave its inner walls to walk through), simplified a little so the trimesh stays small.
+    // courtyard and leave its inner walls to walk through), simplified a little so the trimesh stays small. It stays one prism
+    // as tall as the highest point of the drawn building (a ridge, the top of the tallest part).
     const solid = collisionRings(bd.rings);
     if (solid.length > 1) holed++;
     const scratchRoof = new MeshBuilder();
-    extrudeFootprint(solid, { baseY: minY - 0.3, topY, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
+    extrudeFootprint(solid, { baseY: minY - 0.3, topY: minY + plan.maxTopH, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
     const base = collision.vertexCount;
     for (let i = 0; i < scratchRoof.vertexCount; i++) collision.vertex(scratchRoof.positions[i * 3], scratchRoof.positions[i * 3 + 1], scratchRoof.positions[i * 3 + 2], 0, 1, 0);
     for (const i of scratchRoof.indices) collision.indices.push(base + i);
   }
   const buildingCollisionTris = collision.triangleCount;
   log(`buildings: ${kept.length} (${skipped} tiny skipped, ${holed} with courtyards), heights ${JSON.stringify(bstats.heightSources)}`);
+  log(`building kinds: ${JSON.stringify(kindCounts)}; ${bstat.kindFromData} classified from data, ${bstat.eraFromData} dated; ${bstat.withParts} stepped (${bstat.pieces} pieces, ${bstat.podiums} podiums), ${bstat.pitchedBuildings} with pitched roofs; rooftop equipment ${JSON.stringify(equipment)}; ${wallTris} wall and ${roofTris} roof triangles`);
 
   // collision: buildings then elevated deck slabs and piers
   const cbase = collision.vertexCount;
@@ -198,12 +283,55 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const ground = (x: number, z: number) => surfaceHeight(hm, x, z);
   const paths = buildPaths({ ways: world.roads, roads: roads.json, junctions: roads.exported, crossingSignals, footprints: kept, bounds: b, ground, deckY });
   const ps = paths.file.stats;
-  addSyntheticSidewalkMesh(roads.sidewalk, paths.syntheticLines, ground);
+  addSyntheticSidewalkMesh(roads.sidewalk, paths.syntheticLines, ground, (x, z) => roads.mask.contains(x, z));
   log(`paths: ${ps.nodes} nodes, ${ps.edges} edges, ${(ps.lengthM / 1000).toFixed(1)} km (${(ps.syntheticM / 1000).toFixed(1)} km synthetic), ${ps.components} components (largest ${(ps.largestShare * 100).toFixed(1)}%), ${ps.crossings.total} crossings (${ps.crossings.signals} signalised, ${ps.crossings.atJunctions} at junctions, ${ps.crossings.made} made), ${ps.droppedByBuildings} vertices cut by buildings`);
 
   const pois = await fetchOsmPois(cfg);
   const scenarios = buildScenarios({ pois, projector: cfg.projector, paths: paths.file, roads: roads.json, areas: world.areas, footprints: kept, bounds: b, ground });
   log(`scenarios: ${scenarios.stats.total} points (${scenarios.stats.osm} from OSM, ${scenarios.stats.synth} synthesised${pois ? '' : '; the POI query failed'}) ${JSON.stringify(scenarios.stats.byType)}`);
+
+  // tree, street lamp and furniture anchors (props.json): OSM where mapped, synthetic placements elsewhere
+  const osmProps = await fetchOsmProps(cfg);
+  const pathMask = new RoadMask();
+  {
+    const pn = paths.file.nodes;
+    const pe = paths.file.edges;
+    for (let i = 0; i + 2 < pe.length; i += 3) pathMask.addPolyline([[pn[pe[i]][0], pn[pe[i]][2]], [pn[pe[i + 1]][0], pn[pe[i + 1]][2]]], 0);
+  }
+  const propsRoads: PropsRoad[] = roads.json.map((r) => ({ class: r.class, width: r.width, oneway: r.oneway, bridge: r.bridge, points: r.points }));
+  const props = buildProps({
+    osm: osmProps,
+    projector: cfg.projector,
+    roads: propsRoads,
+    pedestrianWays: world.roads.filter((w) => w.highway === 'pedestrian' && w.kind === 'ped' && w.sub !== 'crossing'),
+    areas: world.areas,
+    footprints: kept,
+    roadMask: roads.mask,
+    pathMask,
+    ground,
+    bounds: b,
+  });
+  log(`props: ${props.trees.length} trees ${JSON.stringify(props.stats.trees)}, ${props.lamps.length} lamps ${JSON.stringify(props.stats.lamps)}, ${props.hydrants.length} hydrants, ${props.bins.length} bins, ${props.bollards.length} bollards${osmProps ? '' : '; the OSM props query failed, synthetic only'}`);
+
+  // baked ambient occlusion: the alpha of COLOR_0 on the ground and the road meshes
+  const aoOf = (positions: ArrayLike<number>, normals?: ArrayLike<number>): number[] => {
+    const out = new Array<number>(positions.length / 3);
+    for (let i = 0; i < out.length; i++) out[i] = ao(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+    void normals;
+    return out;
+  };
+  for (const gp of groundParts) gp.alpha = aoOf(gp.positions);
+  for (const mb of [roads.asphalt, roads.sidewalk, roads.crosswalk, roads.rail, roads.markings]) {
+    const ch = mb.channel('ao', 1, [1]);
+    ch.data = aoOf(mb.positions);
+  }
+  {
+    // deck undersides are dark, their skirts and piers a little less
+    const mb = roads.concrete;
+    const ch = mb.channel('ao', 1, [1]);
+    const base = aoOf(mb.positions);
+    ch.data = base.map((v, i) => v * (mb.normals[i * 3 + 1] < -0.5 ? 0.4 : 0.75));
+  }
 
   // write
   const out = cfg.outDir;
@@ -213,8 +341,8 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   sizes['roads.glb'] = write(
     path.join(out, 'roads.glb'),
     await encodeGlb([
-      ...chunked('asphalt', MAT.asphalt, roads.asphalt, grid),
-      ...chunked('sidewalk', MAT.sidewalk, roads.sidewalk, grid),
+      ...chunked('asphalt', MAT.asphalt, roads.asphalt, grid, ROAD_ATTRS),
+      ...chunked('sidewalk', MAT.sidewalk, roads.sidewalk, grid, ROAD_ATTRS),
       ...chunked('crosswalk', MAT.crosswalk, roads.crosswalk, grid),
       ...chunked('markings', MAT.markings, roads.markings, grid),
       ...chunked('rail', MAT.rail, roads.rail, grid),
@@ -224,9 +352,9 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   sizes['buildings.glb'] = write(
     path.join(out, 'buildings.glb'),
     await encodeGlb([
-      ...chunked('walls', MAT.wall, wall, grid),
-      ...chunked('roofs', MAT.roof, roof, grid),
-      ...chunked('glass_walls', MAT.glass, glassWall, grid),
+      ...chunked('walls', MAT.wall, wall, grid, BUILDING_WALL_ATTRS),
+      ...chunked('roofs', MAT.roof, roof, grid, BUILDING_ROOF_ATTRS),
+      ...chunked('glass_walls', MAT.glass, glassWall, grid, BUILDING_WALL_ATTRS),
     ]),
   );
   sizes['collision.bin'] = write(path.join(out, 'collision.bin'), collisionBytes(collision.positions, collision.indices));
@@ -237,6 +365,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`lanes: ${lanes.stats.lanes} lanes (${lanes.stats.laneKm} km), ${lanes.stats.connectors} connectors, ${lanes.stats.junctions} junctions and ${lanes.stats.implicitJunctions} places where roads meet without one; largest strongly connected part ${(lanes.stats.largestComponent * 100).toFixed(1)}% of lane length (${(lanes.stats.largestComponentStreets * 100).toFixed(1)}% of surface streets)`);
   sizes['paths.json'] = write(path.join(out, 'paths.json'), JSON.stringify(paths.file));
   sizes['scenarios.json'] = write(path.join(out, 'scenarios.json'), JSON.stringify(scenarios));
+  sizes['props.json'] = write(path.join(out, 'props.json'), JSON.stringify(props));
 
   const attribution = [cfg.city.sources.osm.attribution];
   if (used.overture) attribution.push(cfg.city.sources.overture.attribution);
@@ -266,11 +395,17 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     lanes: 'lanes.json',
     paths: 'paths.json',
     scenarios: 'scenarios.json',
+    props: 'props.json',
+    meshFormat: 2,
+    buildingKinds: [...BUILDING_KINDS],
+    landClasses: [...LAND_CLASSES],
     spawns,
     attribution,
     sources: {
       osm: used.osm,
       overtureBuildings: used.overture ? overtureRelease : false,
+      overtureParts: overtureParts.length,
+      osmProps: !!osmProps,
       elevation: used.dem ? 'usgs-3dep' : 'flat',
     },
   };
@@ -286,7 +421,8 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     heightRange: mm,
     ground: { chunks: grid.cols * grid.rows, trianglesLod0: groundTris[0], trianglesLod1: groundTris[1] },
     roads: { ...roads.stats, triangles: roads.asphalt.triangleCount + roads.sidewalk.triangleCount + roads.crosswalk.triangleCount + roads.rail.triangleCount + roads.concrete.triangleCount + roads.markings.triangleCount, markings: roads.markingStats, junctions: roads.junctionStats },
-    buildings: { count: kept.length, skipped, sources: bstats, triangles: wall.triangleCount + roof.triangleCount + glassWall.triangleCount },
+    buildings: { count: kept.length, skipped, sources: bstats, kinds: kindCounts, classification: bstat, rooftopEquipment: equipment, triangles: { walls: wall.triangleCount, roofs: roof.triangleCount, glass: glassWall.triangleCount } },
+    props: props.stats,
     collision: { vertices: collision.vertexCount, triangles: collision.triangleCount, buildingTriangles: buildingCollisionTris },
     lanes: lanes.stats,
     spawns,

@@ -78,6 +78,6 @@
     "steering": { "lockDeg": 33, "lockHighSpeedDeg": 6, "lockRefSpeed": 36, "rateDeg": 85, "returnRateDeg": 130, "selfAlign": 0.95 },
     "traction": { "mu": 0.86, "slideRatio": 0.86, "peakSlipDeg": 9.5, "loadSensitivity": 0.14, "rearGrip": 1.1, "handbrakeGrip": 0.72 },
     "extras": { "burnoutHold": 6.4 },
-    "damage": { "collisionMult": 0.75, "engineMult": 0.8, "weaponMult": 0.9, "deformMult": 0.7, "bodyHealth": 1200, "engineHealth": 1200 }
+    "damage": { "collisionMult": 0.6, "engineMult": 0.6, "weaponMult": 0.9, "deformMult": 0.6, "bodyHealth": 1200, "engineHealth": 1200 }
   }
 }

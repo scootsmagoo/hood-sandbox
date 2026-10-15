@@ -52,12 +52,16 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
   "lanes": "lanes.json",                     // optional: the directed lane graph traffic drives on (see below)
   "paths": "paths.json",                     // optional: the walk network pedestrians route over (see below)
   "scenarios": "scenarios.json",             // optional: where pedestrians sit, wait, queue and chat (see below)
+  "props": "props.json",                     // optional: tree, street lamp and street furniture anchors (see below)
+  "meshFormat": 2,                           // optional: 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)"; absent in an older bake
+  "buildingKinds": ["generic", "office", ...],   // optional: the names of the building kind ids, in id order (see below)
+  "landClasses": ["urban", "grass", ...],        // optional: the names of the ground class ids, in id order
   "spawns": {
     "player":  { "x": 0, "y": 0, "z": 0 },
     "vehicle": { "x": 0, "y": 0, "z": 0, "heading": 0 }   // radians; see "Spawns" below
   },
   "attribution": ["© OpenStreetMap contributors", "Overture Maps Foundation", "USGS 3DEP"],
-  "sources": { "osm": true, "overtureBuildings": "2026-09-23.1", "elevation": "usgs-3dep" }   // optional: what the bake actually used ("flat" elevation = 3DEP was unreachable)
+  "sources": { "osm": true, "overtureBuildings": "2026-09-23.1", "overtureParts": 335, "osmProps": true, "elevation": "usgs-3dep" }   // optional: what the bake actually used ("flat" elevation = 3DEP was unreachable; overtureParts is how many building parts, osmProps whether the tree and lamp query worked)
 }
 ```
 
@@ -80,7 +84,7 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 ### Mesh details (client-facing)
 
 - The `.glb` files use `EXT_meshopt_compression` and `KHR_mesh_quantization` (16-bit positions). Positions are quantized per mesh, so each mesh node carries a scale and translation. three's `GLTFLoader` needs `setMeshoptDecoder(MeshoptDecoder)`.
-- All meshes carry `COLOR_0` (RGBA, normalized uint8, linear). Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers), `road_markings`; `bld_wall`, `bld_roof`, `bld_glass` (towers of 55 m and up, metallic).
+- All meshes carry `COLOR_0` (RGBA, normalized uint8; RGB linear). **From `meshFormat` 2 the alpha is the baked ambient occlusion** (255 = open sky, lower = occluded; see below), where it used to be 255 everywhere. The materials are opaque, so three.js ignores it unless a shader reads `vColor.a`. Materials are white, so use `vertexColors: true`. Materials per file: `ground`; `road_asphalt`, `road_sidewalk`, `road_rail`, `road_concrete` (deck undersides, skirts, piers), `road_markings`; `bld_wall`, `bld_roof`, `bld_glass` (curtain-wall towers: kind 2, towers of 55 m and up unless the data says masonry or civic; metallic).
 - `ground.glb` is the heightmap at full resolution (`groundMeshStep` in `city.json`), triangulated with the diagonal from the south-west to the north-east corner of each cell, split into chunks with two levels of detail (see "Chunks"). The physics heightfield and `heightAt` (`src/shared/tile.ts`) cut each cell the same way, so they agree with the level 0 mesh exactly; a bilinear patch over the four corners would be up to a metre off on a twisted cell.
 - `road_markings` holds lane lines, crosswalks and stop bars (white and yellow in the vertex colours). The old `road_crosswalk` material is no longer produced: crossings are zebra stripes in `road_markings`.
 - At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, motorways 10 cm, residential streets 6 cm; junction surfaces take the lift of their biggest road), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance, and a stronger one to `road_markings` (the client uses -2 for the roads and -4 for the markings).
@@ -157,9 +161,74 @@ For traffic, signals and the minimap. Roads are named by their `roads.json` id (
 
 A stop sign applies to the leg it faces (`direction` along the way, from the sign to the first junction within 40 m) or, for `stop=all`, to every leg. Legs of a signalised junction that cars can arrive from all have `control: "signals"`. Phases are not baked: they are the sim's job, with `dir` and `approach` as input. `src/shared/tile.ts` has the type (`JunctionsData`).
 
+### Mesh attributes (meshFormat 2)
+
+Everything in this section is **optional and additive**: a `.glb` of an older bake lacks it, and a renderer that ignores it draws the same meshes as before (same materials, same node names, same chunks, `COLOR_0` as the albedo). A shader that uses an attribute must cope with its absence (three.js gives a missing attribute the value 0). Custom attributes are glTF `_NAME` attributes; three.js's `GLTFLoader` lower-cases them (`_BLD` becomes `geometry.attributes._bld`) and keeps `TEXCOORD_1` as `uv1`. Integer attributes are stored as plain (not normalized) `uint8` or `uint16`, so a shader reads the integer value as a float. Positions are 16-bit as before; `TEXCOORD_n` stay `float32` because they are in metres. Texture coordinates are on a 1/32 m grid.
+
+**Buildings** (`walls`, `glass_walls` and `roofs` nodes; the three kinds keep their materials and chunks):
+
+| Attribute | Type | walls, glass_walls | roofs |
+|---|---|---|---|
+| `TEXCOORD_0` | float32 x2 | `u` = metres along the footprint ring from the ring's first vertex, **continuous from one edge to the next** (the next quad starts at the u the last one ended at; it restarts at 0 on the ring's first vertex, and each hole is its own ring); `v` = metres above the building's ground datum (the lowest ground under the footprint). The bottom vertices are at `v = -0.3` (the wall goes 0.3 m into the ground), a floating part's at its `min_height`. So `uv` is an exact box projection of the wall: one texture repeat per N metres is `uv / N`. | flat surfaces: metres along (`u`) and across (`v`) the footprint's oriented bounding box, from its corner (so a pattern lines up with the building); pitched slopes: metres along the ridge (`u`) and up the slope (`v`), measured in the slope's plane; parapet, gable and equipment faces: as a wall. |
+| `COLOR_0.a` | uint8 | ambient occlusion, see below | the same (1 on the open roof; the parapet's inner face fades to about 0.55 at its foot) |
+| `_WALL` | float32 x4 | `(u0, len, v0, v1)` of the wall quad this vertex belongs to: where it starts along the ring, its length, and its bottom and top in `v` (without the 0.3 m skirt). Every vertex of a quad has the same value, so a shader can lay out whole windows without looking at the neighbours. | not present |
+| `_BLD` | uint8 x4 | `(kind, era, floors, band)` of the building piece: `kind` is a building kind id, `era` 0 unknown, 1 before 1930, 2 1930 to 1959, 3 1960 to 1989, 4 1990 or later; `floors` is the number of upper floors of this piece (above the band, at least 1, at most 255), so `(v1 - v0 - band / 10) / floors` is the floor height; `band` is the height of the ground floor band, **in decimetres** (storefront, lobby or podium floor; 0 for none), counted up from `v0`. | the same values as the walls of the same piece |
+| `_BID` | uint16 x2 | `(hash, flags)`: `hash` is a stable 16-bit hash of the building's id (seed per-building variation with it; it does not change when the bake does, unless the id does); `flags` is a bit set: 1 pitched roof, 2 parapet, 4 this is a part of a building made of several (a setback tower, a podium), 8 named building, 16 era from data (else inferred), 32 has a courtyard, 64 floating (the part starts above the ground), 128 kind from data (a class, an OSM tag or a name; else inferred from the height and the plan) | the same |
+| `_SRF` | uint8 x4 | not present | `(surface, shape, equipment, slope)`: `surface` is a roof surface id, `shape` the roof shape id of the piece, `equipment` the rooftop equipment id on equipment surfaces, `slope` the pitch in degrees on pitched slopes |
+
+Kinds (`_BLD.x`, `buildingKinds` in `tile.json`): 0 generic (an unclassified block), 1 office (frame or concrete tower, ribbon or punched windows), 2 glass (glass curtain wall: also drawn with the `bld_glass` material), 3 brick (brick or masonry commercial and loft buildings), 4 parking (open-deck garage), 5 retail (shopfronts, one or two storeys), 6 civic (government, courts, libraries, schools, universities, hospitals, museums), 7 religious, 8 industrial (warehouse, depot, utility), 9 residential (apartments, dormitories, hotels, lofts), 10 house (houses and terraces: pitched roofs), 11 small (shed, kiosk, guardhouse, gazebo, shelter), 12 venue (stadium, arena, convention hall, aquarium).
+
+Roof surfaces (`_SRF.x`): 0 flat roof, 1 pitched slope, 2 parapet inner face, 3 parapet cap, 4 gable end (a vertical triangle or trapezoid under a pitched roof), 5 equipment (the sides and top of a rooftop box or tank), 6 soffit (the underside of a part that starts above the ground), 7 dome. Roof shapes (`_SRF.y`): 0 flat, 1 gabled, 2 hipped, 3 pyramidal, 4 dome, 5 skillion (one slope). Equipment (`_SRF.z`): 0 none, 1 air handler (a box), 2 water tank (an octagonal drum), 3 stair or lift bulkhead, 4 penthouse or crown.
+
+- **Floors and heights.** `floors` comes from Overture `num_floors` or OSM `building:levels` when the data fits the height (a floor between 2.6 and 5.5 m), otherwise it is derived from the height with a floor height that depends on the kind (garages about 3 m, offices 4 m, housing 3.1 m, shopfronts 4.5 m).
+- **Roofs.** A flat roof with a parapet (buildings over 6 m): the wall quad rises to the parapet top, which is the building's `height` as before; the roof surface sits 0.7 to 1.2 m below it and the parapet's inner face is in the `roofs` node (`surface` 2; a cap, `surface` 3, only on buildings under 12 m, to save triangles). Rooftop equipment is real geometry on flat roofs over 300 m2 (air handlers, a few water drums, stair and lift bulkheads, and a penthouse on towers over 60 m: boxes and 6-sided drums, `surface` 5, seeded by the building id, so they do not move between bakes). Small low-rise buildings and any building whose OSM `roof:shape` or Overture `roof_shape` says so get a gabled, hipped, pyramidal, skillion or domed roof; the walls stop at the eaves and the roof reaches the building's `height` at the ridge. Pitched roofs are generated for footprints close to a rectangle; others stay flat.
+- **Parts.** Where Overture has `building_part` features for a building they replace its single prism: each part is extruded between its `min_height` and `height` (its own roof, its own `floors`), taller parts hide the walls they cover, and the part of the footprint that no part covers is a prism of its own at the building's height (or at a podium height when the building's height is the tower's). Parts are cut by the roads like footprints are.
+- **Classification.** The kind comes from, in order: the name (deck and garage, church, stadium, civic words), the Overture `class` and `subtype` and the OSM `building`, `amenity`, `shop` and `office` tags, then the facade material, the year (`start_date`, `building:year_built`), the height and the plan. `_BID.y` bit 128 says which of the two it was. The `era` is the year when the data has one (bit 16), else a guess from the kind.
+- **Collision is unchanged.** `collision.bin` is still one prism per footprint: its walls and a flat roof at the **highest** point of the drawn building (the ridge of a pitched roof, the top of the tallest part), with the courtyards, so `buildingTriangles` and the footprints the sim recovers from the roofs are what they were. The drawn building can be lower than its collision prism at the eaves of a pitched roof and over the lower parts of a stepped tower.
+
+**Roads** (`asphalt` and `sidewalk` nodes):
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `TEXCOORD_0` | float32 x2 | a ribbon: `u` = metres across from the left edge (looking along the direction of travel; 0 to the width), `v` = metres along the piece from its start; junction surfaces: the world position `(x, z)` in metres. |
+| `TEXCOORD_1` | float32 x2 | `(halfWidth, kerb)`. A ribbon: `halfWidth` is half the width in metres and `kerb` is 0 on a carriageway (the distance to the nearest edge is `halfWidth - abs(u - halfWidth)`, so a shader gets kerb and gutter wear without further data); on a sidewalk `kerb` is +1 when the road is on its right-hand edge, -1 when it is on the left, 0 when it is neither or both. A junction surface: `halfWidth` 0 and `kerb` is the distance in metres to the edge of the junction polygon at the vertex (0 on the rim). |
+| `COLOR_0.a` | uint8 | ambient occlusion |
+
+`road_concrete` (deck undersides, skirts, piers), `road_rail` and `road_markings` have no texture coordinates; their `COLOR_0.a` is the ambient occlusion of the vertex (the underside of a deck is dark).
+
+**Ground** (`ground` nodes, both levels of detail):
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `_LAND` | uint8 x4 | `(class, grass, dirt, plaza)`: `class` is the ground class id of the vertex; the other three are blend weights 0 to 255 (a 3x3 smoothing of the classes round the vertex) of lawn, bare earth and gravel, and paving. The rest (255 minus their sum) is plain urban ground or asphalt. Interpolating the weights across a triangle is right; interpolating the id is not (read it flat or ignore it). |
+| `COLOR_0.a` | uint8 | ambient occlusion |
+
+Ground classes (`_LAND.x`, `landClasses` in `tile.json`): 0 urban, 1 grass (parks, gardens, lawns, meadows, institutional grass), 2 woodland, 3 dirt (construction, brownfield), 4 plaza (pedestrian squares and areas), 5 parking lot, 6 industrial yard (gravel), 7 rail ballast, 8 water, 9 sports pitch or playground, 10 cemetery, 11 residential yard, 12 commercial hardscape. `COLOR_0` of the ground is the colour of the class, as before.
+
+**Ambient occlusion** (`COLOR_0.a`): a sky-view estimate from a height raster of the buildings (1.5 m cells): 16 horizon directions, to 120 m, so a street canyon is darker than a plaza and the foot of a tower darker than its top. Ground, road and sidewalk vertices get it at their own height, wall vertices at theirs (the base of a wall facing a narrow street is dark, the top is not), plus a contact term within about 3 m of a wall, and 0.5 under a deck. The range is about 0.25 to 1. It is meant to multiply the **indirect** light (the hemisphere or sky term), not the albedo: that is why it is in the alpha and not in the colour.
+
+### `props.json`
+
+Anchors for the trees, street lamps and street furniture of the next phases. **Not geometry**: the client instances models at these points. Optional: a tile without it has no anchors. Written by `tools/pipeline/src/world/props.ts` from OSM and synthetic placements only (no canopy raster: its licence is not settled). All coordinates are the tile's; `y` is the ground (or deck) height at the point. `yaw` is the way the object faces, as a ped's yaw: forward is `(sin yaw, cos yaw)` in `(x, z)`.
+
+```jsonc
+{ "version": 1,
+  "trees":     [ [x, y, z, height, crownRadius, class, src], ... ],
+  "lamps":     [ [x, y, z, yaw, poleHeight, kind, src], ... ],
+  "hydrants":  [ [x, y, z], ... ],                    // OSM emergency=fire_hydrant
+  "bins":      [ [x, y, z], ... ],                    // OSM amenity=waste_basket
+  "bollards":  [ [x, y, z], ... ],                    // OSM barrier=bollard
+  "stats": { "trees": { "osm": 0, "row": 0, "street": 0, "park": 0 }, "lamps": { "osm": 0, "synthetic": 0 }, "osm": true } }
+```
+
+- **Trees.** `class`: 0 broadleaf (oak, maple), 1 conifer (pine), 2 small ornamental (crape myrtle, pear). `height` and `crownRadius` are metres (from the OSM `height` and `diameter_crown` tags when present, else a seeded draw by class). `src`: 0 synthetic street tree (along a sidewalk, 10 to 16 m apart, thinned so a street is patchy), 1 OSM `natural=tree` node, 2 OSM `natural=tree_row` (placed every 8 m along the way), 3 synthetic park and woodland fill (jittered grid, 8 to 12 m in parks, 6 m in woodland). No tree stands in a footprint, on a road, or within 2.5 m of a lamp.
+- **Lamps.** `kind`: 0 cobra-head arm lamp (the arm points along `yaw`, towards the road), 1 pedestrian post-top lamp (no arm), 2 tall highway mast. `src`: 0 OSM `highway=street_lamp`, 1 synthetic. Synthetic lamps stand 1.2 m behind the kerb line, every 32 m along primary, secondary and tertiary streets (staggered on the two sides, so one every 16 m along a street), every 40 m on residential streets, every 20 m on pedestrian streets and plazas (post-top), and every 48 m along motorways and trunk roads (masts, on a deck at the deck's height). None is within 8 m of a junction centre, in a footprint, or within 10 m of an OSM lamp. Lamps are for night lighting anchors: sodium-orange light pools and glow sprites are the client's job.
+- **Furniture.** OSM only for now; the sim does not collide with it.
+- The file is deterministic (seeded by position).
+
 ## Rules
 
-- The sim worker reads `tile.json`, `height.bin` and `collision.bin`, and `roads.json` when `tile.json` names one (optional: without it no cars are parked at the curb). It also reads `junctions.json`, `paths.json` and `scenarios.json` when named (optional: without `paths.json` there are no ambient pedestrians). It never parses glTF and never imports three.js.
+- The sim worker reads `tile.json`, `height.bin` and `collision.bin`, and `roads.json` when `tile.json` names one (optional: without it no cars are parked at the curb). It also reads `junctions.json`, `paths.json` and `scenarios.json` when named (optional: without `paths.json` there are no ambient pedestrians). It never parses glTF and never imports three.js. `props.json` is for the client (the sim ignores it for now; `loadBakedTile` reads it into `TileData.anchors` with `parseProps`).
 - The client renders the `.glb` meshes and may also show the heightmap.
 - Until a baked tile exists, the client falls back to a procedural test ground that has the same shape (a flat heightmap, some boxes, a spawn laid out like the real one, and a few street centrelines in `roads`).
 - Baked tiles are build output. `public/tiles/` is gitignored and regenerated with `npm run bake` in `tools/pipeline/`.

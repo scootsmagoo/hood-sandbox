@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { clockFromParams, formatClock, isNight, moonDirection, nightFactor, parseTime, skyLook, sunDirection, sunElevation, newSkyLook, warmth } from './timeOfDay';
+import { CLASSIC, GTA4, gradeLook, newGradeLook, clockFromParams, formatClock, isNight, moonDirection, nightFactor, parseTime, skyLook, sunDirection, sunElevation, newSkyLook, warmth } from './timeOfDay';
 
 const at = (hhmm: string) => parseTime(hhmm)!;
 
@@ -54,7 +54,7 @@ describe('sky colour', () => {
   const lum = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
   it('is bright and blue by day, with the daylight exposure', () => {
-    const k = skyLook(at('13:00'), newSkyLook());
+    const k = skyLook(at('13:00'), newSkyLook(), CLASSIC);
     expect(lum(k.horizon)).toBeGreaterThan(0.5);
     expect(k.zenith.b).toBeGreaterThan(k.zenith.r);
     expect(k.exposure).toBeCloseTo(1.05, 2);
@@ -62,7 +62,7 @@ describe('sky colour', () => {
   });
 
   it('is a dark blue at night, with a dim moon and a little more ambient light than the dark would give', () => {
-    const k = skyLook(at('23:30'), newSkyLook());
+    const k = skyLook(at('23:30'), newSkyLook(), CLASSIC);
     expect(k.horizon.b).toBeGreaterThan(k.horizon.r);
     expect(lum(k.horizon)).toBeLessThan(0.05);
     expect(k.sunIntensity).toBeLessThan(0.9);
@@ -72,7 +72,7 @@ describe('sky colour', () => {
 
   it('is warm orange at dusk and dawn', () => {
     for (const t of ['07:40', '19:05']) {
-      const k = skyLook(at(t), newSkyLook());
+      const k = skyLook(at(t), newSkyLook(), CLASSIC);
       expect(warmth(at(t))).toBeGreaterThan(0.6);
       expect(k.horizon.r).toBeGreaterThan(k.horizon.b);
       expect(k.sun.r).toBeGreaterThan(k.sun.b);
@@ -80,9 +80,9 @@ describe('sky colour', () => {
   });
 
   it('moves smoothly: neighbouring minutes differ by little', () => {
-    let prev = skyLook(at('06:00'), newSkyLook()).horizon.clone();
+    let prev = skyLook(at('06:00'), newSkyLook(), CLASSIC).horizon.clone();
     for (let m = 6 * 60 + 1; m < 9 * 60; m++) {
-      const cur = skyLook(m, newSkyLook()).horizon;
+      const cur = skyLook(m, newSkyLook(), CLASSIC).horizon;
       expect(Math.abs(cur.r - prev.r) + Math.abs(cur.g - prev.g) + Math.abs(cur.b - prev.b)).toBeLessThan(0.06);
       prev = cur.clone();
     }
@@ -91,6 +91,87 @@ describe('sky colour', () => {
   it('writes into the given look without allocating a new one', () => {
     const out = newSkyLook();
     expect(skyLook(at('12:00'), out)).toBe(out);
+  });
+});
+
+describe('the GTA IV look', () => {
+  const lum = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const sat = (c: THREE.Color) => (Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b)) / Math.max(c.r, c.g, c.b, 1e-6);
+  const look = (t: string) => skyLook(at(t), newSkyLook());
+
+  it('is the default look', () => {
+    expect(look('13:00').horizon.getHex()).toBe(skyLook(at('13:00'), newSkyLook(), GTA4).horizon.getHex());
+  });
+
+  it('is hazy by day: a bright, desaturated, slightly yellow horizon, under a grey-blue sky', () => {
+    const k = look('13:00');
+    expect(lum(k.horizon)).toBeGreaterThan(0.5);
+    expect(sat(k.horizon)).toBeLessThan(0.3); // linear space
+    expect(k.horizon.r).toBeGreaterThan(k.horizon.b);
+    expect(sat(k.zenith)).toBeLessThan(sat(skyLook(at('13:00'), newSkyLook(), CLASSIC).zenith) * 0.6);
+    expect(k.visibility).toBeLessThan(1800);
+  });
+
+  it('has a diffuse day sun: weaker than the classic one, with pale, soft shadows', () => {
+    const k = look('13:00');
+    expect(k.sunIntensity).toBeLessThan(skyLook(at('13:00'), newSkyLook(), CLASSIC).sunIntensity);
+    expect(k.shadowIntensity).toBeLessThan(0.85);
+    expect(k.shadowSoftness).toBeGreaterThan(2);
+  });
+
+  it('keeps the night sky dark but not black, with a warm glow at the horizon', () => {
+    const k = look('23:30');
+    expect(lum(k.zenith)).toBeLessThan(0.02);
+    expect(lum(k.zenith)).toBeGreaterThan(0.001);
+    expect(lum(k.horizon)).toBeGreaterThan(0.015);
+    expect(k.horizon.r).toBeGreaterThan(k.horizon.b);
+    expect(k.hemiGround.r).toBeGreaterThan(k.hemiGround.b); // sodium bounce
+  });
+
+  it('is a warm smoggy orange at dusk and dawn', () => {
+    for (const t of ['07:40', '19:05']) {
+      const k = look(t);
+      expect(k.horizon.r).toBeGreaterThan(k.horizon.b * 1.4);
+      expect(k.sun.r).toBeGreaterThan(k.sun.b);
+    }
+  });
+
+  it('moves smoothly through the day', () => {
+    let prev = look('05:00').horizon.clone();
+    for (let m = 5 * 60 + 1; m < 21 * 60; m++) {
+      const cur = skyLook(m, newSkyLook()).horizon;
+      expect(Math.abs(cur.r - prev.r) + Math.abs(cur.g - prev.g) + Math.abs(cur.b - prev.b)).toBeLessThan(0.06);
+      prev = cur.clone();
+    }
+  });
+});
+
+describe('colour grade', () => {
+  const grade = (t: string) => gradeLook(at(t), newGradeLook());
+
+  it('is desaturated and soft by day, richer and deeper at night', () => {
+    const d = grade('13:00');
+    const n = grade('23:30');
+    expect(d.saturation).toBeLessThan(0.85);
+    expect(d.contrast).toBeLessThan(n.contrast);
+    expect(d.lift).toBeGreaterThan(n.lift);
+    expect(n.bloom).toBeGreaterThan(d.bloom);
+  });
+
+  it('casts the day yellow-green (the blue falls away in the mid-tones) and dusk warm', () => {
+    const d = grade('13:00');
+    expect(d.midTint.b).toBeLessThan(d.midTint.g);
+    const w = grade('19:05');
+    expect(w.highlightTint.r).toBeGreaterThan(w.highlightTint.b * 1.1);
+  });
+
+  it('moves smoothly', () => {
+    let prev = grade('06:00').saturation;
+    for (let m = 6 * 60 + 1; m < 9 * 60; m++) {
+      const cur = gradeLook(m, newGradeLook()).saturation;
+      expect(Math.abs(cur - prev)).toBeLessThan(0.02);
+      prev = cur;
+    }
   });
 });
 

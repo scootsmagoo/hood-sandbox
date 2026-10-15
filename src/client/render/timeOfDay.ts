@@ -46,6 +46,11 @@ export interface SkyLook {
   hemiIntensity: number;
   ambient: number;
   exposure: number;
+  /** Distance, m, at which the haze has swallowed nearly everything (the exponential fog's range). */
+  visibility: number;
+  /** How dark a shadow is, 0 to 1 (an overcast sun leaves pale shadows), and how soft its edge is (PCF radius, texels). */
+  shadowIntensity: number;
+  shadowSoftness: number;
 }
 
 export function newSkyLook(): SkyLook {
@@ -60,6 +65,9 @@ export function newSkyLook(): SkyLook {
     hemiIntensity: 0,
     ambient: 0,
     exposure: 1,
+    visibility: 1300,
+    shadowIntensity: 1,
+    shadowSoftness: 1,
   };
 }
 
@@ -73,9 +81,14 @@ interface Palette {
   hemiIntensity: number;
   ambient: number;
   exposure: number;
+  visibility: number;
+  shadowIntensity: number;
+  shadowSoftness: number;
 }
 
-function palette(p: { horizon: number; zenith: number; sun: number; sunIntensity: number; hemiSky: number; hemiGround: number; hemiIntensity: number; ambient: number; exposure: number }): Palette {
+type PaletteSpec = { horizon: number; zenith: number; sun: number; sunIntensity: number; hemiSky: number; hemiGround: number; hemiIntensity: number; ambient: number; exposure: number; visibility?: number; shadowIntensity?: number; shadowSoftness?: number };
+
+function palette(p: PaletteSpec): Palette {
   return {
     horizon: new THREE.Color(p.horizon),
     zenith: new THREE.Color(p.zenith),
@@ -86,20 +99,50 @@ function palette(p: { horizon: number; zenith: number; sun: number; sunIntensity
     hemiIntensity: p.hemiIntensity,
     ambient: p.ambient,
     exposure: p.exposure,
+    visibility: p.visibility ?? 1300,
+    shadowIntensity: p.shadowIntensity ?? 1,
+    shadowSoftness: p.shadowSoftness ?? 1,
   };
 }
 
-/** Full daylight: the look the game had before the clock. */
-const DAY = palette({ horizon: 0xc9d8e2, zenith: 0x4a82c4, sun: 0xfff0d8, sunIntensity: 2.2, hemiSky: 0xd6e4ff, hemiGround: 0x8a8574, hemiIntensity: 2.3, ambient: 0.12, exposure: 1.05 });
-/** Night: a dark blue sky, the moon as a dim key light, and enough hemisphere and ambient light to play by. */
-const NIGHT = palette({ horizon: 0x1b2a4a, zenith: 0x070d20, sun: 0x9db4ff, sunIntensity: 0.75, hemiSky: 0x4a6a9e, hemiGround: 0x23262f, hemiIntensity: 1.5, ambient: 0.45, exposure: 1.3 });
-/** Dusk and dawn: oranges low down, a deep blue overhead. */
-const WARM = palette({ horizon: 0xf08a50, zenith: 0x3f5f96, sun: 0xffa060, sunIntensity: 1.9, hemiSky: 0xffc08c, hemiGround: 0x6e4e3a, hemiIntensity: 1.7, ambient: 0.12, exposure: 1.1 });
+/** The three anchor moments a look is made of; `skyLook` blends them by the clock. */
+export interface SkyPalette {
+  day: Palette;
+  night: Palette;
+  warm: Palette;
+  /** Pull the sky light (the hemisphere light's sky colour) halfway to the colour of the sky itself, so it tracks the sky through the day. */
+  trackSky?: boolean;
+}
+
+/** `?gfx=classic`: the look the game had before the graphics overhaul. Full daylight, a blue-white sky, a dark blue night, orange dusk. */
+export const CLASSIC: SkyPalette = {
+  day: palette({ horizon: 0xc9d8e2, zenith: 0x4a82c4, sun: 0xfff0d8, sunIntensity: 2.2, hemiSky: 0xd6e4ff, hemiGround: 0x8a8574, hemiIntensity: 2.3, ambient: 0.12, exposure: 1.05 }),
+  night: palette({ horizon: 0x1b2a4a, zenith: 0x070d20, sun: 0x9db4ff, sunIntensity: 0.75, hemiSky: 0x4a6a9e, hemiGround: 0x23262f, hemiIntensity: 1.5, ambient: 0.45, exposure: 1.3 }),
+  warm: palette({ horizon: 0xf08a50, zenith: 0x3f5f96, sun: 0xffa060, sunIntensity: 1.9, hemiSky: 0xffc08c, hemiGround: 0x6e4e3a, hemiIntensity: 1.7, ambient: 0.12, exposure: 1.1 }),
+};
+
+/**
+ * The GTA IV look. Day: humid, hazy and overcast-leaning, a milky yellow-grey horizon under a pale
+ * grey-blue sky, a diffuse sun that leaves pale soft shadows and lots of sky light, a brown-green
+ * ground bounce. Dusk and dawn: a warm, smoggy glow (dull orange and mauve, not gold). Night: a dark
+ * blue-grey sky with a brown-orange light-pollution glow at the horizon, a cold dim moon, and a warm
+ * sodium bounce from the ground (the street lamps themselves are in look/lamps.ts). The sky light
+ * (`hemiSky`, `hemiGround`) is derived from these sky colours, see `skyLook`.
+ */
+export const GTA4: SkyPalette = {
+  trackSky: true,
+  day: palette({ horizon: 0xcac9be, zenith: 0x8a9fb2, sun: 0xffecc8, sunIntensity: 1.55, hemiSky: 0xc9cfd2, hemiGround: 0x80745e, hemiIntensity: 2.45, ambient: 0.12, exposure: 1.0, visibility: 1700, shadowIntensity: 0.72, shadowSoftness: 3 }),
+  night: palette({ horizon: 0x4c3626, zenith: 0x0b1222, sun: 0x93a8d8, sunIntensity: 0.5, hemiSky: 0x34405a, hemiGround: 0x4a2e18, hemiIntensity: 2.3, ambient: 0.46, exposure: 1.35, visibility: 900, shadowIntensity: 1, shadowSoftness: 1.5 }),
+  warm: palette({ horizon: 0xdf9660, zenith: 0x68718c, sun: 0xffa566, sunIntensity: 1.4, hemiSky: 0xd5a98a, hemiGround: 0x6a4c38, hemiIntensity: 1.8, ambient: 0.12, exposure: 1.08, visibility: 1300, shadowIntensity: 0.88, shadowSoftness: 2 }),
+};
+
+const SKY_MIX = new THREE.Color();
 
 /** Writes the look for a moment of the day into `out`. Allocates nothing. */
-export function skyLook(minutes: number, out: SkyLook): SkyLook {
+export function skyLook(minutes: number, out: SkyLook, pal: SkyPalette = GTA4): SkyLook {
   const day = 1 - nightFactor(minutes);
   const warm = warmth(minutes);
+  const { day: DAY, night: NIGHT, warm: WARM } = pal;
   const mixColor = (a: THREE.Color, b: THREE.Color, c: THREE.Color, dst: THREE.Color) => {
     dst.lerpColors(a, b, day).lerp(c, warm);
   };
@@ -109,10 +152,18 @@ export function skyLook(minutes: number, out: SkyLook): SkyLook {
   mixColor(NIGHT.sun, DAY.sun, WARM.sun, out.sun);
   mixColor(NIGHT.hemiSky, DAY.hemiSky, WARM.hemiSky, out.hemiSky);
   mixColor(NIGHT.hemiGround, DAY.hemiGround, WARM.hemiGround, out.hemiGround);
+  if (pal.trackSky) {
+    // the sky as seen from the ground: mostly the hazy horizon, some of the zenith
+    SKY_MIX.lerpColors(out.zenith, out.horizon, 0.6).multiplyScalar(1.15);
+    out.hemiSky.lerp(SKY_MIX, 0.5);
+  }
   out.sunIntensity = lerp3(NIGHT.sunIntensity, DAY.sunIntensity, WARM.sunIntensity, day, warm);
   out.hemiIntensity = lerp3(NIGHT.hemiIntensity, DAY.hemiIntensity, WARM.hemiIntensity, day, warm);
   out.ambient = lerp3(NIGHT.ambient, DAY.ambient, WARM.ambient, day, warm);
   out.exposure = lerp3(NIGHT.exposure, DAY.exposure, WARM.exposure, day, warm);
+  out.visibility = lerp3(NIGHT.visibility, DAY.visibility, WARM.visibility, day, warm);
+  out.shadowIntensity = lerp3(NIGHT.shadowIntensity, DAY.shadowIntensity, WARM.shadowIntensity, day, warm);
+  out.shadowSoftness = lerp3(NIGHT.shadowSoftness, DAY.shadowSoftness, WARM.shadowSoftness, day, warm);
   return out;
 }
 
@@ -120,6 +171,59 @@ export function skyLook(minutes: number, out: SkyLook): SkyLook {
 function lerp3(night: number, dayV: number, warmV: number, day: number, warm: number): number {
   const base = night + (dayV - night) * day;
   return base + (warmV - base) * warm;
+}
+
+/**
+ * The colour grade of the post pass for a moment of the day (look/post.ts applies it after tone
+ * mapping). Analytic rather than a LUT: a handful of numbers blended by the clock cost nothing and
+ * need no texture. GTA IV by day is desaturated and low in contrast with lifted blacks and a
+ * yellow-green cast in the mid-tones; at dusk the cast turns warm and brown; at night the image is
+ * warmer and keeps its saturation (the sodium light carries it) with a deeper S-curve and more bloom.
+ */
+export interface GradeLook {
+  saturation: number;
+  contrast: number;
+  /** Raises the blacks: output = lift + colour * (1 - lift). */
+  lift: number;
+  /** Multiplied in the shadows and in the highlights, with a cast on the mid-tones in between. */
+  shadowTint: THREE.Color;
+  midTint: THREE.Color;
+  highlightTint: THREE.Color;
+  vignette: number;
+  bloom: number;
+  /** Scene brightness above which a pixel blooms. */
+  bloomThreshold: number;
+}
+
+export function newGradeLook(): GradeLook {
+  return { saturation: 1, contrast: 0, lift: 0, shadowTint: new THREE.Color(1, 1, 1), midTint: new THREE.Color(1, 1, 1), highlightTint: new THREE.Color(1, 1, 1), vignette: 0, bloom: 0, bloomThreshold: 1 };
+}
+
+interface GradeAnchor { sat: number; contrast: number; lift: number; shadow: [number, number, number]; mid: [number, number, number]; high: [number, number, number]; vignette: number; bloom: number; threshold: number }
+const GRADE_DAY: GradeAnchor = { sat: 0.8, contrast: 0.16, lift: 0.03, shadow: [0.98, 1.0, 0.98], mid: [1.02, 1.02, 0.95], high: [1.02, 1.01, 0.96], vignette: 0.24, bloom: 0.3, threshold: 0.85 };
+const GRADE_WARM: GradeAnchor = { sat: 0.86, contrast: 0.2, lift: 0.025, shadow: [1.0, 0.95, 0.9], mid: [1.06, 1.0, 0.86], high: [1.1, 1.0, 0.86], vignette: 0.28, bloom: 0.42, threshold: 0.75 };
+const GRADE_NIGHT: GradeAnchor = { sat: 0.95, contrast: 0.3, lift: 0.012, shadow: [0.96, 0.99, 1.06], mid: [1.04, 1.0, 0.94], high: [1.08, 1.0, 0.88], vignette: 0.32, bloom: 0.62, threshold: 0.7 };
+
+export function gradeLook(minutes: number, out: GradeLook): GradeLook {
+  const day = 1 - nightFactor(minutes);
+  const warm = warmth(minutes);
+  const f = (a: number, b: number, c: number) => {
+    const base = a + (b - a) * day;
+    return base + (c - base) * warm;
+  };
+  const tint = (dst: THREE.Color, key: 'shadow' | 'mid' | 'high') => {
+    dst.setRGB(f(GRADE_NIGHT[key][0], GRADE_DAY[key][0], GRADE_WARM[key][0]), f(GRADE_NIGHT[key][1], GRADE_DAY[key][1], GRADE_WARM[key][1]), f(GRADE_NIGHT[key][2], GRADE_DAY[key][2], GRADE_WARM[key][2]));
+  };
+  out.saturation = f(GRADE_NIGHT.sat, GRADE_DAY.sat, GRADE_WARM.sat);
+  out.contrast = f(GRADE_NIGHT.contrast, GRADE_DAY.contrast, GRADE_WARM.contrast);
+  out.lift = f(GRADE_NIGHT.lift, GRADE_DAY.lift, GRADE_WARM.lift);
+  tint(out.shadowTint, 'shadow');
+  tint(out.midTint, 'mid');
+  tint(out.highlightTint, 'high');
+  out.vignette = f(GRADE_NIGHT.vignette, GRADE_DAY.vignette, GRADE_WARM.vignette);
+  out.bloom = f(GRADE_NIGHT.bloom, GRADE_DAY.bloom, GRADE_WARM.bloom);
+  out.bloomThreshold = f(GRADE_NIGHT.threshold, GRADE_DAY.threshold, GRADE_WARM.threshold);
+  return out;
 }
 
 /** Parses "HH:MM" to minutes since midnight, or null. */

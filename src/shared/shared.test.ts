@@ -6,7 +6,7 @@ import { generateProceduralTile, propsToMesh } from './proceduralTile';
 import { Rng } from './rng';
 import { SnapshotRing } from './ring';
 import { SNAPSHOT_BYTES, SnapshotView, E, H } from './snapshot';
-import { decodeTile, heightAt, loadBakedTile, loadTileOrFallback, parseRoads, parseTileManifest } from './tile';
+import { decodeTile, heightAt, loadBakedTile, loadTileOrFallback, parseProps, parseRoads, parseTileManifest } from './tile';
 
 describe('Rng', () => {
   it('repeats for the same seed and differs for another', () => {
@@ -310,5 +310,17 @@ describe('handling table', () => {
     expect(() => parseHandling('x', { ...base, suspension: { ...base.suspension, restRatio: 1.5 } })).toThrow(/restRatio/);
     expect(() => parseHandling('x', { ...base, mass: Number.NaN })).toThrow(/finite/);
     expect(() => loadHandlingTable({ coupe: {} })).toThrow(/sedan/);
+  });
+});
+
+describe('props.json', () => {
+  it('keeps well formed anchors and drops the rest', () => {
+    const p = parseProps({ version: 1, trees: [[1, 2, 3, 10, 4, 0, 1], [1, 2, 3], [1, 2, 3, 10, 4, 0, Number.NaN]], lamps: [[0, 0, 0, 1, 9, 0, 1]], hydrants: [[1, 2, 3]] })!;
+    expect(p.trees.length).toBe(1);
+    expect(p.lamps.length).toBe(1);
+    expect(p.hydrants.length).toBe(1);
+    expect(p.bins).toEqual([]);
+    expect(parseProps({ version: 2 })).toBeNull();
+    expect(parseProps(null)).toBeNull();
   });
 });

@@ -60,8 +60,8 @@
       },
       "bootMs": 1194,
       "heapMB": 60,
-      "geometries": 708,
-      "textures": 8
+      "geometries": 880,
+      "textures": 14
     },
     "desktop-medium": {
       "phases": {
@@ -123,8 +123,8 @@
       },
       "bootMs": 870,
       "heapMB": 60,
-      "geometries": 699,
-      "textures": 8
+      "geometries": 860,
+      "textures": 14
     },
     "desktop-low": {
       "phases": {
@@ -186,7 +186,7 @@
       },
       "bootMs": 936,
       "heapMB": 59,
-      "geometries": 675,
+      "geometries": 860,
       "textures": 8
     },
     "phone-low": {
@@ -249,7 +249,7 @@
       },
       "bootMs": 1710,
       "heapMB": 60,
-      "geometries": 592,
+      "geometries": 780,
       "textures": 8
     }
   },

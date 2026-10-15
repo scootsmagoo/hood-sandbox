@@ -68,6 +68,22 @@ export function overpassPoiQuery(box: TileConfig['queryBox']): string {
 out geom;`;
 }
 
+/** Trees, street lamps and street furniture that props.json is made from. */
+export function overpassPropsQuery(box: TileConfig['queryBox']): string {
+  const b = `${box.south.toFixed(6)},${box.west.toFixed(6)},${box.north.toFixed(6)},${box.east.toFixed(6)}`;
+  return `[out:json][timeout:180];
+(
+  node["natural"="tree"](${b});
+  way["natural"="tree_row"](${b});
+  node["highway"="street_lamp"](${b});
+  node["man_made"="street_lamp"](${b});
+  node["emergency"="fire_hydrant"](${b});
+  node["amenity"~"^(waste_basket|waste_disposal)$"](${b});
+  node["barrier"="bollard"](${b});
+);
+out geom;`;
+}
+
 export async function fetchOsm(cfg: TileConfig): Promise<OsmData> {
   return fetchOverpass(cfg, overpassQuery(cfg.queryBox));
 }
@@ -86,6 +102,21 @@ export async function fetchOsmPois(cfg: TileConfig): Promise<OsmData | null> {
     } catch (e) {
       const wait = 4000 * 2 ** attempt;
       console.warn(`osm pois: attempt ${attempt + 1} failed (${(e as Error).message}); ${attempt < 3 ? `retrying in ${wait / 1000}s` : 'giving up, scenario points will be synthesised'}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  return null;
+}
+
+/** Tree and street furniture sources (cached, so a re-bake stays offline). Retried with a backoff; null if all attempts fail (the props are then synthetic only). */
+export async function fetchOsmProps(cfg: TileConfig): Promise<OsmData | null> {
+  const query = overpassPropsQuery(cfg.queryBox);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await fetchOverpass(cfg, query, 'osm-props');
+    } catch (e) {
+      const wait = 4000 * 2 ** attempt;
+      console.warn(`osm props: attempt ${attempt + 1} failed (${(e as Error).message}); ${attempt < 3 ? `retrying in ${wait / 1000}s` : 'giving up, props will be synthetic only'}`);
       if (attempt < 3) await new Promise((r) => setTimeout(r, wait));
     }
   }

@@ -9,26 +9,34 @@ export const WRECK = {
   /** A step that changes the car's velocity by less than this (m/s) is not a crash. */
   minDv: 2.0,
   /**
-   * Body damage per (m/s)^2 of velocity change above the minimum: damage follows the energy of the hit. (A crash bounces back
-   * at about a fifth of the speed in, so the velocity change of a hit is about 1.2 times the impact speed: a head-on into a
-   * wall smokes the engine from about 60 km/h, kills it from about 80 and can set it alight from about 90.)
+   * Body damage per (m/s)^2 of velocity change above the minimum: damage follows the energy of the hit. The velocity change of
+   * a head-on is about 1.2 to 1.3 times the impact speed. With the engine boost below, a head-on takes about 0.56 * (dv^2 -
+   * minDv^2) off the engine: one hit at 60 km/h leaves it well above the smoke line, one at 90 km/h smokes it lightly, and
+   * it takes 2 to 3 hits at 80 to 90 km/h, or one at 130 km/h, to kill it.
    */
-  bodyPerDv2: 1.05,
+  bodyPerDv2: 0.5,
   /** The engine takes a bit more than the body from a head-on. */
-  engineBoost: 1.3,
-  /** Share of that damage the engine takes: head-on, from the side, from behind. */
+  engineBoost: 1.12,
+  /** Share of that damage the engine takes: head-on, from the side, from behind. Side swipes barely touch the engine. */
   engineFront: 1.0,
-  engineSide: 0.35,
-  engineRear: 0.3,
+  engineSide: 0.1,
+  engineRear: 0.08,
   /** Engine health at which the car starts to smoke. */
-  smokeAt: 420,
-  /** The engine is dead at zero; this much below it, a fire starts at once. */
-  igniteBelow: -250,
+  smokeAt: 450,
+  /** The engine is dead at zero; this far below it (or more), a fire starts at once. */
+  igniteBelow: -400,
   /** Chance that a dead engine catches fire by itself, and the delay, s. */
-  igniteChance: 0.55,
+  igniteChance: 0.15,
   igniteDelayS: [1.5, 4] as const,
-  /** A fire burns this long before the tank goes, s. */
-  burnS: [5, 8] as const,
+  /** Chance that a bullet into an engine that is already low sparks it (the engine dies and burns), and the delay, s. */
+  bulletIgniteChance: 0.12,
+  /** A car resting upside down this long (s) catches fire, as in GTA. */
+  roofFireS: 4,
+  /** Speed under which a car counts as resting (m/s), and how far its up-vector must point down (y, from -1). */
+  restSpeed: 1.5,
+  roofUpY: -0.6,
+  /** A fire burns this long before the tank goes, s (the warning: `vehicle:burning` carries it). */
+  burnS: [10, 15] as const,
   /** Fire damage to someone sitting in the car, per second. */
   fireDamagePerS: 9,
   /** Blast: radius (m), damage to a ped at the centre, and the fraction of that a car takes. */

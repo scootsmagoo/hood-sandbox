@@ -1,11 +1,46 @@
 import type { Projector, V2 } from '../geo.js';
 import { pointInRing, ringBounds, ringCentroid, signedArea } from '../geo.js';
-import type { OvertureBuilding } from '../sources/overture.js';
+import type { OvertureBuilding, OvertureBuildingPart } from '../sources/overture.js';
 import type { OsmBuilding } from './osm.js';
 
 export type HeightSource = 'overture' | 'osm-height' | 'floors' | 'default';
 
-export interface Building {
+/** A building part (Overture `building_part`) in game coordinates. */
+export interface PartIn {
+  id: string;
+  /** polygons, each outer ring first then holes; open rings */
+  polygons: V2[][][];
+  height: number | null;
+  minHeight: number | null;
+  numFloors: number | null;
+  roofShape: string | null;
+  roofHeight: number | null;
+  roofDirection: number | null;
+  facadeMaterial: string | null;
+  facadeColor: string | null;
+}
+
+/** What the sources say about a building beyond its footprint and height (all optional: an old extract has none of it). */
+export interface BuildingInfo {
+  /** Overture id (no suffix for the polygon of a multipolygon or the pieces of a clip), the key of its parts */
+  srcId?: string;
+  name?: string | null;
+  /** tags of the OSM building that contains the footprint's centre */
+  tags?: Record<string, string>;
+  numFloors?: number | null;
+  minHeight?: number | null;
+  roofShape?: string | null;
+  roofHeight?: number | null;
+  /** degrees clockwise from north */
+  roofDirection?: number | null;
+  roofColor?: string | null;
+  facadeMaterial?: string | null;
+  facadeColor?: string | null;
+  hasParts?: boolean;
+  parts?: PartIn[];
+}
+
+export interface Building extends BuildingInfo {
   id: string;
   /** outer ring first, then holes; open rings */
   rings: V2[][];
@@ -98,7 +133,16 @@ export function buildBuildings(
   osm: OsmBuilding[],
   proj: Projector,
   bounds: { minX: number; minZ: number; maxX: number; maxZ: number },
+  parts: OvertureBuildingPart[] = [],
 ): { buildings: Building[]; stats: BuildingStats } {
+  const partsOf = new Map<string, PartIn[]>();
+  for (const p of parts) {
+    const polygons = p.polygons.map((poly) => poly.map((r) => openRing(r, proj)).filter((r) => r.length >= 3)).filter((poly) => poly.length > 0);
+    if (!polygons.length) continue;
+    const list = partsOf.get(p.buildingId) ?? [];
+    list.push({ id: p.id, polygons, height: p.height, minHeight: p.minHeight, numFloors: p.numFloors, roofShape: p.roofShape, roofHeight: p.roofHeight, roofDirection: p.roofDirection, facadeMaterial: p.facadeMaterial, facadeColor: p.facadeColor });
+    partsOf.set(p.buildingId, list);
+  }
   const osmBounds = osm.map((b) => ringBounds(b.rings[0]));
   const grid = new Grid(50);
   osm.forEach((b, i) => grid.add(i, osmBounds[i]));
@@ -117,10 +161,10 @@ export function buildBuildings(
     return c[0] >= bounds.minX && c[0] <= bounds.maxX && c[1] >= bounds.minZ && c[1] <= bounds.maxZ;
   };
 
-  const push = (id: string, rings: V2[][], h: number | null, floors: number | null, use: string | null, fromOsm = false) => {
+  const push = (id: string, rings: V2[][], h: number | null, floors: number | null, use: string | null, fromOsm = false, info: BuildingInfo = {}) => {
     const r = resolveHeight({ id, height: h, numFloors: floors, use });
     const source: HeightSource = r.source === 'overture' && fromOsm ? 'osm-height' : r.source;
-    out.push({ id, rings, height: r.height, heightSource: source, use: use ?? 'yes' });
+    out.push({ id, rings, height: r.height, heightSource: source, use: use ?? 'yes', ...info, numFloors: floors });
     stats.heightSources[source]++;
   };
 
@@ -144,14 +188,33 @@ export function buildBuildings(
           if (!use || use === 'yes') use = match.tags.building && match.tags.building !== 'yes' ? match.tags.building : use;
         }
         const id = `overture:${b.id}${b.polygons.length > 1 ? '/' + pi : ''}`;
-        push(id, rings, h, floors, use, fromOsm);
+        push(id, rings, h, floors, use, fromOsm, {
+          srcId: b.id,
+          name: b.name ?? match?.tags.name ?? null,
+          tags: match?.tags,
+          minHeight: b.minHeight ?? null,
+          roofShape: b.roofShape ?? (match?.tags['roof:shape'] || null),
+          roofHeight: b.roofHeight ?? null,
+          roofDirection: b.roofDirection ?? null,
+          roofColor: b.roofColor ?? null,
+          facadeMaterial: b.facadeMaterial ?? (match?.tags['building:material'] || null),
+          facadeColor: b.facadeColor ?? (match?.tags['building:colour'] || null),
+          hasParts: !!b.hasParts,
+          parts: partsOf.get(b.id),
+        });
         stats.overture++;
       });
     }
   } else {
     for (const b of osm) {
       if (!inside(b.rings)) continue;
-      push(b.id, b.rings, osmHeight(b.tags), osmLevels(b.tags), b.tags.building === 'yes' ? null : b.tags.building, true);
+      push(b.id, b.rings, osmHeight(b.tags), osmLevels(b.tags), b.tags.building === 'yes' ? null : b.tags.building, true, {
+        name: b.tags.name ?? null,
+        tags: b.tags,
+        roofShape: b.tags['roof:shape'] || null,
+        facadeMaterial: b.tags['building:material'] || null,
+        facadeColor: b.tags['building:colour'] || null,
+      });
       stats.osmOnly++;
     }
   }

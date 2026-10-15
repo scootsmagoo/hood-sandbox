@@ -421,6 +421,7 @@ Reference projects: Streets GL (MIT, a browser OSM renderer), OSM2World, TerraDr
 
 - **Targets**: 60 fps on an M-series MacBook in Chrome and Safari, playable (30+ fps) on an iPhone 15 Pro, about 1,500 draw calls and about 3M visible triangles at most on High.
 - **Graphics tiers** (Low, Medium, High, picked from the GPU, with a governor that steps down when the frame rate drops) also scale crowd and traffic density and LOD distances.
+- **The look is GTA IV's, in Atlanta** (`src/client/render/look/`, [docs/graphics-plan.md](docs/graphics-plan.md) section 9): muted, hazy and grimy by day, a smoggy dusk, sodium-orange street lamps and lit windows at night, over procedural facades and worn roads, with a post pass for the grade and the bloom. Each tier has `fx` fields saying how much of it to spend (the table is in [docs/perf.md](docs/perf.md)). `?gfx=classic` is the old flat renderer; `&gfxoff=post,facade,surface,haze,lamps,bloom` turns parts off for an A/B test.
 - **Draw calls**: BatchedMesh per material for tiles, InstancedMesh for props, peds and traffic, and impostors for far buildings.
 - **Memory**: free CPU copies after GPU upload and stream tiles in and out. Phones get a lighter build (fewer pool lights, smaller tile radius, lower texture resolution). The iPhone's memory ceiling is the hard limit.
 - **Perf and leak gates in CI** from the first playable build, ported from Skyrome's scripts (`perf-budget`, `soak`, `leaks`, `check:controls`).

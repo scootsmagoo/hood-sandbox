@@ -8,8 +8,11 @@ import { GamepadSource } from './client/input/gamepad';
 import { TouchControls } from './client/input/touch';
 import { NetSystem } from './client/net/NetSystem';
 import { Atmosphere } from './client/render/Atmosphere';
+import { lookMode } from './client/graphics';
+import { installLook } from './client/render/look';
 import { clockFromParams } from './client/render/timeOfDay';
 import { EntityViews } from './client/render/EntityViews';
+import { loadCarAssets } from './client/render/carAssets';
 import { loadCollisionDebug } from './client/render/CollisionDebug';
 import { loadScenarioProps } from './client/render/ScenarioProps';
 import { loadSignalHeads } from './client/render/SignalHeads';
@@ -52,6 +55,8 @@ async function main() {
     const tileBase = tileParam === 'none' ? null : new URL(tileParam ?? DEFAULT_TILE, document.baseURI).href;
     const seed = Number(params.get('seed') ?? 1) || 1;
 
+    // The car models (public/assets/vehicles, built by `npm run assets`) load while the sim starts; a car whose model fails stays a box.
+    const carAssets = loadCarAssets();
     const transport = await createTransport(params);
     game.transport = transport;
     boot.textContent = 'Loading the map…';
@@ -104,11 +109,13 @@ async function main() {
       if (dbg) game.addSystem(dbg);
     }
     game.addSystem(new AimSystem(game));
+    await carAssets;
     game.addSystem(new EntityViews(game));
     game.addSystem(new GunFx(game));
     game.addSystem(new CameraRig(game));
     game.addSystem(new Atmosphere(game));
-    if (params.get('gfx') === 'next') (await import('./client/render/next')).installGfxNext(game); // graphics spike, docs/graphics-plan.md
+    // The GTA IV look (src/client/render/look/): the default. ?gfx=classic is the old flat renderer; &gfxoff=post,facade,surface,haze,lamps,bloom switches parts off for A/B.
+    if (lookMode(params) === 'gta4') installLook(game, tileBase);
     game.addSystem(new Hud(game));
     game.addSystem(new GunHud(game));
     game.addSystem(new LawHud(game));

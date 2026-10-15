@@ -3,6 +3,7 @@ import type { V2 } from '../geo.js';
 import { segmentIntersection } from '../geo.js';
 import type { MeshBuilder } from '../mesh/builder.js';
 import type { RoadWay } from './osm.js';
+import { distToRings } from './shape.js';
 
 /**
  * Junction polygons.
@@ -324,7 +325,17 @@ export function addJunctionMesh(
   const poly = j.polygon;
   const n = poly.length;
   const sign = polygonArea(poly) >= 0 ? 1 : -1;
-  const v = (x: number, z: number, lift: number) => target.vertex(x, ground(x, z) + lift, z, 0, 1, 0, color[0], color[1], color[2]);
+  const ring: V2[] = poly.map((q) => [q.x, q.z] as V2);
+  const hasUv = target.channels.has('uv');
+  const v = (x: number, z: number, lift: number) => {
+    const i = target.vertex(x, ground(x, z) + lift, z, 0, 1, 0, color[0], color[1], color[2]);
+    if (hasUv) {
+      // texture coordinates are the world position; uv1 = (0, distance to the kerb)
+      target.set('uv', i, x, z);
+      target.set('uv1', i, 0, distToRings(x, z, [ring]));
+    }
+    return i;
+  };
   // star-shaped around the centre when every fan triangle has the polygon's orientation
   let star = true;
   for (let i = 0; i < n; i++) {

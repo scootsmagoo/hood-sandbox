@@ -84,7 +84,8 @@ export function loadTileConfig(cityId = 'atlanta', tileId = 'm1-five-points'): T
     chunkSize: t.chunkSizeM ?? 256,
     cols,
     rows: cols,
-    outDir: path.join(REPO_ROOT, 'public/tiles', city.id, t.id),
+    // HOOD_TILE_OUT writes the bake somewhere else (an experiment that must not disturb the tile the dev server serves)
+    outDir: process.env.HOOD_TILE_OUT ? path.resolve(process.env.HOOD_TILE_OUT) : path.join(REPO_ROOT, 'public/tiles', city.id, t.id),
     cacheDir: path.join(CACHE_DIR, city.id, t.id),
   };
 }

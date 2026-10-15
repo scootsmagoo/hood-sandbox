@@ -268,6 +268,14 @@ The existing controls check, with a Chromium (default) or Playwright WebKit (`--
 | Medium | 1.5 | 1024, 50 m | 1400 m | 300 m | on (desktop) |
 | Low | 1 | none | 700 m | 220 m | off |
 
+What the GTA IV look spends per tier (`Tier.fx`, see "The GTA IV look" below):
+
+| | facade | surfaces | post | bloom | haze | lamps |
+|---|---|---|---|---|---|---|
+| High | 2 full | 2 full | 2 grade + bloom | 2 levels (1/4, 1/16) | on | 2 (80 poles, 56 pools, 1000 glows) |
+| Medium | 2 full | 2 full | 2 grade + bloom | 2 levels | on | 2 |
+| Low | 1 (no stains, streaks, slab lines, blinds) | 1 (no patches, cracks, stains, finest octaves) | 1 (one grade pass, no bloom) | 0 | on | 1 (36 poles, 28 pools, 500 glows) |
+
 Touch devices start on Medium and the governor steps down after 3 s above 24 ms; `?graphics=low` forces Low (the phone profile does). Multisampling is off on touch devices and whenever `?graphics=low`. The coarse ground distance is `400 m x lodScale` (1, 0.75, 0.55), so new level-of-detail code should divide the distance it measures by `lodScale` as the header of `graphics.ts` says. On the phone profile Low draws 160 to 170 calls and 72k to 82k triangles; High draws up to 484 and 200k.
 
 ## Known problems the harnesses surfaced
@@ -299,6 +307,43 @@ Touch devices start on Medium and the governor steps down after 3 s above 24 ms;
 - Far building and road impostors (README: "impostors for far buildings"): they are the next triangle cost once towers get detail.
 - Real-device numbers, then re-baseline `phone-low`.
 
+## The GTA IV look (2026-10-15)
+
+The default look is now GTA IV's (`src/client/render/look/`, [docs/graphics-plan.md](graphics-plan.md) section 9). `?gfx=classic` is the old renderer, `&gfxoff=post,facade,surface,haze,lamps,bloom` switches parts off. It adds no geometry beyond the lamp poles (at most 80 instanced), no textures (everything is ALU in the material shaders), 3 to 4 instanced lamp draws at night (the poles by day), and a post chain: the scene into a half-float target, then (High and Medium) 6 small bloom passes and one composite, or (Low) the composite alone.
+
+**Before and after, same tile, same session, same box** (`npm run perf-budget` and `perf-budget:phone`, best of 2, `--query gfx=classic` against the default; worst phase of each profile; the tile is mesh format 2 for both, so the triangle counts are the new tile's):
+
+| Profile | Draws | Triangles | GPU p50 / p95 (timer queries) | Textures | Heap |
+|---|---|---|---|---|---|
+| desktop-high | 470 -> 455 | 401k -> 406k | 0.3 / 0.7 -> 0.6 / 1.3 ms | 6 -> 11 | 51.0 -> 51.3 MB |
+| desktop-medium | 425 -> 428 | 329k -> 336k | 0.4 / 0.6 -> 0.7 / 1.3 ms | 6 -> 11 | 51.1 -> 50.9 MB |
+| desktop-low | 289 -> 291 | 207k -> 207k | 0.2 / 0.5 -> 0.5 / 0.7 ms | 4 -> 5 | 50.0 -> 49.8 MB |
+| phone-low (4x CPU) | 210 -> 206 | 167k -> 157k | 0.2 / 0.2 -> 0.3 / 0.4 ms | 4 -> 5 | 49.8 -> 50.1 MB |
+
+Draws and triangles differ by route (the bot drives a different way each run), not by the look: the look draws the scene once, plus 7 post draws and 3 to 4 lamp draws at night, and the poles are about 1.5k triangles. **The CPU timings of those runs are not usable:** other jobs shared the machine (the phone profile's classic baseline read 9.8 ms of main-thread time a frame against 4.3 ms on a quiet box, and the default read 10.0), so the cpuMean and cpuP95 budgets, which were already being exceeded by the classic path in the same run, say nothing about the look. By construction the look's own main-thread work is small: the patch scan twice a second (a traverse of about 400 meshes), the post passes' submit (7 draws), and at night a lamp list rebuild when the camera has moved 15 m (up to about 2,000 lamps to sort, at most every 0.4 s). It was not timed on its own; re-measure the phone profile on a quiet machine.
+
+**What the parts cost the GPU** (`node scripts/gfx-cost.mjs`: 150 frames on a fixed camera, frame limit off, `renderer.render` plus `gl.finish()`, traffic and people off, mean of the middle 80% in ms; "no X" is the default with one part switched off with `gfxoff`). The box's GPU is far faster than a phone's, so these say how the parts compare, not what a phone will do (the phone's A17 Pro is roughly a seventh of this GPU in compute; the phone viewport is 0.26 MP at Low and 0.58 MP at Medium against 0.92 MP here):
+
+| Tier, view | classic | default | no post | no facade | no surface | no lamps |
+|---|---|---|---|---|---|---|
+| High, street by day | 0.44 | 0.51 | 0.47 | 0.49 | 0.49 | 0.50 |
+| High, aerial by day | 0.68 | 0.81 | 0.73 | 0.77 | 0.78 | 0.76 |
+| High, street at night | 0.46 | 0.51 | 0.50 | 0.50 | 0.50 | 0.52 |
+| Medium, street by day | 0.41 | 0.48 | 0.44 | 0.47 | 0.48 | 0.45 |
+| Medium, aerial by day | 0.67 | 0.75 | 0.72 | 0.76 | 0.78 | 0.75 |
+| Low, street by day | 0.28 | 0.38 | 0.32 | 0.32 | 0.32 | 0.32 |
+| Low, aerial by day | 0.45 | 0.51 | 0.49 | 0.50 | 0.48 | 0.49 |
+| Phone Medium (393x659), street / aerial | 0.35 / 0.55 | 0.39 / 0.62 | 0.37 / 0.60 | 0.39 / 0.61 | 0.39 / 0.62 | 0.37 / 0.62 |
+| Phone Low, street / aerial | 0.22 / 0.39 | 0.27 / 0.41 | 0.24 / 0.41 | 0.24 / 0.43 | 0.26 / 0.41 | 0.25 / 0.41 |
+
+The whole look costs 0.05 to 0.13 ms on this GPU, the post chain about 0.03 to 0.06 of it, and no single part more than 0.04. Differences of 0.02 ms are noise. **The Low decision:** Low keeps a single grade pass (`post: 1`) rather than none. The grade is most of what makes the picture GTA IV (the desaturation, the cast and the lifted blacks: without it Low would look like a different game from Medium), it costs 0.05 ms here at 0.26 MP (a 2 MB half-float target and one full-screen pass), the phone-low profile with post off measured a GPU p50 of 0.2 ms against 0.3, and it has nothing that grows with the scene. The fallback if a real iPhone says otherwise is one line: `post: 0` on Low (the look then keeps its materials, haze, sky and lamps, and loses the grade and the vignette). Bloom is the part to cut first on a slow phone (`bloom: 0` on Medium).
+
+**Budgets.** Raised: `textures` for desktop-high and desktop-medium from 8 to 14 (the post chain's render targets: the scene target and the four bloom targets, 6 -> 11 measured, x1.3); phone-low and desktop-low stay at 8 (5 measured). Nothing else was raised for the look: the count and GPU budgets hold. Still over, and not because of the look: the CPU means and p95s (a busy machine, see above) and the triangle budgets of desktop-high and desktop-medium, which the classic path exceeds in the same runs (401k against 370k, 329k against 330k) because the tile is now meshFormat 2 (pitched roofs, building parts, rooftop equipment); the phone-low triangle budget (160k) sits at the new tile's 157k to 167k. Those want re-baselining when the pipeline lane's tile settles.
+
+**Memory.** The post chain is one RGBA16F target (8 bytes a pixel: about 7 MB at 1280x720, about 2 MB at 393x659, plus a 4x multisampled copy of about 30 MB where the canvas has MSAA) and four small bloom targets (none on Low: they are 2 x 2). No textures are added; the JS heap grows by about 0.3 MB. Programs: the look adds about 14 (the facade, 6 surface kinds, the sky, 4 post passes, the lamp materials); the leak harness shows them stable across reloads and tier switches.
+
+**Gates.** `npm run leaks` passes (reload 453 -> 453 geometries, 9 -> 9 textures, programs 43 -> 43; tiers, drive, crowd and gunfire flat), `npm run check:controls` passes, `npm test` (674 tests, with new ones for the palettes, the grade, the tier fx, the lamp placement and the facade attributes) and `npm run build` pass. One full leaks run failed once with `reload` +5 geometries and `tiers` +24 unused, while the pipeline lane was baking a new tile; two reruns on a still tile pass, as does `--query gfx=classic`.
+
 ### Round 6 timing tripwires (2026-10-15)
 
 The GTA IV physics, the ragdolls, solid props, the police pacing HUD and the street-name label together put desktop-low and phone-low over their p95 tripwires. Measured the same day on the same machine:
@@ -312,3 +357,20 @@ The GTA IV physics, the ragdolls, solid props, the police pacing HUD and the str
 So the round costs about 0.2 ms of main-thread time on average on the throttled phone, plus spikier p95 tails. Only the failing `cpuP95` lines were raised, to the worst seen that day x1.25 (desktop-low idle, walk, drive; phone-low every phase). Means, draws, triangles and heap are unchanged. `--write-budget` was not used: it doubles a noisy p95 (phone-low look would have gone 5.4 -> 14.2), which would make the tripwire useless.
 
 `LawHud` and `GunHud` now read the viewport size from `game.viewW` / `game.viewH` (set on resize), not `canvas.clientWidth` in a frame: a layout read after the HUD's writes forces a synchronous reflow. The dialling markers do nothing in a frame with nobody dialling.
+
+## Blender cars (2026-10-15)
+
+The box stand-ins are replaced by the scripted Blender cars of `tools/blender/` (sedan, coupe, pickup, and police cruisers on the sedan and coupe), loaded from `public/assets/vehicles/*.glb` (five files, 176 to 209 KB each, 0.95 MB in all, meshopt-compressed). Triangles per car at LOD0 / LOD1 / LOD2 (the wheel counted four times): sedan 8274 / 1908 / 460, coupe 8094 / 1832 / 472, pickup 8212 / 2198 / 526, sedan-police 8668 / 2044 / 508, coupe-police 8494 / 1968 / 520.
+
+**Levels of detail** (`src/client/render/carLod.ts`, distances divided by the tier's `lodScale`): a full model (the player's car, police, a damaged or burning or opened traffic car within 45 m) draws LOD0 within 20 m, LOD1 to 55 m, LOD2 beyond, holding a level 2 m past its boundary. Instanced traffic draws LOD0 only within 9 m, LOD1 to 55 m, LOD2 beyond, as five instanced meshes per type and level in use (paint, detail, glass, lamps, wheels). Only the paint casts a shadow (and the wheels up close).
+
+**Draws.** A full car is now about 17 draws at LOD0 (body by material, one lamp mesh for head, tail and reverse, the door, bonnet and bumpers, and all four wheels as one InstancedMesh per wheel material), 11 at LOD1 and 5 at LOD2, against 25 to 28 for the stand-in. That is where the police response got cheaper.
+
+| 40 traffic cars and 4 police cruisers by the player, 1280x720 (90 frames, maximum) | Stand-in boxes (`?cars=box`) | Blender cars | Delta |
+|---|---|---|---|
+| desktop-high: draws / triangles | 448 / 256k | 405 / 304k | -43 / +48k |
+| desktop-low: draws / triangles | 256 / 159k | 252 / 182k | -4 / +23k |
+
+`npm run perf-budget` against `?cars=box`, the same day and tree: desktop-high draws fell by 50 to 175 a phase (walk 571 -> 420, look 610 -> 434), triangles rose by up to 60k (walk 298k -> 357k, drive 305k -> 359k); phone-low draws fell slightly (look 350 -> 208), triangles rose by up to 29k (drive 128k -> 157k). All the draw and triangle budgets hold. Main-thread CPU is about +0.1 ms a frame on desktop and +0.5 ms on the phone profile (its 4x slowdown), mostly in three's draw submission for the new materials; the CPU tripwires on this shared box were over for both the stand-in and the new cars. The geometry budgets went up (708 -> 880 desktop-high, 592 -> 780 phone-low): every car asset's geometry is uploaded once at boot (`EntityViews.prewarm` draws each asset at each level into a 1-pixel target, so nothing uploads or compiles mid-game), about 1 MB of GPU buffers.
+
+**Damage** (`carDamage.ts`, `carModel.ts`) costs nothing until a car is hit: the first dent clones that car's near geometry (about 0.3 MB) and moves the vertices in the dent's sphere on the CPU (a millisecond or so per hit); the copies are freed with the model. Fallen bumpers are a pool of at most 10 pieces. `npm run leaks` passes all phases, and a new `wrecks` phase (`--phases wrecks --query transport=loopback`, 20 cycles: three cars wrecked through the client's event path, one blown up, then removed) is flat: geometries 626 -> 626, objects 1314 -> 1314.

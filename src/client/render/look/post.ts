@@ -1,10 +1,12 @@
 /**
- * A small post-processing chain for `?gfx=next`: the scene is drawn into a half-float target
- * (multisampled where the canvas is), a cheap two-level bloom is built from the bright parts, and
- * one composite pass does the tone mapping (the same ACES curve three.js uses), a colour grade
- * that follows the time of day, a vignette and a little dither.
+ * A small post-processing chain: the scene is drawn into a half-float target (multisampled where
+ * the canvas is), an optional cheap two-level bloom is built from the bright parts, and one
+ * composite pass does the tone mapping (the same ACES curve three.js uses), the colour grade of
+ * `gradeLook` (timeOfDay.ts: saturation, contrast, lifted blacks, shadow, mid-tone and highlight
+ * tints), a vignette and a little dither. With `levels = 0` it is the single cheap grade pass of
+ * the Low tier: no bloom passes at all.
  *
- * It hooks `renderer.render` on the one instance, so no file outside `next/` changes, and
+ * It hooks `renderer.render` on the one instance, so nothing outside `look/` changes, and
  * `dispose()` puts the original back. Draw-call counts keep adding up across the passes
  * (`info.autoReset` is turned off and reset by hand once a frame).
  *
@@ -12,20 +14,16 @@
  * (about 6 small passes), and one full-screen composite. Low tier keeps only the 1/4 level.
  */
 import * as THREE from 'three';
+import { newGradeLook, type GradeLook } from '../timeOfDay';
 import { GLSL_NOISE } from './glsl';
 
-export interface GradeParams {
+/** The grade plus the renderer's exposure. */
+export interface PostGrade extends GradeLook {
   exposure: number;
-  saturation: number;
-  contrast: number;
-  shadowTint: THREE.Color;
-  highlightTint: THREE.Color;
-  vignette: number;
-  bloom: number;
 }
 
-export function newGrade(): GradeParams {
-  return { exposure: 1, saturation: 1, contrast: 1, shadowTint: new THREE.Color(1, 1, 1), highlightTint: new THREE.Color(1, 1, 1), vignette: 0.2, bloom: 0.4 };
+export function newGrade(): PostGrade {
+  return { ...newGradeLook(), exposure: 1 };
 }
 
 const FULL_VERT = /* glsl */ `
@@ -93,7 +91,9 @@ uniform float uBloomB;
 uniform float uSat;
 uniform float uContrast;
 uniform vec3 uShadowTint;
+uniform vec3 uMidTint;
 uniform vec3 uHighTint;
+uniform float uLift;
 uniform float uVignette;
 varying vec2 vUv;
 ${GLSL_NOISE}
@@ -126,7 +126,9 @@ void main() {
   // an S-curve around mid grey, strength from uContrast
   vec3 s = col * col * (3.0 - 2.0 * col);
   col = mix(col, s, uContrast);
+  col *= mix(vec3(1.0), uMidTint, 1.0 - abs(l * 2.0 - 1.0));
   col *= mix(uShadowTint, uHighTint, smoothstep(0.05, 0.75, l));
+  col = uLift + col * (1.0 - uLift);
   vec2 q = vUv - 0.5;
   col *= 1.0 - uVignette * smoothstep(0.25, 0.85, dot(q, q) * 2.2);
   col += (gfxH21(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -148,7 +150,7 @@ type RenderFn = THREE.WebGLRenderer['render'];
 
 export class PostFx {
   readonly grade = newGrade();
-  /** Bloom levels to build this frame: 2 (1/4 and 1/16 size), 1 (1/4 only) or 0. */
+  /** Bloom levels to build this frame: 2 (1/4 and 1/16 size), 1 (1/4 only) or 0 (none: the grade pass alone). */
   levels = 2;
   private readonly size = new THREE.Vector2();
   private readonly rtOpts: THREE.RenderTargetOptions;
@@ -168,6 +170,7 @@ export class PostFx {
   private originalRender: RenderFn | null = null;
   private wasAutoReset = true;
   private busy = false;
+  private sizeKey = -1;
 
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
@@ -198,7 +201,9 @@ export class PostFx {
       uSat: { value: 1 },
       uContrast: { value: 0 },
       uShadowTint: { value: this.grade.shadowTint },
+      uMidTint: { value: this.grade.midTint },
       uHighTint: { value: this.grade.highlightTint },
+      uLift: { value: 0 },
       uVignette: { value: 0.2 },
     });
     this.quad = new THREE.Mesh(geo, this.prefilterMat);
@@ -227,13 +232,16 @@ export class PostFx {
     this.renderer.getDrawingBufferSize(this.size);
     const w = Math.max(2, this.size.x);
     const h = Math.max(2, this.size.y);
-    if (this.scene.width === w && this.scene.height === h) return;
+    const key = w * 100000 + h + this.levels * 1e11;
+    if (this.sizeKey === key) return;
+    this.sizeKey = key;
     this.scene.setSize(w, h);
-    const q = (n: number, f: number) => Math.max(2, Math.floor(n / f));
-    this.a.setSize(q(w, 4), q(h, 4));
-    this.b.setSize(q(w, 4), q(h, 4));
-    this.c.setSize(q(w, 16), q(h, 16));
-    this.d.setSize(q(w, 16), q(h, 16));
+    // The bloom targets stay at 2 x 2 for levels that are not built, so Low pays nothing for them.
+    const q = (n: number, f: number, on: boolean) => (on ? Math.max(2, Math.floor(n / f)) : 2);
+    this.a.setSize(q(w, 4, this.levels > 0), q(h, 4, this.levels > 0));
+    this.b.setSize(q(w, 4, this.levels > 0), q(h, 4, this.levels > 0));
+    this.c.setSize(q(w, 16, this.levels > 1), q(h, 16, this.levels > 1));
+    this.d.setSize(q(w, 16, this.levels > 1), q(h, 16, this.levels > 1));
   }
 
   private pass(mat: THREE.ShaderMaterial, target: THREE.WebGLRenderTarget | null): void {
@@ -255,6 +263,7 @@ export class PostFx {
       const g = this.grade;
       const levels = this.levels;
       const pm = this.prefilterMat.uniforms;
+      pm.uThreshold.value = g.bloomThreshold;
       if (levels > 0) {
         // bright pass to 1/4, blur
         pm.tSrc.value = this.scene.texture;
@@ -279,6 +288,7 @@ export class PostFx {
       cu.uSat.value = g.saturation;
       cu.uContrast.value = g.contrast;
       cu.uVignette.value = g.vignette;
+      cu.uLift.value = g.lift;
       this.pass(this.compositeMat, null);
     } finally {
       r.setRenderTarget(null);

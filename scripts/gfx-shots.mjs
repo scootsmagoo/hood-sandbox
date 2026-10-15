@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
  * Graphics comparison shots into .shots/ (docs/graphics-plan.md). The same fixed camera views, drawn
- * with the default renderer or with `?gfx=next`, so a before and an after can be put side by side.
+ * with the default look (GTA IV) or with `--query gfx=classic`, so a before and an after can be put
+ * side by side. Views named `<place>-<time>` exist for every place (five-points, peachtree,
+ * centennial, aerial, street, plaza) and time (day 14:00, dusk 18:50, night 23:30), and `driving`.
  *
- *   node scripts/gfx-shots.mjs --prefix gfx-before [--query "gfx=next"] [--views street-day,street-night,...]
+ *   node scripts/gfx-shots.mjs --prefix gta4 [--query "gfx=classic"] [--views five-points-day,peachtree-night,...]
  *                              [--url http://127.0.0.1:5180/] [--graphics high|medium|low] [--size 1280x720]
  *
  * Views are camera placements, not gameplay: a system added after the camera rig puts the camera at
@@ -33,6 +35,16 @@ const VIEWS = {
   'aerial-night': { time: '23:30', eye: [150, 150, 210], look: [-80, 20, -160], fov: 55 },
   driving: { time: '17:30', eye: [0, 0, 0], look: [0, 0, 0], fov: 62, drive: true },
 };
+// The look's shots: a place at three times of day.
+const PLACES = {
+  'five-points': { eye: [-45, 5.4, 66], look: [5, 12, -8], fov: 64 },
+  peachtree: { eye: [30, 4.4, -45], look: [95, 17, -170], fov: 62 },
+  centennial: { eye: [-203, -10.5, -640], look: [-320, -14, -730], fov: 70 },
+  aerial: { eye: [150, 150, 210], look: [-80, 20, -160], fov: 55 },
+};
+const TIMES = { day: '14:00', dusk: '18:50', night: '23:30' };
+for (const [pn, pv] of Object.entries(PLACES)) for (const [tn, tv] of Object.entries(TIMES)) VIEWS[`${pn}-${tn}`] = { time: tv, ...pv };
+for (const [tn, tv] of Object.entries(TIMES)) VIEWS[`driving-${tn}`] = { time: tv, eye: [0, 0, 0], look: [0, 0, 0], fov: 62, drive: true };
 if (typeof args.eye === 'string' && typeof args.look === 'string') {
   // A one-off view: --eye x,y,z --look x,y,z [--time HH:MM]
   VIEWS.custom = { time: typeof args.time === 'string' ? args.time : '14:00', eye: args.eye.split(',').map(Number), look: args.look.split(',').map(Number), fov: 62 };

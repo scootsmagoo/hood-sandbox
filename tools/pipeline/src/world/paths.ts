@@ -813,16 +813,32 @@ export function buildPaths(inp: PathsInput): PathsResult {
   return { file, syntheticLines };
 }
 
-/** Ribbons for the synthetic sidewalks, added to the sidewalk mesh so they exist to look at as well as to walk on. */
-export function addSyntheticSidewalkMesh(mesh: MeshBuilder, lines: { pts: V2[]; ys: number[] }[], ground: (x: number, z: number) => number): number {
+/** Ribbons for the synthetic sidewalks, added to the sidewalk mesh so they exist to look at as well as to walk on. `onRoad` tells which side of a ribbon has the carriageway (for the kerb attribute). */
+export function addSyntheticSidewalkMesh(mesh: MeshBuilder, lines: { pts: V2[]; ys: number[] }[], ground: (x: number, z: number) => number, onRoad?: (x: number, z: number) => boolean): number {
   let tris = 0;
+  const hasUv = mesh.channels.has('uv');
   for (const line of lines) {
     if (line.pts.length < 2) continue;
     const { left, right } = ribbonEdges(line.pts, SYNTHETIC_WIDTH / 2);
     const base = mesh.vertexCount;
+    let along = 0;
     for (let i = 0; i < line.pts.length; i++) {
-      mesh.vertex(left[i][0], ground(left[i][0], left[i][1]) + WALK_LIFT, left[i][1], 0, 1, 0);
-      mesh.vertex(right[i][0], ground(right[i][0], right[i][1]) + WALK_LIFT, right[i][1], 0, 1, 0);
+      const li = mesh.vertex(left[i][0], ground(left[i][0], left[i][1]) + WALK_LIFT, left[i][1], 0, 1, 0);
+      const ri = mesh.vertex(right[i][0], ground(right[i][0], right[i][1]) + WALK_LIFT, right[i][1], 0, 1, 0);
+      if (!hasUv) continue;
+      if (i > 0) along += Math.hypot(line.pts[i][0] - line.pts[i - 1][0], line.pts[i][1] - line.pts[i - 1][1]);
+      const w = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
+      let kerb = 0;
+      if (onRoad && w > 0.1) {
+        const nx = (right[i][0] - left[i][0]) / w, nz = (right[i][1] - left[i][1]) / w;
+        const rr = onRoad(right[i][0] + nx * 2, right[i][1] + nz * 2);
+        const ll = onRoad(left[i][0] - nx * 2, left[i][1] - nz * 2);
+        kerb = rr && !ll ? 1 : ll && !rr ? -1 : 0;
+      }
+      mesh.set('uv', li, 0, along);
+      mesh.set('uv', ri, w, along);
+      mesh.set('uv1', li, w / 2, kerb);
+      mesh.set('uv1', ri, w / 2, kerb);
     }
     mesh.indices.push(...ribbonIndices(line.pts.length, base));
     tris += (line.pts.length - 1) * 2;

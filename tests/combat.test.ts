@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { generateProceduralTile } from '../src/shared/proceduralTile';
 import { COMBAT, carHitDamage, fallDamage, pickMeleeTarget } from '../src/sim/combat/damage';
 import { impactDamage, WRECK } from '../src/sim/combat/vehicleDamage';
+import type { SimEvent } from '../src/shared/protocol';
 import { LIFE } from '../src/sim/combat/systems';
 import { HANDLING } from '../src/shared/handling';
 import { SnapshotView, E, PedFlag, VehicleFlag, H, Overlay } from '../src/shared/snapshot';
@@ -48,6 +49,16 @@ describe('damage numbers', () => {
     expect(impactDamage(0, -18, 0, HANDLING.coupe.damage).engine).toBeGreaterThan(head.engine);
     expect(impactDamage(0, -18, 0, HANDLING.pickup.damage).body).toBeLessThan(head.body);
     expect(HANDLING.pickup.damage.bodyHealth).toBeGreaterThan(HANDLING.sedan.damage.bodyHealth);
+  });
+  it('the engine numbers: a 60 km/h head-on leaves it above the smoke line, a side swipe or a bump barely touches it', () => {
+    const sedan = HANDLING.sedan.damage;
+    // the velocity change of a head-on at 60 and 90 km/h (measured: about 1.2 to 1.3 times the impact speed)
+    const at60 = 19.4;
+    const at90 = 32.7;
+    expect(impactDamage(0, -at60, 0, sedan).engine).toBeLessThan(1000 - WRECK.smokeAt);
+    expect(impactDamage(0, -at90, 0, sedan).engine).toBeGreaterThan(1000 - WRECK.smokeAt);
+    expect(impactDamage(at60, 0, 0, sedan).engine).toBeLessThan(40);
+    expect(impactDamage(0, -6, 0, sedan).engine).toBeLessThan(30);
   });
 });
 
@@ -265,30 +276,48 @@ describe('falls', () => {
 });
 
 describe('wrecking a car', () => {
-  /** Drives into the tile's north wall at `speed` m/s (rolling up to it a few metres out), then holds the throttle. */
-  async function crash(speed: number, type = 'sedan') {
+  /**
+   * Coasts into the tile's north wall at `speed` m/s, `hitCount` times: each time from a standstill a metre and a half short
+   * of the wall, with the throttle off so the car does not keep pushing. The events of the whole run come back too.
+   */
+  async function hits(speed: number, hitCount: number, type = 'sedan', seconds = 12) {
     const tile = generateProceduralTile(1);
     const { sim, car } = await driverSim(type, tile, { x: -40, z: 985 });
-    // the wall's face is at z 1000: start with the bumper a metre and a half short of it
-    car.teleport(-40, 0.4, 1000 - car.h.chassis.halfExtents[2] - 1.5, 0);
-    run(sim, 10, cmd());
-    car.body.setLinvel({ x: 0, y: 0, z: speed }, true);
-    car.adopt();
-    const v = vehicle(sim);
-    const events = runLog(sim, 60 * 12, () => cmd({ axes: { Throttle: 1 } }));
-    return { sim, v, events };
+    const events: SimEvent[] = [];
+    for (let i = 0; i < hitCount; i++) {
+      // the wall's face is at z 1000: start with the bumper a metre and a half short of it
+      car.teleport(-40, 0.4, 1000 - car.h.chassis.halfExtents[2] - 1.5, 0);
+      events.push(...runLog(sim, 10, cmd()));
+      car.body.setLinvel({ x: 0, y: 0, z: speed }, true);
+      car.adopt();
+      events.push(...runLog(sim, 60 * seconds, cmd()));
+    }
+    return { sim, v: vehicle(sim), events };
   }
+  const crash = (speed: number, type = 'sedan', seconds = 12) => hits(speed, 1, type, seconds);
+  const KMH = (kmh: number) => kmh / 3.6;
 
-  it('a gentle bump does nothing; a hard hit smokes the engine', async () => {
+  it('a gentle bump does nothing; a 60 km/h head-on dents the body and leaves the engine running and clear of smoke', async () => {
     const soft = await crash(4);
     expect(soft.v.engine).toBeGreaterThan(900);
     expect(soft.v.smoking).toBe(false);
-    const hard = await crash(19);
+    const dent = await crash(KMH(60));
+    expect(dent.v.health).toBeLessThan(dent.v.maxBody);
+    expect(dent.v.health).toBeGreaterThan(dent.v.maxBody * 0.6);
+    expect(dent.v.engine).toBeGreaterThan(WRECK.smokeAt);
+    expect(dent.v.smoking).toBe(false);
+    expect(dent.v.engineDead).toBe(false);
+    expect(ofType(dent.events, 'vehicle:smoke')).toHaveLength(0);
+    expect(ofType(dent.events, 'vehicle:damage').length).toBeGreaterThan(0);
+  });
+
+  it('a 90 km/h head-on smokes the engine, lightly: not dead', async () => {
+    const hard = await crash(KMH(90));
     expect(hard.v.smoking).toBe(true);
     expect(hard.v.engineDead).toBe(false);
+    expect(hard.v.engine).toBeGreaterThan(0);
     expect(hard.v.engine).toBeLessThan(WRECK.smokeAt);
     expect(ofType(hard.events, 'vehicle:smoke')).toHaveLength(1);
-    expect(ofType(hard.events, 'vehicle:damage').length).toBeGreaterThan(0);
     const v = new SnapshotView();
     hard.sim.writeSnapshot(v);
     const o = v.at(v.indexOf(hard.v.id));
@@ -296,8 +325,18 @@ describe('wrecking a car', () => {
     expect(v.f32[o + E.Health2]).toBeCloseTo(hard.v.engine, 3);
   });
 
-  it('a harder one kills the engine: no more driving', async () => {
-    const r = await crash(24);
+  it('a dead engine takes 2 to 3 hard hits: 80 km/h needs three, 90 km/h two, 130 km/h one', async () => {
+    expect((await hits(KMH(80), 2)).v.engineDead).toBe(false);
+    const eighty = await hits(KMH(80), 3);
+    expect(eighty.v.engineDead).toBe(true);
+    expect(ofType(eighty.events, 'vehicle:engine-dead')).toHaveLength(1);
+    expect((await hits(KMH(90), 1)).v.engineDead).toBe(false);
+    expect((await hits(KMH(90), 2)).v.engineDead).toBe(true);
+    expect((await crash(KMH(130))).v.engineDead).toBe(true);
+  });
+
+  it('a dead engine: no more driving', async () => {
+    const r = await crash(KMH(130));
     expect(r.v.engineDead).toBe(true);
     expect(ofType(r.events, 'vehicle:engine-dead')).toHaveLength(1);
     // Reversing away does nothing: the engine is dead.
@@ -307,18 +346,73 @@ describe('wrecking a car', () => {
     expect(Math.hypot(p1.x - p0.x, p1.z - p0.z)).toBeLessThan(2);
   });
 
-  it('a very hard one sets it on fire, and then it explodes: burnt out, disabled for good', async () => {
-    const r = await crash(31);
-    expect(ofType(r.events, 'vehicle:fire')).toHaveLength(1);
-    expect(ofType(r.events, 'vehicle:explode')).toHaveLength(1);
+  it('a 140 km/h crash sets it alight at once; the burn gives 10 to 15 s of warning, then it explodes', async () => {
+    const r = await crash(KMH(140), 'sedan', 20);
+    const fire = ofType(r.events, 'vehicle:fire');
+    const burning = ofType(r.events, 'vehicle:burning');
+    expect(fire).toHaveLength(1);
+    expect(burning).toHaveLength(1);
+    expect(burning[0].tick).toBe(fire[0].tick);
+    expect(burning[0].secondsLeft).toBeGreaterThanOrEqual(WRECK.burnS[0]);
+    expect(burning[0].secondsLeft).toBeLessThanOrEqual(WRECK.burnS[1]);
+    const boom = ofType(r.events, 'vehicle:explode');
+    expect(boom).toHaveLength(1);
+    // The time from the fire to the blast is the burn time the event announced, to the tick.
+    expect(Math.abs((boom[0].tick - fire[0].tick) / 60 - burning[0].secondsLeft)).toBeLessThan(0.05);
     expect(r.v.burnt).toBe(true);
     expect(r.v.onFire).toBe(false);
-    // The player was still at the wheel: the blast killed them (and the WASTED screen may already have put them back at the spawn).
-    const blast = ofType(r.events, 'vehicle:explode')[0];
-    expect(ofType(r.events, 'player:wasted').filter((e) => e.tick === blast.tick)).toHaveLength(1);
+    // The player was still at the wheel: the heat, then the blast, killed them (the WASTED screen may already have put them back at the spawn).
+    expect(ofType(r.events, 'player:wasted').filter((e) => e.tick <= boom[0].tick)).toHaveLength(1);
     const v = new SnapshotView();
     r.sim.writeSnapshot(v);
     expect(v.u32[v.at(v.indexOf(r.v.id)) + E.Flags] & VehicleFlag.Burnt).toBeTruthy();
+  });
+
+  it('a car resting upside down for 4 s catches fire; one that is the right way up does not', async () => {
+    const tile = generateProceduralTile(1);
+    const { sim, car } = await driverSim('sedan', tile, { x: -40, z: 985 });
+    car.teleport(-40, 1.6, 985, 0);
+    car.body.setRotation({ x: 1, y: 0, z: 0, w: 0 }, true);
+    car.adopt();
+    const early = runLog(sim, 60 * 3);
+    expect(vehicle(sim).onFire).toBe(false);
+    expect(ofType(early, 'vehicle:fire')).toHaveLength(0);
+    const late = runLog(sim, 60 * 2);
+    expect(Math.abs(vehicle(sim).car.pose().q.x)).toBeGreaterThan(0.9); // still on its roof
+    expect(ofType(late, 'vehicle:fire')).toHaveLength(1);
+    expect(ofType(late, 'vehicle:burning')).toHaveLength(1);
+    expect(vehicle(sim).onFire).toBe(true);
+    const upright = await driverSim('sedan', tile, { x: 0, z: 900 });
+    expect(ofType(runLog(upright.sim, 60 * 10), 'vehicle:fire')).toHaveLength(0);
+  });
+
+  it('bullets into an engine that is already low can spark it; into a healthy one they do not', async () => {
+    const { sim } = await driverSim();
+    const v = vehicle(sim);
+    v.engine = 300;
+    v.smoking = true;
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 40 && !v.engineDead; i++) {
+      sim.damageVehicle(v, 0, 5, 0);
+      events.push(...runLog(sim, 2));
+    }
+    expect(v.engineDead).toBe(true);
+    expect(ofType(events, 'vehicle:engine-dead')).toHaveLength(1);
+
+    const fresh = await driverSim();
+    const f = vehicle(fresh.sim);
+    for (let i = 0; i < 20; i++) fresh.sim.damageVehicle(f, 0, 5, 0);
+    expect(f.engineDead).toBe(false);
+  });
+
+  it('the pickup outlasts the coupe from the same crash', async () => {
+    const coupe = await crash(KMH(90), 'coupe');
+    const pickup = await crash(KMH(90), 'pickup');
+    expect(coupe.v.engine / coupe.v.maxEngine).toBeLessThan(pickup.v.engine / pickup.v.maxEngine);
+    expect(coupe.v.smoking).toBe(true);
+    expect(pickup.v.smoking).toBe(false);
+    expect((await hits(KMH(90), 2, 'coupe')).v.engineDead).toBe(true);
+    expect((await hits(KMH(90), 2, 'pickup')).v.engineDead).toBe(false);
   });
 
   it('a pickup takes less damage than a coupe from the same crash', async () => {

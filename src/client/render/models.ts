@@ -1,6 +1,8 @@
 /**
- * Stand-in models, built from primitives: a car and the protagonist. Real assets (Blender scripts
- * under tools/blender, exported as glTF) replace them later behind the same interfaces.
+ * Stand-in models, built from primitives: a car and the protagonist. Cars now come from Blender
+ * assets (tools/blender, loaded by carAssets.ts, drawn by carModel.ts) behind the same
+ * `VehicleModel` interface; `makeVehicleModel` picks the asset and falls back to the box car here
+ * when the asset is missing (not loaded, failed, or `?cars=box`).
  *
  * Models face +Z with +X to their left, matching the sim.
  */
@@ -10,6 +12,11 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { newJoints, solvePose, type PedMode, type PoseExtra } from './pedPose';
 import type { WeaponKind } from '../../shared/weapons';
 import { WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
+import { carAsset } from './carAssets';
+import type { CarDamageState, DamageShape } from './carDamage';
+import { CAR_HEAD } from './carMaterials';
+import { assetFor } from './carLod';
+import { CarModel, type DetachedPart } from './carModel';
 
 // Boxes of the same size share one geometry, so building and dropping models does not leak.
 const boxGeos = new Map<string, THREE.BoxGeometry>();
@@ -38,6 +45,20 @@ export interface VehicleModel {
   /** Flat tyres, one bit a wheel (snapshot order): those wheels are drawn squashed and sunk. */
   setFlats(mask: number): void;
   dispose(): void;
+  /** Asset cars only: the level of detail drawn (0 nearest) and how to change it. */
+  lod?: number;
+  setLod?(level: number): void;
+  /** Asset cars only: grime, 0 to 1. */
+  setDirt?(k: number): void;
+  /** Asset cars only: the car's shape for the damage rules, and drawing a damage state (returns parts that fell off). */
+  shape?: DamageShape;
+  syncDamage?(s: CarDamageState): DetachedPart[];
+}
+
+/** A car's model: its Blender asset (the police one for a police car) when loaded, else the stand-in box car. */
+export function makeVehicleModel(h: HandlingData, color: number, livery?: ModelLivery): VehicleModel {
+  const asset = carAsset(assetFor(h.id, !!livery && !livery.unmarked));
+  return asset ? new CarModel(asset, h, color, livery) : buildVehicleModel(h, color, livery);
 }
 
 /** What the sim says about a police car's paint. */
@@ -79,6 +100,7 @@ const shared = {
 /** How bright the headlamps are drawn, 0.8 by day; the time of day raises it at night. Shared by every car. */
 export function setHeadlights(k: number) {
   shared.head.emissiveIntensity = k;
+  CAR_HEAD.value = k;
 }
 
 /**

@@ -30,6 +30,13 @@ export interface TileManifest {
   paths?: string;
   /** `scenarios.json`: where people sit, wait, queue and chat. */
   scenarios?: string;
+  /** `props.json`: tree, street lamp and street furniture anchors (see the contract). */
+  props?: string;
+  /** 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)" in the contract; absent in an older bake. */
+  meshFormat?: number;
+  /** Names of the building kind ids (`_BLD.x`) and ground class ids (`_LAND.x`), in id order. */
+  buildingKinds?: string[];
+  landClasses?: string[];
   spawns: {
     player: { x: number; y: number; z: number };
     /** `heading` is the three.js `rotation.y` of an object that faces -Z at 0: forward is (-sin h, -cos h). */
@@ -86,6 +93,34 @@ export interface JunctionsData {
   crossings: { id: number; points: [number, number, number][]; signals: boolean }[];
 }
 
+/**
+ * Shape of `props.json` (docs/contracts/m1-tile-format.md, "props.json"): anchors, not geometry. Tuples:
+ * trees `[x, y, z, height, crownRadius, class, src]`, lamps `[x, y, z, yaw, poleHeight, kind, src]`, furniture `[x, y, z]`.
+ */
+export interface PropsData {
+  version: number;
+  trees: [number, number, number, number, number, number, number][];
+  lamps: [number, number, number, number, number, number, number][];
+  hydrants: [number, number, number][];
+  bins: [number, number, number][];
+  bollards: [number, number, number][];
+}
+
+/** Reads `props.json`: tuples of the wrong length are dropped; null when it is not a props file. */
+export function parseProps(json: unknown): PropsData | null {
+  const j = json as Partial<PropsData> | null;
+  if (!j || j.version !== 1) return null;
+  const tuples = <T extends number[]>(a: unknown, n: number): T[] => (Array.isArray(a) ? (a.filter((t) => Array.isArray(t) && t.length >= n && t.slice(0, n).every(isNum)) as T[]) : []);
+  return {
+    version: 1,
+    trees: tuples(j.trees, 7),
+    lamps: tuples(j.lamps, 7),
+    hydrants: tuples(j.hydrants, 3),
+    bins: tuples(j.bins, 3),
+    bollards: tuples(j.bollards, 3),
+  };
+}
+
 export interface TileData {
   manifest: TileManifest;
   /** Row-major, `cols` per row; column index runs along +X and row index along +Z. */
@@ -98,6 +133,8 @@ export interface TileData {
   /** The walk network and the scenario points, when the tile has them. Without a network there are no ambient pedestrians. */
   paths?: PathsData;
   scenarios?: ScenariosData;
+  /** `props.json`, when the tile has one: tree, street lamp and furniture anchors for the client (named `anchors` because `ProceduralTile.props` is something else). */
+  anchors?: PropsData;
   /** `junctions.json`, when the tile has one (pedestrians read the signal groups of the junctions their crossings cross). */
   junctions?: JunctionsData;
   /** The lane graph, when the tile has one. Without it there is no ambient traffic. */
@@ -227,7 +264,7 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     // A dev server answers unknown paths with index.html, which fails here as a JSON error.
     throw new Error(`no usable tile at ${base} (${(e as Error).message})`);
   }
-  const [h, c, roads, paths, scenarios, junctions, lanes] = await Promise.all([
+  const [h, c, roads, paths, scenarios, junctions, lanes, props] = await Promise.all([
     get(manifest.heightmap.file),
     get(manifest.collision.file),
     loadRoads(base, manifest, fetchFn),
@@ -235,6 +272,7 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     loadOptional(base, manifest.scenarios, parseScenarios, fetchFn),
     loadOptional(base, manifest.junctions, (j) => ((j as JunctionsData | null)?.junctions ? (j as JunctionsData) : null), fetchFn),
     loadOptional(base, manifest.lanes, parseLanes, fetchFn),
+    loadOptional(base, manifest.props, parseProps, fetchFn),
   ]);
   const tile = decodeTile(manifest, await h.arrayBuffer(), await c.arrayBuffer());
   if (roads) tile.roads = roads;
@@ -242,6 +280,7 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
   if (scenarios) tile.scenarios = scenarios;
   if (junctions) tile.junctions = junctions;
   if (lanes) tile.lanes = lanes;
+  if (props) tile.anchors = props;
   return tile;
 }
 

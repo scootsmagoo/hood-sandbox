@@ -191,14 +191,81 @@ check(jn.junctions.filter((j) => j.control === 'signals').every((j) => j.legs.so
   check(lanes.edges.filter((e) => e.t === 1).every((c) => c.t === 1 && c.c.every((o) => lanes.edges[o].t === 1)), 'conflicts point at connectors');
 }
 
+// mesh attributes (meshFormat 2) and the anchors file
+if (tile.meshFormat === 2) {
+  const load = async (f: string) => { const b = readFileSync(path.join(dir, f)); return decodeGlb(new Uint8Array(b.buffer, b.byteOffset, b.byteLength)); };
+  const have = (doc: Awaited<ReturnType<typeof load>>, kind: string, sems: string[]) => {
+    const nodes = doc.getRoot().listNodes().filter((n) => n.getMesh() && (n.getExtras() as { kind?: string }).kind === kind);
+    return nodes.length > 0 && nodes.every((n) => n.getMesh()!.listPrimitives().every((p) => sems.every((s) => !!p.getAttribute(s))));
+  };
+  const bdoc = await load(tile.meshes.buildings);
+  check(have(bdoc, 'walls', ['TEXCOORD_0', '_WALL', '_BLD', '_BID']), 'wall meshes carry TEXCOORD_0, _WALL, _BLD and _BID');
+  check(have(bdoc, 'glass_walls', ['TEXCOORD_0', '_WALL', '_BLD', '_BID']), 'glass wall meshes carry the wall attributes');
+  check(have(bdoc, 'roofs', ['TEXCOORD_0', '_BLD', '_BID', '_SRF']), 'roof meshes carry TEXCOORD_0, _BLD, _BID and _SRF');
+  const kinds: string[] = tile.buildingKinds;
+  const counts = new Array(kinds.length).fill(0);
+  let badUv = 0, badQuad = 0, quads = 0, okKind = true, aoLo = 1, aoHi = 0;
+  const surfaces = new Set<number>();
+  for (const n of bdoc.getRoot().listNodes()) {
+    const m = n.getMesh();
+    if (!m) continue;
+    const kind = (n.getExtras() as { kind?: string }).kind;
+    for (const p of m.listPrimitives()) {
+      const uv = p.getAttribute('TEXCOORD_0')!, bl = p.getAttribute('_BLD')!, col = p.getAttribute('COLOR_0')!, wl = p.getAttribute('_WALL');
+      const srf = p.getAttribute('_SRF');
+      const tmp = [0, 0, 0, 0];
+      for (let i = 0; i < uv.getCount(); i++) {
+        const u = uv.getElement(i, [0, 0]);
+        if (!Number.isFinite(u[0]) || !Number.isFinite(u[1])) badUv++;
+        const k = bl.getElement(i, tmp)[0];
+        if (k >= kinds.length) okKind = false;
+        if (kind === 'walls') counts[k]++;
+        const c = col.getElement(i, [0, 0, 0, 0])[3];
+        aoLo = Math.min(aoLo, c); aoHi = Math.max(aoHi, c);
+        if (srf) surfaces.add(srf.getElement(i, [0, 0, 0, 0])[0]);
+        // a wall vertex lies inside its quad's span: u between the start and the end, v between the bottom (less the skirt) and the top
+        if (wl) {
+          const w = wl.getElement(i, [0, 0, 0, 0]);
+          quads++;
+          if (u[0] < w[0] - 0.1 || u[0] > w[0] + w[1] + 0.1 || u[1] < w[2] - 0.4 || u[1] > w[3] + 0.1) badQuad++;
+        }
+      }
+    }
+  }
+  check(badUv === 0 && okKind, 'building texture coordinates are finite and kind ids are in range');
+  check(quads > 10000 && badQuad === 0, `wall vertices lie inside the span their _WALL gives (${quads} vertices, ${badQuad} outside)`);
+  check(aoLo < 0.5 && aoHi > 0.95, `building ambient occlusion spans ${aoLo.toFixed(2)} to ${aoHi.toFixed(2)}`);
+  check([0, 1, 2, 5].every((s) => surfaces.has(s)), `roofs have flat, pitched, parapet and equipment surfaces (${[...surfaces].join(',')})`);
+  console.log('     wall vertices by building kind:', Object.fromEntries(kinds.map((k, i) => [k, counts[i]])));
+  const rdoc = await load(tile.meshes.roads);
+  check(have(rdoc, 'asphalt', ['TEXCOORD_0', 'TEXCOORD_1']) && have(rdoc, 'sidewalk', ['TEXCOORD_0', 'TEXCOORD_1']), 'asphalt and sidewalk meshes carry road texture coordinates');
+  const gdoc = await load(tile.meshes.ground);
+  check(have(gdoc, 'ground', ['_LAND']), 'ground meshes carry _LAND');
+  let aoSeen = 0;
+  for (const n of rdoc.getRoot().listNodes()) {
+    const p = n.getMesh()?.listPrimitives()[0];
+    if (!p || (n.getExtras() as { kind?: string }).kind !== 'concrete') continue;
+    const col = p.getAttribute('COLOR_0')!;
+    for (let i = 0; i < col.getCount(); i++) if (col.getElement(i, [0, 0, 0, 0])[3] < 0.5) aoSeen++;
+  }
+  check(aoSeen > 0, `deck undersides are dark (${aoSeen} vertices under 0.5)`);
+}
+if (tile.props) {
+  const pr = JSON.parse(readFileSync(path.join(dir, tile.props), 'utf8')) as { version: number; trees: number[][]; lamps: number[][]; hydrants: number[][]; stats: unknown };
+  console.log(`     props.json: ${pr.trees.length} trees, ${pr.lamps.length} lamps, ${pr.hydrants.length} hydrants`, JSON.stringify(pr.stats));
+  check(pr.version === 1 && pr.trees.length > 500 && pr.lamps.length > 500, 'props.json has trees and lamps');
+  check(pr.trees.every((t) => t.length === 7 && t.every(Number.isFinite) && Math.abs(t[0]) < 1000 && Math.abs(t[2]) < 1000 && t[3] > 1 && t[4] > 0.5 && [0, 1, 2].includes(t[5])), 'tree anchors are finite, inside the tile and well formed');
+  check(pr.lamps.every((l) => l.length === 7 && l.every(Number.isFinite) && Math.abs(l[0]) < 1000 && Math.abs(l[2]) < 1000 && [0, 1, 2].includes(l[5])), 'lamp anchors are finite, inside the tile and well formed');
+}
+
 const sp = tile.spawns;
 check(Math.abs(sp.player.x) < 150 && Math.abs(sp.player.z) < 150, `player spawn is near Five Points (${sp.player.x}, ${sp.player.z})`);
 check(Math.hypot(sp.vehicle.x, sp.vehicle.z) < 300, `vehicle spawn is near the origin (${sp.vehicle.x}, ${sp.vehicle.z}, heading ${sp.vehicle.heading})`);
 check(tile.attribution.length >= 1, `attribution: ${tile.attribution.join(' | ')}`);
 
-const total = ['tile.json', tile.heightmap.file, tile.meshes.ground, tile.meshes.roads, tile.meshes.buildings, tile.collision.file, tile.roads, tile.junctions, tile.lanes, tile.paths, tile.scenarios].reduce((a, f) => a + statSync(path.join(dir, f)).size, 0);
+const total = ['tile.json', tile.heightmap.file, tile.meshes.ground, tile.meshes.roads, tile.meshes.buildings, tile.collision.file, tile.roads, tile.junctions, tile.lanes, tile.paths, tile.scenarios, tile.props].filter(Boolean).reduce((a, f) => a + statSync(path.join(dir, f)).size, 0);
 check(total < 15 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)} MB is under 15 MB`);
-check(total < 10 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)} MB is under the 10 MB target`);
+check(total < 14 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)} MB is under the 14 MB target`);
 
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed`);

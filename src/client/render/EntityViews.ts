@@ -11,7 +11,15 @@ import { weaponByIndex } from '../../shared/weapons';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
 import { OUTFIT_COUNT } from '../../shared/entityDefs';
-import { buildPedModel, buildVehicleModel, glowTex, OUTFITS, setHeadlights, type PedLook, type PedMode, type PedModel, type VehicleModel } from './models';
+import { buildPedModel, glowTex, makeVehicleModel, OUTFITS, setHeadlights, type PedLook, type PedMode, type PedModel, type VehicleModel } from './models';
+import { carAsset, carAssetHolder, carAssetsReady } from './carAssets';
+import { CAR_ASSETS } from './carLod';
+import { applyBullet, applyExplosion, applyHealth, applyImpact, boxShape, isDamaged, newDamage, type CarDamageState, type DamageShape } from './carDamage';
+import { CarDebris } from './carDebris';
+import { assetFor, pickLod } from './carLod';
+import { CAR_SKY } from './carMaterials';
+import { shapeOf } from './carModel';
+import { newSkyLook, skyLook } from './timeOfDay';
 import { RagdollFigures } from './RagdollFigures';
 import { TrafficInstances } from './TrafficInstances';
 import { newJoints, solvePose, type PoseExtra } from './pedPose';
@@ -57,6 +65,23 @@ interface VehicleView {
   burnt: boolean;
   /** A police car, with a lightbar to flash. */
   police: boolean;
+  /** Drawn as the stand-in box car (the assets were not loaded when it was made). */
+  standIn: boolean;
+}
+
+/** A damaged traffic car is drawn as its full model within this distance (m, scaled by the tier's lodScale). */
+const DAMAGED_NEAR = 45;
+
+/** Grime per car, 0.1 (clean) to 0.75 (filthy): a hash of its id, so a car keeps its dirt. */
+export function dirtOf(id: number): number {
+  const h = Math.sin(id * 78.233 + 1.7) * 43758.5453;
+  return 0.1 + 0.65 * (h - Math.floor(h)) ** 1.5;
+}
+
+/** The body origin's height above flat ground at rest (RaycastCar.restHeight). */
+function rideHeight(h: (typeof HANDLING)[string]): number {
+  const omega = 2 * Math.PI * h.suspension.frequencyHz;
+  return h.wheels.radius + Math.max(0.04, h.suspension.travel * h.suspension.restRatio - 9.81 / (omega * omega)) - h.wheels.mountY;
 }
 type View = PedView | VehicleView;
 
@@ -79,6 +104,13 @@ export class EntityViews implements System {
   readonly traffic = new TrafficInstances();
   /** Bodies that are ragdolls, drawn from their ragdoll records. */
   readonly ragdolls = new RagdollFigures(24);
+  /** Each car's damage (dents, bumpers, bonnet, windows), kept while the car exists, whether it is drawn as a model or an instance. */
+  readonly damage = new Map<EntityId, CarDamageState>();
+  /** Bumpers that fell off. */
+  readonly debris = new CarDebris();
+  private readonly sky = newSkyLook();
+  private skyMinutes = -1;
+  private readonly shapes = new Map<string, DamageShape>();
 
   constructor(private readonly game: Game) {
     game.views = this;
@@ -96,9 +128,55 @@ export class EntityViews implements System {
     this.smoke = new SmokeSystem(game.scene);
     this.engineSmoke = new SmokeSystem(game.scene, { max: 360, color: [0.16, 0.16, 0.18], size: [1.0, 4.2], life: [1.4, 2.8], rise: 2.6, alpha: 0.85 });
     this.fire = new SmokeSystem(game.scene, { max: 320, color: [1.0, 0.42, 0.08], additive: true, size: [1.6, 0.4], life: [0.4, 0.9], rise: 2.2, alpha: 1 });
+    this.group.add(this.debris.group);
+    if (carAssetsReady()) this.group.add(carAssetHolder());
     game.onSimEvent((e) => {
-      if (e.type === 'vehicle:explode') this.explode(e.x, e.y, e.z);
+      if (e.type === 'vehicle:explode') {
+        this.explode(e.x, e.y, e.z);
+        const s = this.damageOf(e.vehicleId);
+        if (s) applyExplosion(s.state, s.shape, e.vehicleId);
+      } else if (e.type === 'vehicle:damage' && e.at) {
+        const s = this.damageOf(e.vehicleId);
+        if (s) {
+          const [x, y, z, dx, dy, dz] = e.at;
+          applyImpact(s.state, s.shape, x, y, z, dx, dy, dz, e.amount, s.deform);
+        }
+      } else if (e.type === 'weapon:fire') {
+        for (const hit of e.impacts) if (hit.kind === 'vehicle' && hit.targetId) this.bulletHit(hit.targetId, hit.x, hit.y, hit.z);
+      }
     });
+  }
+
+  /** The damage state of a car (made on its first hit) and the shape and deform factor its rules need; null if it is not a known car. */
+  private damageOf(id: EntityId): { state: CarDamageState; shape: DamageShape; deform: number } | null {
+    const def = this.game.view.defs.get(id);
+    if (!def || def.kind !== EntityKind.Vehicle) return null;
+    const h = HANDLING[def.typeId] ?? HANDLING.sedan;
+    let state = this.damage.get(id);
+    if (!state) this.damage.set(id, (state = newDamage()));
+    return { state, shape: this.shapeFor(def.typeId, !!def.police && !def.police.unmarked), deform: h.damage.deformMult };
+  }
+
+  private shapeFor(typeId: string, police: boolean): DamageShape {
+    const name = assetFor(typeId, police);
+    let s = this.shapes.get(name);
+    if (!s) {
+      const asset = carAsset(name);
+      const h = HANDLING[typeId] ?? HANDLING.sedan;
+      s = asset ? shapeOf(asset) : boxShape(h.chassis.halfExtents[2], h.chassis.halfExtents[0]);
+      this.shapes.set(name, s);
+    }
+    return s;
+  }
+
+  /** A bullet hit a car at a world point: it may break the window it hit. */
+  private bulletHit(id: EntityId, x: number, y: number, z: number) {
+    const st = this.game.view.entities.get(id);
+    const s = this.damageOf(id);
+    if (!st || !s) return;
+    this.q.set(st.q.x, st.q.y, st.q.z, st.q.w).invert();
+    this.tmp.set(x - st.x, y - st.y, z - st.z).applyQuaternion(this.q);
+    applyBullet(s.state, s.shape, this.tmp.x, this.tmp.y, this.tmp.z);
   }
 
   /** The stand-in explosion: a bright flash that swells and fades, a fireball and a burst of black smoke. */
@@ -113,13 +191,68 @@ export class EntityViews implements System {
     this.engineSmoke.burst(x, y + 1, z, 60, 6);
   }
 
+  private warmed = false;
+
+  /**
+   * Draws every car asset once, at every level of detail, into a 1-pixel target: the geometries are on the GPU and the shaders
+   * compiled before the first car needs them (no hitch when a police car first rolls up, and nothing new uploaded mid-game).
+   */
+  private prewarm() {
+    this.warmed = true;
+    if (!carAssetsReady()) return;
+    const g = this.game;
+    const temp = new THREE.Group();
+    const models: VehicleModel[] = [];
+    const ahead = new THREE.Vector3(0, 0, -6).applyQuaternion(g.camera.quaternion).add(g.camera.position);
+    const types = new Set<string>();
+    for (const [name, e] of Object.entries(CAR_ASSETS)) {
+      const h = HANDLING[e.type] ?? HANDLING.sedan;
+      types.add(h.id);
+      const livery = e.police ? { body: 0x223344, stripe: 0xdddddd, lightbar: [0x3366ff, 0xff3333] as [number, number] } : undefined;
+      for (let level = 0; level < 3; level++) {
+        const m = makeVehicleModel(h, 0x808080, livery);
+        if (!m.setLod) continue;
+        m.setLod(level);
+        m.root.position.copy(ahead);
+        temp.add(m.root);
+        models.push(m);
+      }
+      void name;
+    }
+    this.traffic.begin(g.camera.position, 1);
+    this.traffic.prewarm([...types].map((t) => HANDLING[t]), ahead);
+    g.scene.add(temp);
+    const rt = new THREE.WebGLRenderTarget(1, 1);
+    const prev = g.renderer.getRenderTarget();
+    g.renderer.setRenderTarget(rt);
+    g.renderer.render(g.scene, g.camera);
+    g.renderer.setRenderTarget(prev);
+    rt.dispose();
+    g.scene.remove(temp);
+    for (const m of models) m.dispose();
+    this.traffic.begin(g.camera.position, 1);
+    this.traffic.end();
+  }
+
   update(dt: number) {
+    if (!this.warmed) this.prewarm();
     const { entities } = this.game.view;
     const { defs } = this.game.view;
     // Headlamps brighten at night, on every car.
     const night = this.game.clockView?.night ?? 0;
     setHeadlights(0.8 + 1.6 * night);
-    this.traffic.begin();
+    // the cars' cheap reflections take the sky's colours
+    const minutes = Math.round((this.game.clockView?.minutes ?? 14 * 60) * 4) / 4;
+    if (minutes !== this.skyMinutes) {
+      this.skyMinutes = minutes;
+      skyLook(minutes, this.sky);
+      CAR_SKY.uSkyTop.value.copy(this.sky.zenith);
+      CAR_SKY.uSkyHorizon.value.copy(this.sky.horizon);
+      CAR_SKY.uSkyGround.value.copy(this.sky.hemiGround).multiplyScalar(0.6);
+    }
+    const cam = this.game.camera.position;
+    const lodScale = this.game.tier.lodScale;
+    this.traffic.begin(cam, lodScale);
     this.ragdolls.begin();
     const sample = this.game.view.sample;
     for (const [id, st] of entities) {
@@ -132,15 +265,23 @@ export class EntityViews implements System {
         // Ambient traffic is drawn as instances, unless it smokes, burns or has a door open.
         const def = defs.get(id);
         if (def && def.kind === EntityKind.Vehicle) {
-          const special = (st.flags & (VehicleFlag.Smoking | VehicleFlag.OnFire | VehicleFlag.Burnt | VehicleFlag.DoorOpen)) !== 0;
+          // a damaged car gets its full model (dents, loose parts) while it is near; farther off the instance shows its wear
+          const special =
+            (st.flags & (VehicleFlag.Smoking | VehicleFlag.OnFire | VehicleFlag.Burnt | VehicleFlag.DoorOpen)) !== 0 ||
+            (isDamaged(this.damage.get(id)) && Math.hypot(st.x - cam.x, st.z - cam.z) < DAMAGED_NEAR * lodScale);
           if (!special) {
             if (v) this.dropView(id, v);
             const h = HANDLING[def.typeId] ?? HANDLING.sedan;
             const wear = Math.max(0, Math.min(1, 1 - st.health / h.damage.bodyHealth));
-            this.traffic.add(h, def.color, st.x, st.y, st.z, st.q, st.wheels, wear, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, 0.5 + 1.7 * night);
+            this.traffic.add(h, def.color, st.x, st.y, st.z, st.q, st.wheels, wear, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, 0.5 + 1.7 * night, dirtOf(id));
             continue;
           }
         }
+      }
+      if (v && v.kind === 'vehicle' && v.standIn && carAssetsReady()) {
+        // the assets arrived after this car was made: swap the box for the real model
+        this.dropView(id, v);
+        v = undefined;
       }
       if (!v) {
         // Draw only what the sim has defined; the definition can trail the first snapshot by a frame or two.
@@ -212,7 +353,10 @@ export class EntityViews implements System {
       } else {
         const want = (st.flags & VehicleFlag.DoorOpen) !== 0 ? 1 : 0;
         v.door += (want - v.door) * Math.min(1, dt * 9);
-        v.model.apply(st.wheels, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, v.door);
+        const m = v.model;
+        if (m.setLod) m.setLod(pickLod(Math.hypot(st.x - cam.x, st.y - cam.y, st.z - cam.z), lodScale, m.lod));
+        m.apply(st.wheels, (st.flags & VehicleFlag.Braking) !== 0, (st.flags & VehicleFlag.Reversing) !== 0, v.door);
+        this.syncDamage(id, v, st);
         this.emitSmoke(v, st, dt);
         this.condition(v, st, dt);
       }
@@ -226,10 +370,11 @@ export class EntityViews implements System {
     for (const [id, p] of this.props) {
       if (!entities.has(id) || !defs.has(id)) this.dropProp(id, p);
     }
+    for (const id of this.damage.keys()) if (!entities.has(id)) this.damage.delete(id);
+    this.debris.update(dt);
     this.crowd.commit();
-    const cam = this.game.camera;
     this.game.renderer.getDrawingBufferSize(this.size);
-    const scale = this.size.y / (2 * Math.tan((cam.fov * Math.PI) / 360));
+    const scale = this.size.y / (2 * Math.tan((this.game.camera.fov * Math.PI) / 360));
     for (const sys of [this.smoke, this.engineSmoke, this.fire]) {
       sys.setScale(scale);
       sys.update(dt);
@@ -325,15 +470,38 @@ export class EntityViews implements System {
     // (helicopters and spike strips are drawn by `updateProp`)
     if (def.kind !== EntityKind.Vehicle) throw new Error(`no view for entity kind ${def.kind}`);
     const h = HANDLING[def.typeId] ?? HANDLING.sedan;
+    const model = makeVehicleModel(h, def.color, def.police ? { body: def.police.body, stripe: def.police.stripe, lightbar: def.police.lightbar, unmarked: def.police.unmarked } : undefined);
+    model.setDirt?.(def.police ? 0.15 : dirtOf(def.id));
     return {
       kind: 'vehicle',
-      model: buildVehicleModel(h, def.color, def.police ? { body: def.police.body, stripe: def.police.stripe, lightbar: def.police.lightbar, unmarked: def.police.unmarked } : undefined),
+      model,
       handlingId: h.id,
       door: 0,
       wear: 0,
       burnt: false,
       police: !!def.police,
+      standIn: !model.setLod,
     };
+  }
+
+  /** Draws a car's damage state on its model; parts that came off become debris. */
+  private syncDamage(id: EntityId, v: VehicleView, st: EntityState) {
+    const s = this.damage.get(id);
+    const m = v.model;
+    if (!m.syncDamage) return;
+    const h = HANDLING[v.handlingId] ?? HANDLING.sedan;
+    if (s) applyHealth(s, m.shape!, st.health / h.damage.bodyHealth);
+    if (st.flags & VehicleFlag.Burnt) {
+      const d = this.damageOf(id);
+      if (d && !d.state.burnt) applyExplosion(d.state, d.shape, id);
+    }
+    const state = this.damage.get(id);
+    if (!state) return;
+    const parts = m.syncDamage(state);
+    if (parts.length) {
+      const ground = st.y - rideHeight(h);
+      parts.forEach((p, i) => this.debris.add(p, st.vx, st.vy, st.vz, ground, id * 7 + i + state.version));
+    }
   }
 
   /** Wear on the paint, the lightbar, and the smoke and flames of a wreck. */
@@ -390,6 +558,7 @@ export class EntityViews implements System {
   dispose() {
     for (const [id, p] of [...this.props]) this.dropProp(id, p);
     this.traffic.dispose();
+    this.debris.dispose();
     this.crowd.dispose();
     this.ragdolls.dispose();
     this.smoke.dispose();

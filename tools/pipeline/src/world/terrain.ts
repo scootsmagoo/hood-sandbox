@@ -87,10 +87,11 @@ export const GROUND_COLORS: Record<AreaKind | 'urban', RGB> = {
   pitch: srgb(0.38, 0.60, 0.34),
   rail: srgb(0.44, 0.41, 0.39),
   construction: srgb(0.60, 0.54, 0.44),
+  plaza: srgb(0.58, 0.57, 0.54),
 };
 
 // later entries paint over earlier ones
-const PAINT_ORDER: AreaKind[] = ['residential', 'commercial', 'industrial', 'rail', 'construction', 'parking', 'cemetery', 'forest', 'park', 'pitch', 'water'];
+const PAINT_ORDER: AreaKind[] = ['residential', 'commercial', 'industrial', 'rail', 'construction', 'parking', 'plaza', 'cemetery', 'forest', 'park', 'pitch', 'water'];
 
 /** Land class for each heightmap vertex: 0 = urban, otherwise index+1 into PAINT_ORDER. */
 export function rasterizeAreas(areas: Area[], hm: Heightmap): Uint8Array {
@@ -123,11 +124,62 @@ export function landColor(code: number): RGB {
   return code === 0 ? GROUND_COLORS.urban : GROUND_COLORS[PAINT_ORDER[code - 1]];
 }
 
+/** Ground class ids (`_LAND.x`); `landClasses` in tile.json lists the names in this order. */
+export const LAND_CLASSES = ['urban', 'grass', 'woodland', 'dirt', 'plaza', 'parking', 'industrial', 'rail', 'water', 'pitch', 'cemetery', 'residential', 'commercial'] as const;
+
+const LAND_ID: Record<AreaKind, number> = {
+  park: 1, forest: 2, construction: 3, plaza: 4, parking: 5, industrial: 6, rail: 7, water: 8, pitch: 9, cemetery: 10, residential: 11, commercial: 12,
+};
+
+/** Blend weights (grass, dirt, plaza), each 0 to 1, of a ground class. */
+const LAND_WEIGHTS: [number, number, number][] = [
+  [0, 0, 0], // urban
+  [1, 0, 0], // grass
+  [1, 0, 0], // woodland
+  [0, 1, 0], // dirt
+  [0, 0, 1], // plaza
+  [0, 0, 0], // parking
+  [0, 0.6, 0], // industrial yard
+  [0, 0.8, 0], // rail ballast
+  [0, 0, 0], // water
+  [0.8, 0, 0], // pitch
+  [1, 0, 0], // cemetery
+  [0.5, 0, 0], // residential yard
+  [0, 0, 0.3], // commercial hardscape
+];
+
+/** The ground class id of a rasterized land code (0 = urban, otherwise index + 1 into PAINT_ORDER). */
+export function landClassOf(code: number): number {
+  return code === 0 ? 0 : LAND_ID[PAINT_ORDER[code - 1]];
+}
+
+/** `_LAND` for the sample (c, r): class id and the blend weights of a 3x3 smoothing (neighbours `step` samples away). */
+export function landAttr(hm: Heightmap, land: Uint8Array, c: number, r: number, step: number, out: Uint8Array, o: number): void {
+  const at = (cc: number, rr: number) => landClassOf(land[Math.max(0, Math.min(hm.rows - 1, rr)) * hm.cols + Math.max(0, Math.min(hm.cols - 1, cc))]);
+  let g = 0, d = 0, p = 0, wsum = 0;
+  for (let dj = -1; dj <= 1; dj++) {
+    for (let di = -1; di <= 1; di++) {
+      const w = (di === 0 ? 2 : 1) * (dj === 0 ? 2 : 1);
+      const k = at(c + di * step, r + dj * step);
+      g += LAND_WEIGHTS[k][0] * w;
+      d += LAND_WEIGHTS[k][1] * w;
+      p += LAND_WEIGHTS[k][2] * w;
+      wsum += w;
+    }
+  }
+  out[o] = at(c, r);
+  out[o + 1] = Math.round((g / wsum) * 255);
+  out[o + 2] = Math.round((d / wsum) * 255);
+  out[o + 3] = Math.round((p / wsum) * 255);
+}
+
 export interface GroundMesh {
   positions: Float32Array;
   normals: Float32Array;
   colors: Float32Array;
   indices: Uint32Array;
+  /** `_LAND` per vertex: class id and the lawn, dirt and plaza weights, 0 to 255 */
+  land: Uint8Array;
 }
 
 export interface GroundRange {
@@ -164,6 +216,7 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range
   const positions = new Float32Array(nv * 3);
   const normals = new Float32Array(nv * 3);
   const colors = new Float32Array(nv * 3);
+  const landA = new Uint8Array(nv * 4);
   const h = (c: number, r: number) => hm.data[Math.max(0, Math.min(hm.rows - 1, r)) * hm.cols + Math.max(0, Math.min(hm.cols - 1, c))];
   for (let j = 0; j < rs; j++) {
     for (let i = 0; i < cs; i++) {
@@ -184,6 +237,7 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range
       colors[o] = col[0];
       colors[o + 1] = col[1];
       colors[o + 2] = col[2];
+      landAttr(hm, land, c, r, step, landA, (j * cs + i) * 4);
     }
   }
   const indices = new Uint32Array((cs - 1) * (rs - 1) * 6 + loopLen * 12);
@@ -213,6 +267,7 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range
         normals[v * 3 + q] = normals[src * 3 + q];
         colors[v * 3 + q] = colors[src * 3 + q];
       }
+      for (let q = 0; q < 4; q++) landA[v * 4 + q] = landA[src * 4 + q];
       positions[v * 3 + 1] -= skirt;
       low.push(v++);
     }
@@ -224,7 +279,7 @@ export function buildGroundMesh(hm: Heightmap, land: Uint8Array, step = 1, range
       indices[k++] = loop[m]; indices[k++] = low[m]; indices[k++] = low[n];
     }
   }
-  return { positions, normals, colors, indices: indices.subarray(0, k) };
+  return { positions, normals, colors, indices: indices.subarray(0, k), land: landA };
 }
 
 export type { V2 };

@@ -24,7 +24,7 @@ export interface RoadWay {
   pts: V2[];
 }
 
-export type AreaKind = 'park' | 'forest' | 'water' | 'residential' | 'commercial' | 'industrial' | 'parking' | 'cemetery' | 'pitch' | 'rail' | 'construction';
+export type AreaKind = 'park' | 'forest' | 'water' | 'residential' | 'commercial' | 'industrial' | 'parking' | 'cemetery' | 'pitch' | 'rail' | 'construction' | 'plaza';
 
 export interface Area {
   kind: AreaKind;
@@ -151,6 +151,9 @@ const AREA_RULES: [string, RegExp, AreaKind][] = [
   ['landuse', /^(cemetery)$/, 'cemetery'],
   ['landuse', /^(construction|brownfield)$/, 'construction'],
   ['amenity', /^parking$/, 'parking'],
+  ['place', /^square$/, 'plaza'],
+  ['highway', /^pedestrian$/, 'plaza'],
+  ['leisure', /^plaza$/, 'plaza'],
 ];
 
 export function areaKindOf(tags: Record<string, string>): AreaKind | null {

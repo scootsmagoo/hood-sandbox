@@ -34,6 +34,7 @@ import { PedBrain, rollPersonality, type Reaction } from './npc/brain';
 import { GROUPS, initRapier } from './physics/rapier';
 import { defaultSystems, type SimSystem } from './systems';
 import { RaycastCar } from './vehicles/RaycastCar';
+import { crashPoint } from './vehicles/impactPoint';
 import { planParking } from './streets/parking';
 import { PhysicsWorld } from './World';
 import { GameClock, type ClockOptions } from './clock';
@@ -469,7 +470,9 @@ export class Simulation {
     if (v.burnt || (body <= 0 && engine <= 0)) return;
     v.health = Math.max(-200, v.health - body);
     v.engine = Math.max(-500, v.engine - engine);
-    this.emit({ type: 'vehicle:damage', tick: this.tick, vehicleId: v.id, amount: body, body: v.health, engine: v.engine, sourceId });
+    // a crash this step: where it hit, for the client's dents
+    const at = !v.kinematic && v.car.impactSpeedLoss >= WRECK.minDv ? crashPoint(this.physics.world, v.car) : undefined;
+    this.emit({ type: 'vehicle:damage', tick: this.tick, vehicleId: v.id, amount: body, body: v.health, engine: v.engine, sourceId, ...(at ? { at } : {}) });
   }
 
   /** The stand-in explosion: a flash, a blast that hurts what is near, and a burnt-out shell that never drives again. */

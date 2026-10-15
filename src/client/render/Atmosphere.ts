@@ -1,5 +1,7 @@
 /**
- * Sky, fog and light, driven by the game clock. A gradient dome follows the camera; a hemisphere
+ * Sky, fog and light, driven by the game clock. In the GTA IV look (the default; `?gfx=classic` is
+ * the old one) the dome is the hazy cloudy sky of look/sky.ts, the fog is exponential, and the
+ * sun leaves pale soft shadows by day, all from the GTA4 palette of timeOfDay.ts. A dome follows the camera; a hemisphere
  * light and an ambient light fill the scene; a directional light is the sun by day and the moon
  * by night, and its shadow box follows the player (snapped to the shadow map's texels so edges do
  * not shimmer). The look for each moment comes from timeOfDay.ts.
@@ -10,8 +12,10 @@
 import * as THREE from 'three';
 import { H } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
-import type { Tier } from '../graphics';
-import { isNight, moonDirection, nightFactor, newSkyLook, skyLook, sunDirection, type SkyLook } from './timeOfDay';
+import { lookMode, resolveFx, type LookMode, type Tier } from '../graphics';
+import { createSkyMaterial } from './look/sky';
+import { lookState } from './look/state';
+import { CLASSIC, GTA4, isNight, moonDirection, nightFactor, newSkyLook, skyLook, sunDirection, type SkyLook, type SkyPalette } from './timeOfDay';
 
 /** The clock as the client shows it: game minutes since midnight, the day (0 = Monday), and the night factor. */
 export interface ClockView {
@@ -54,9 +58,16 @@ export class Atmosphere implements System {
   private lastMinutes = -1;
   private glowTimer = GLOW_EVERY;
   private glowOn = false;
+  readonly style: LookMode;
+  private readonly pal: SkyPalette;
+  private skyOctaves: 2 | 4 | 0 = 0;
+  private time = 0;
+  private haze = true;
 
   constructor(private readonly game: Game) {
     const scene = game.scene;
+    this.style = lookMode(game.params);
+    this.pal = this.style === 'gta4' ? GTA4 : CLASSIC;
     scene.fog = new THREE.Fog(0xc9d8e2, 200, 1300);
     this.hemi = new THREE.HemisphereLight(0xd6e4ff, 0x8a8574, 2.3);
     this.ambient = new THREE.AmbientLight(0xffffff, 0);
@@ -68,7 +79,7 @@ export class Atmosphere implements System {
     this.sun.shadow.normalBias = 0.05;
     scene.add(this.sun, this.sun.target);
 
-    const mat = new THREE.ShaderMaterial({
+    const classicMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
@@ -76,8 +87,9 @@ export class Atmosphere implements System {
       vertexShader: 'varying float vH; void main(){ vH = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: 'uniform vec3 uHorizon; uniform vec3 uZenith; varying float vH; void main(){ float t = pow(clamp(vH,0.0,1.0), 0.55); gl_FragColor = vec4(mix(uHorizon, uZenith, t), 1.0); }',
     });
-    this.dome = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), mat);
-    this.dome.renderOrder = -10;
+    this.dome = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), classicMat);
+    // The classic dome is drawn first; the look's sky is drawn after the opaque scene, only where nothing else is.
+    this.dome.renderOrder = this.style === 'gta4' ? 1000 : -10;
     this.dome.frustumCulled = false;
     scene.add(this.dome);
 
@@ -89,9 +101,17 @@ export class Atmosphere implements System {
 
   private applyTier(t: Tier) {
     this.dome.scale.setScalar(t.far * 0.9);
-    const fog = this.game.scene.fog as THREE.Fog;
-    fog.far = Math.min(1300, t.far * 0.8);
-    fog.near = fog.far * 0.15;
+    if (this.style === 'gta4') {
+      const octaves = t.name === 'low' ? 2 : 4;
+      if (octaves !== this.skyOctaves) {
+        this.skyOctaves = octaves;
+        (this.dome.material as THREE.Material).dispose();
+        this.dome.material = createSkyMaterial(octaves);
+        this.lastMinutes = -1; // the new material takes the sky's uniforms on the next update
+      }
+    }
+    this.haze = resolveFx(t, this.game.params).haze;
+    this.applyFog(t);
     const on = t.shadowMap > 0;
     this.sun.castShadow = on;
     if (on) {
@@ -107,6 +127,18 @@ export class Atmosphere implements System {
       this.sun.shadow.mapSize.set(t.shadowMap, t.shadowMap);
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
+    }
+  }
+
+  /** Fog range: three's linear ramp in the classic look; in the GTA IV look the exponential haze (near < 0, look/fog.ts) out to the day's visibility. */
+  private applyFog(t: Tier) {
+    const fog = this.game.scene.fog as THREE.Fog;
+    if (this.style === 'gta4' && this.haze) {
+      fog.far = Math.min(this.look.visibility, t.far * 0.75);
+      fog.near = -1;
+    } else {
+      fog.far = Math.min(1300, t.far * 0.8);
+      fog.near = fog.far * 0.15;
     }
   }
 
@@ -137,18 +169,26 @@ export class Atmosphere implements System {
       this.lastMinutes = c.minutes;
       this.applyLook(c.minutes);
     }
+    this.time += dt;
+    if (this.style === 'gta4') (this.dome.material as THREE.ShaderMaterial).uniforms.uTime.value = this.time;
     this.glowTimer -= dt;
     if (this.glowTimer <= 0) {
       this.glowTimer = GLOW_EVERY;
-      this.applyGlow(cv.night);
+      // The look's facade has its own lit windows; the flat orange glow is for the classic look (and for the facade switched off).
+      if (!lookState.facade) this.applyGlow(cv.night);
     }
   }
 
   private applyLook(minutes: number) {
-    const look = skyLook(minutes, this.look);
+    const look = skyLook(minutes, this.look, this.pal);
     const g = this.game;
     this.setDome(look);
     (g.scene.fog as THREE.Fog).color.copy(look.fog);
+    if (this.style === 'gta4') {
+      this.applyFog(g.tier);
+      this.sun.shadow.intensity = look.shadowIntensity;
+      this.sun.shadow.radius = look.shadowSoftness * (g.tier.shadowMap >= 2048 ? 1 : 0.8);
+    }
     this.sun.color.copy(look.sun);
     this.sun.intensity = look.sunIntensity;
     this.hemi.color.copy(look.hemiSky);
@@ -164,6 +204,13 @@ export class Atmosphere implements System {
     sunDirection(minutes, this.sunDir);
     moonDirection(minutes, this.moonDir);
     this.lightDir.copy(this.sunDir).lerp(this.moonDir, night).normalize();
+    if (this.style === 'gta4') {
+      const u = (this.dome.material as THREE.ShaderMaterial).uniforms;
+      (u.uSunDir.value as THREE.Vector3).copy(this.sunDir);
+      (u.uMoonDir.value as THREE.Vector3).copy(this.moonDir);
+      (u.uSunColor.value as THREE.Color).copy(look.sun);
+      u.uNight.value = night;
+    }
   }
 
   private setDome(look: SkyLook) {

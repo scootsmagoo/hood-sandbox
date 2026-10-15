@@ -18,6 +18,9 @@
  *                (tracers, flashes, puffs, sparks, blood, bullet holes, the gunshot sounds): the pooled effects must not grow
  *   police   20  a helicopter and a spike strip appear (heat 3, a strip laid) and are taken away: their models, beam and glow are made and
  *                disposed with the entities. Needs the sim on the main thread: `--query transport=loopback`.
+ *   wrecks   20  three cars (a sedan, a pickup, a police cruiser) beside the player are crashed (dents, bumpers off, the bonnet, windows,
+ *                one blown up) through the client's event path, then removed: their models, dented geometry copies and damage state go
+ *                with them, the fallen bumpers stay in a capped pool. Needs the sim on the main thread: `--query transport=loopback`.
  *   ragdoll  20  eight people are thrown (killed or knocked down), drawn as ragdolls, then removed: the sim's bodies and joints and the
  *                client's pooled ragdoll figures must not grow. Needs the sim on the main thread: `--query transport=loopback`.
  * Counted after each cycle: JS heap, renderer geometries, textures, programs, materials and objects in
@@ -38,7 +41,7 @@ const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
 const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire').split(',').filter(Boolean);
-const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20 };
+const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20 };
 const WARM = 2;
 /** Longest a single cycle may take before it is counted as stuck. */
 const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
@@ -168,6 +171,40 @@ const ACTIVITIES = {
       await window.__h.sleep(400);
     });
   },
+  /** Three cars wrecked beside the player and removed: car models with dented geometry, loose parts and broken glass, and the damage state. */
+  async wrecks() {
+    const left = await page.evaluate(async () => {
+      const g = window.__hood.game;
+      const S = g.transport.host?.simulation;
+      if (!S) throw new Error('the wrecks phase needs the sim on the main thread: --query transport=loopback');
+      const p = S.playerPosition();
+      const ids = [];
+      for (const [i, type] of ['sedan', 'pickup', 'sedan'].entries()) {
+        const x = p.x + 6 + i * 6, z = p.z + 4;
+        const v = S.spawnVehicle(type, x, S.groundAt(x, z), z, 0, 0x556677, (v) => {
+          if (i === 2) { v.police = { agency: 'acp', body: 0x2c3e50, stripe: 0xe8c547, lightbar: [0x3ea8ff, 0xffb000] }; v.lightbar = true; }
+        });
+        ids.push(v.id);
+      }
+      await window.__h.sleep(300);
+      const send = (e) => { for (const fn of g.net.listeners) fn(e); };
+      for (const id of ids) {
+        for (const [x, y, z, dx, dy, dz] of [[0.5, 0.1, 2.2, 0, 0, -1], [-0.4, 0.1, -2.2, 0, 0, 1], [0.9, 0.3, 0.2, -1, 0, 0], [-0.9, 0.5, -0.6, 1, 0, 0]]) {
+          for (let k = 0; k < 3; k++) send({ type: 'vehicle:damage', tick: 0, vehicleId: id, amount: 120, body: 500, engine: 500, sourceId: 0, at: [x, y, z, dx, dy, dz] });
+        }
+        const st = g.view.entities.get(id);
+        if (st) send({ type: 'weapon:fire', tick: 0, shooterId: 0, weapon: 'pistol', x: st.x, y: st.y + 3, z: st.z, dx: 0, dy: -1, dz: 0, impacts: [{ kind: 'vehicle', x: st.x + 0.8, y: st.y + 0.7, z: st.z + 0.3, nx: 1, ny: 0, nz: 0, targetId: id, headshot: false }] });
+        await window.__h.sleep(60);
+      }
+      const st = g.view.entities.get(ids[1]);
+      if (st) send({ type: 'vehicle:explode', tick: 0, vehicleId: ids[1], x: st.x, y: st.y, z: st.z });
+      await window.__h.sleep(800);
+      for (const id of ids) S.despawn(id);
+      await window.__h.sleep(600);
+      return ids.filter((id) => g.views.damage.has(id)).length;
+    });
+    if (left) throw new Error(`damage state left behind for ${left} cars`);
+  },
   /** Eight people thrown round the player and removed again: ragdoll bodies in the sim, ragdoll figures in the client. */
   async ragdoll() {
     const counts = await page.evaluate(async () => {
@@ -217,7 +254,7 @@ const ACTIVITIES = {
 // `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
 const FROZEN = { pedBudget: 0, traffic: 0 };
 const LIVE = { pedBudget: 40, traffic: 0.75 };
-const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN };
+const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN, wrecks: FROZEN };
 /** The ragdoll phase's physics world after each cycle: its bodies and joints must come back to the same count. */
 const ragdollWorld = [];
 const setPopulation = (c) => page.evaluate((c) => window.__hood.game.transport.config?.(c), c);

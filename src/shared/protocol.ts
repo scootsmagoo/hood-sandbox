@@ -106,11 +106,23 @@ export type SimEvent =
   | { type: 'ped:up'; tick: number; pedId: EntityId }
   | { type: 'ped:dead'; tick: number; pedId: EntityId; sourceId: EntityId; kind: DamageKind; x: number; y: number; z: number }
   /** A car's body or engine took damage. `body` and `engine` are the health left. */
-  | { type: 'vehicle:damage'; tick: number; vehicleId: EntityId; amount: number; body: number; engine: number; sourceId: EntityId }
+  | {
+      type: 'vehicle:damage';
+      tick: number;
+      vehicleId: EntityId;
+      amount: number;
+      body: number;
+      engine: number;
+      sourceId: EntityId;
+      /** A crash only: where it hit and which way it pushed, in the car's frame: [x, y, z (m), dx, dy, dz (unit)]. The client dents the body there. */
+      at?: [number, number, number, number, number, number];
+    }
   /** The engine dropped below the smoking threshold. */
   | { type: 'vehicle:smoke'; tick: number; vehicleId: EntityId }
   | { type: 'vehicle:engine-dead'; tick: number; vehicleId: EntityId }
   | { type: 'vehicle:fire'; tick: number; vehicleId: EntityId }
+  /** A car has caught fire and will explode in `secondsLeft` s (the warning for the HUD and audio). */
+  | { type: 'vehicle:burning'; tick: number; vehicleId: EntityId; secondsLeft: number }
   /** The stand-in explosion: a flash, and the car is burnt out and disabled for good. */
   | { type: 'vehicle:explode'; tick: number; vehicleId: EntityId; x: number; y: number; z: number }
   /** A crime was committed (before anyone reports it). */

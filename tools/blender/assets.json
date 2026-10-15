@@ -1,0 +1,10 @@
+{
+  "_comment": "Every asset `npm run assets` builds (tools/blender/build.mjs). module: the Python module under tools/blender with build(asset); type: the handling.json entry it is built to; police: has the police kit. Output: public/assets/vehicles/<name>.glb.",
+  "vehicles": [
+    { "name": "sedan", "module": "cars.sedan", "type": "sedan" },
+    { "name": "coupe", "module": "cars.coupe", "type": "coupe" },
+    { "name": "pickup", "module": "cars.pickup", "type": "pickup" },
+    { "name": "sedan-police", "module": "cars.police", "type": "sedan", "police": true },
+    { "name": "coupe-police", "module": "cars.police", "type": "coupe", "police": true }
+  ]
+}

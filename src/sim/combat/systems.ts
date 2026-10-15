@@ -306,45 +306,60 @@ export class DownedSystem implements SimSystem {
 export class VehicleDamageSystem implements SimSystem {
   readonly name = 'vehicleDamage';
   readonly priority = 52;
+  /** Engine health at the end of the last pass: whatever is lost between passes came from a bullet or a blast. */
+  private seenEngine = new WeakMap<VehicleEntity, number>();
+  /** Seconds each car has rested upside down. */
+  private roofT = new WeakMap<VehicleEntity, number>();
 
   fixedUpdate(sim: Simulation, dt: number) {
     for (const v of sim.vehicles()) {
       if (v.burnt) continue;
       // Crashes: the velocity change of the last step, in the car's own frame.
       const car = v.car;
+      // Engine lost since the last pass that no crash explains: a bullet or a blast.
+      const seen = this.seenEngine.get(v);
+      const external = seen === undefined ? 0 : Math.max(0, seen - v.engine);
       if (car.impactSpeedLoss >= WRECK.minDv) {
         const pose = car.pose();
         const dv = rotateVecInv(pose.q, car.impactDv.x, car.impactDv.y, car.impactDv.z);
         const dmg = impactDamage(dv.x, dv.z, dv.y, car.h.damage);
         if (dmg.body > 0) sim.damageVehicle(v, dmg.body, dmg.engine, v.occupantId);
       }
-      this.condition(sim, v, dt);
+      this.condition(sim, v, dt, external);
+      this.seenEngine.set(v, v.engine);
     }
   }
 
-  private condition(sim: Simulation, v: VehicleEntity, dt: number) {
+  private condition(sim: Simulation, v: VehicleEntity, dt: number, external: number) {
     if (!v.smoking && v.engine <= WRECK.smokeAt * (v.maxEngine / 1000)) {
       v.smoking = true;
       sim.emit({ type: 'vehicle:smoke', tick: sim.tick, vehicleId: v.id });
     }
-    if (!v.engineDead && (v.engine <= 0 || v.health <= 0)) {
+    // A bullet or a blast into an engine that is already low can spark it: the engine dies and it may burn.
+    const sparked = !v.engineDead && external > 0 && v.engine <= WRECK.smokeAt * (v.maxEngine / 1000) && sim.fireRng.chance(WRECK.bulletIgniteChance);
+    if (!v.engineDead && (v.engine <= 0 || v.health <= 0 || sparked)) {
       v.engineDead = true;
       v.engine = Math.min(v.engine, 0);
       v.smoking = true;
       sim.emit({ type: 'vehicle:engine-dead', tick: sim.tick, vehicleId: v.id });
-      v.igniteIn = sim.fireRng.chance(WRECK.igniteChance) ? sim.fireRng.range(WRECK.igniteDelayS[0], WRECK.igniteDelayS[1]) : Infinity;
+      v.igniteIn = (sparked || sim.fireRng.chance(WRECK.igniteChance)) ? sim.fireRng.range(WRECK.igniteDelayS[0], WRECK.igniteDelayS[1]) : Infinity;
       // Whoever is driving an AI car gets out of a dead one.
       const driver = v.occupantId ? (sim.registry.get(v.occupantId) as PedEntity | undefined) : undefined;
       if (driver && driver.role !== 'player') sim.ejectPed(driver);
     }
     if (v.engineDead && !v.onFire) {
       v.igniteIn -= dt;
-      if (v.igniteIn <= 0 || v.engine <= WRECK.igniteBelow) {
-        v.onFire = true;
-        v.burnT = 0;
-        v.burnFor = sim.fireRng.range(WRECK.burnS[0], WRECK.burnS[1]);
-        sim.emit({ type: 'vehicle:fire', tick: sim.tick, vehicleId: v.id });
-      }
+      if (v.igniteIn <= 0 || v.engine <= WRECK.igniteBelow) this.ignite(sim, v);
+    }
+    // Resting on its roof for a while: it catches fire.
+    if (!v.onFire) {
+      const q = v.car.pose().q;
+      const up = rotateVec(q, 0, 1, 0);
+      const speed = Math.hypot(v.car.body.linvel().x, v.car.body.linvel().y, v.car.body.linvel().z);
+      const rest = up.y < WRECK.roofUpY && speed < WRECK.restSpeed;
+      const t = rest ? (this.roofT.get(v) ?? 0) + dt : 0;
+      this.roofT.set(v, t);
+      if (t >= WRECK.roofFireS) this.ignite(sim, v);
     }
     if (v.onFire) {
       v.burnT += dt;
@@ -357,6 +372,15 @@ export class VehicleDamageSystem implements SimSystem {
       }
       if (v.burnT >= v.burnFor) sim.explodeVehicle(v);
     }
+  }
+
+  /** Sets the car alight: it burns for `WRECK.burnS` and the warning goes out with the time left. */
+  private ignite(sim: Simulation, v: VehicleEntity) {
+    v.onFire = true;
+    v.burnT = 0;
+    v.burnFor = sim.fireRng.range(WRECK.burnS[0], WRECK.burnS[1]);
+    sim.emit({ type: 'vehicle:fire', tick: sim.tick, vehicleId: v.id });
+    sim.emit({ type: 'vehicle:burning', tick: sim.tick, vehicleId: v.id, secondsLeft: v.burnFor });
   }
 }
 

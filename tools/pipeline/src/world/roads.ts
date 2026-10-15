@@ -44,6 +44,8 @@ export interface RoadMeshes {
   runs: CarRun[];
   /** lane lines, crosswalks and stop bars, one mesh with vertex colours */
   markings: MeshBuilder;
+  /** where the car roads and junctions are (also used for the markings): the sidewalks' kerb side comes from it */
+  mask: RoadMask;
   markingStats: { lines: number; crosswalks: number; bars: number; stopBars: number };
   controls: Controls;
   /** junctions.json */
@@ -232,11 +234,14 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
   const plan = Array.isArray(input) ? planRoads(input, hm) : input;
   const res: RoadMeshes = {
     asphalt: new MeshBuilder(), sidewalk: new MeshBuilder(), crosswalk: new MeshBuilder(), rail: new MeshBuilder(),
-    concrete: new MeshBuilder(), collision: new MeshBuilder(), json: [], junctions: [], junctionStats: { candidates: 0, clusters: 0, built: 0, rejected: {} }, runs: [], markings: new MeshBuilder(), markingStats: { lines: 0, crosswalks: 0, bars: 0, stopBars: 0 }, controls: { junctions: [], signals: [], stops: [] }, crossings: [], exported: { junctions: [], signals: [], stops: [], crossings: [] },
+    concrete: new MeshBuilder(), collision: new MeshBuilder(), json: [], junctions: [], junctionStats: { candidates: 0, clusters: 0, built: 0, rejected: {} }, runs: [], markings: new MeshBuilder(), mask: new RoadMask(), markingStats: { lines: 0, crosswalks: 0, bars: 0, stopBars: 0 }, controls: { junctions: [], signals: [], stops: [] }, crossings: [], exported: { junctions: [], signals: [], stops: [], crossings: [] },
     stats: { ways: 0, drivableWays: 0, deckWays: 0, deckMetres: 0, piers: 0, maxDeckHeightAboveGround: 0 },
   };
   const ground = (x: number, z: number) => surfaceHeight(hm, x, z);
   const thickness = DEFAULT_DECK_OPTIONS.thickness;
+  // texture coordinates on the carriageways and sidewalks, ambient occlusion on every mesh (see "Mesh attributes (meshFormat 2)")
+  for (const mb of [res.asphalt, res.sidewalk]) { mb.channel('uv', 2); mb.channel('uv1', 2); }
+  for (const mb of [res.asphalt, res.sidewalk, res.crosswalk, res.rail, res.concrete, res.markings]) mb.channel('ao', 1, [1]);
 
   const dense = plan.dense;
   const profIndex = new Map<number, number>();
@@ -252,6 +257,9 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
   const jr = buildJunctions(jways, { liftOf: roadLift, skipNode: (id) => deckNodeIds.has(id) });
   res.junctions = jr.junctions;
   res.junctionStats = jr.stats;
+  const mask = res.mask;
+  for (const g of dense) if (g.w.kind === 'car' && !g.w.bridge) mask.addPolyline(g.pts, g.w.width / 2);
+  for (const j of res.junctions) mask.addPolygon(j.polygon.map((q) => [q.x, q.z] as V2));
   const carPos = new Map<number, number>();
   carIdx.forEach((di, k) => carPos.set(di, k));
   for (const j of jr.junctions) {
@@ -398,9 +406,6 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
 
   // markings
   const mk = res.markings;
-  const mask = new RoadMask();
-  for (const g of dense) if (g.w.kind === 'car' && !g.w.bridge) mask.addPolyline(g.pts, g.w.width / 2);
-  for (const j of res.junctions) mask.addPolygon(j.polygon.map((q) => [q.x, q.z] as V2));
   const onRoad = (x: number, z: number) => mask.contains(x, z, 0.3);
   const inBounds = (p: V2) => p[0] >= bounds.minX && p[0] <= bounds.maxX && p[1] >= bounds.minZ && p[1] <= bounds.maxZ;
   const crossingPts: V2[][] = [];
@@ -518,9 +523,26 @@ function emitPiece(
   if (!wantMesh) return;
 
   const base = target.vertexCount;
+  const hasUv = target.channels.has('uv');
+  let along = 0;
   for (let i = 0; i < n; i++) {
-    target.vertex(left[i][0], lY[i], left[i][1], 0, 1, 0, color[0], color[1], color[2]);
-    target.vertex(right[i][0], rY[i], right[i][1], 0, 1, 0, color[0], color[1], color[2]);
+    const li = target.vertex(left[i][0], lY[i], left[i][1], 0, 1, 0, color[0], color[1], color[2]);
+    const ri = target.vertex(right[i][0], rY[i], right[i][1], 0, 1, 0, color[0], color[1], color[2]);
+    if (!hasUv) continue;
+    if (i > 0) along += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const w = Math.hypot(right[i][0] - left[i][0], right[i][1] - left[i][1]);
+    // which edge of a sidewalk has the carriageway beside it: probe 2 m past each edge (+1: the right one, -1: the left one, 0: neither or both)
+    let kerb = 0;
+    if (target === res.sidewalk && w > 0.1) {
+      const nx = (right[i][0] - left[i][0]) / w, nz = (right[i][1] - left[i][1]) / w;
+      const rr = res.mask.contains(right[i][0] + nx * 2, right[i][1] + nz * 2);
+      const ll = res.mask.contains(left[i][0] - nx * 2, left[i][1] - nz * 2);
+      kerb = rr && !ll ? 1 : ll && !rr ? -1 : 0;
+    }
+    target.set('uv', li, 0, along);
+    target.set('uv', ri, w, along);
+    target.set('uv1', li, w / 2, kerb);
+    target.set('uv1', ri, w / 2, kerb);
   }
   target.indices.push(...ribbonIndices(n, base));
   res.stats.ways++;

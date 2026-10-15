@@ -1,0 +1,65 @@
+{
+  "_comment": "Written by tools/blender/build.mjs (npm run assets). Do not edit.",
+  "vehicles": {
+    "coupe": {
+      "file": "assets/vehicles/coupe.glb",
+      "type": "coupe",
+      "police": false,
+      "hash": "42076ed42582",
+      "bytes": 176372,
+      "tris": [
+        8094,
+        1832,
+        472
+      ]
+    },
+    "coupe-police": {
+      "file": "assets/vehicles/coupe-police.glb",
+      "type": "coupe",
+      "police": true,
+      "hash": "dccd2b7d15b4",
+      "bytes": 204988,
+      "tris": [
+        8494,
+        1968,
+        520
+      ]
+    },
+    "pickup": {
+      "file": "assets/vehicles/pickup.glb",
+      "type": "pickup",
+      "police": false,
+      "hash": "0ba713de80b0",
+      "bytes": 181676,
+      "tris": [
+        8212,
+        2198,
+        526
+      ]
+    },
+    "sedan": {
+      "file": "assets/vehicles/sedan.glb",
+      "type": "sedan",
+      "police": false,
+      "hash": "832183a9dbcc",
+      "bytes": 178584,
+      "tris": [
+        8274,
+        1908,
+        460
+      ]
+    },
+    "sedan-police": {
+      "file": "assets/vehicles/sedan-police.glb",
+      "type": "sedan",
+      "police": true,
+      "hash": "2b5af4d4c0cc",
+      "bytes": 208968,
+      "tris": [
+        8668,
+        2044,
+        508
+      ]
+    }
+  }
+}
