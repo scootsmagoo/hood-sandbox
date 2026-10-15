@@ -1136,7 +1136,10 @@ async function gunSuite() {
     await check('starts armed: a pistol with a full magazine and spare rounds', async () => {
       const a = await aim(page);
       expect(a.weapon === 'pistol', `weapon ${a.weapon}`);
-      expect(a.mag === 12 && a.reserve === 48, `ammo ${a.mag} / ${a.reserve}`);
+      // The player's spare rounds never run out (weapons.json player.infiniteReserve): 255 in the snapshot, ∞ on the HUD.
+      expect(a.mag === 12 && a.reserve === 255, `ammo ${a.mag} / ${a.reserve}`);
+      const res = await page.evaluate(() => document.querySelector('.gun-ammo .res')?.textContent);
+      expect(res === '/ ∞', `HUD reserve shows ${res}`);
       expect(a.owned === 15, `owned mask ${a.owned} (?weapons=all)`);
       const hud = await page.evaluate(() => document.querySelector('.gun-ammo .mag')?.textContent);
       expect(hud === '12', `HUD shows ${hud}`);
@@ -1205,7 +1208,11 @@ async function gunSuite() {
       await page.waitForFunction(() => window.__hood.game.view.heat >= 1, null, { timeout: 15000 });
     });
     await check('T reloads: the click, the bar, then a full magazine from the spare rounds', async () => {
-      await wait(700);
+      // Two shots first, then T at once (a part magazine also reloads by itself after a pause in the shooting).
+      await tap('KeyG');
+      await wait(350);
+      await tap('KeyG');
+      await wait(250);
       const before = await aim(page);
       await tap('KeyT');
       await wait(400);
@@ -1215,7 +1222,7 @@ async function gunSuite() {
       expect(before.mag < 12, `magazine was ${before.mag}`);
       expect(mid.reload > 0 && mid.reload < 1, `reload progress ${mid.reload}`);
       expect(after.mag === 12 && after.reload === 0, `after: ${after.mag} reload ${after.reload}`);
-      expect(after.reserve === before.reserve - (12 - before.mag), `reserve ${before.reserve} -> ${after.reserve}`);
+      expect(before.reserve === 255 ? after.reserve === 255 : after.reserve === before.reserve - (12 - before.mag), `reserve ${before.reserve} -> ${after.reserve}`);
       expect((await events(page, 'weapon:reload')).length >= 1, 'no weapon:reload event');
     });
     await check('the SMG fires on while the key is held, and bloom widens the crosshair', async () => {

@@ -133,7 +133,8 @@ export class GunHud implements System {
       // 255 spare rounds stands for "never runs out" (police); the player's are finite.
       if (a.reserve !== this.cache.reserve) {
         this.cache.reserve = a.reserve;
-        this.reserve.textContent = `/ ${a.reserve}`;
+        // 255 is the snapshot's mark for spare rounds that never run out.
+        this.reserve.textContent = a.reserve >= 255 ? '/ ∞' : `/ ${a.reserve}`;
       }
       this.ammo.classList.toggle('empty', a.empty > 0 || (a.mag === 0 && a.reload === 0));
       const rl = Math.round(a.reload * 100);

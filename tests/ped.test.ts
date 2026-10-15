@@ -23,8 +23,8 @@ describe('on foot', () => {
     expect(c.speed).toBeCloseTo(PED.runSpeed, 1);
     run(sim, 60, walk({ buttons: Button.Sprint }));
     expect(c.speed).toBeCloseTo(PED.sprintSpeed, 1);
-    // north is -Z
-    expect(c.z).toBeLessThan(-10);
+    // north is -Z: a second each of jogging and sprinting covers about runSpeed + sprintSpeed metres
+    expect(c.z).toBeLessThan(-(PED.runSpeed + PED.sprintSpeed) * 0.8);
   });
 
   it('walks when the stick is half pushed, camera-relative', async () => {
@@ -72,7 +72,7 @@ describe('on foot', () => {
     // 0.3 m kerb at x -14, z 2 (3 deep): walk north across it from z 6
     c.teleport(-14, 0, 7);
     let top = 0;
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 180; i++) {
       run(sim, 1, walk({ axes: { MoveY: 0.6 } }));
       top = Math.max(top, c.y);
     }

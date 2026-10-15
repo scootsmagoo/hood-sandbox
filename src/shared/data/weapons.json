@@ -111,6 +111,10 @@
   },
   "player": {
     "_comment": "What the player starts with: the default (a pistol and some rounds) and ?weapons=all.",
+    "infiniteReserve": true,
+    "_infiniteReserve": "Spare rounds never run out (the magazine still empties and reloads). On until ammo can be bought or picked up.",
+    "autoReloadIdleS": 1.5,
+    "_autoReloadIdleS": "A part-empty magazine reloads by itself after this long without a shot.",
     "default": ["pistol"],
     "all": ["pistol", "smg", "shotgun", "rifle"]
   },

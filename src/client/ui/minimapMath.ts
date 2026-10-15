@@ -34,6 +34,16 @@ export function zoomForSpeed(speedMps: number): number {
  * Forward direction (x, z) of a yaw, written to `out` (index 0 is x, 1 is z). The radar's "up" is
  * the camera's forward direction, so this is used for the camera and for every heading.
  */
+/**
+ * The way a ped or a car faces, from the yaw of its rotation (`yawOfQuat`). Bodies face their local +Z, so this is
+ * `(sin, cos)`, half a turn from a camera's `headingVector` (a camera at yaw 0 looks along -Z).
+ */
+export function facingVector(bodyYaw: number, out: Float64Array = new Float64Array(2)): Float64Array {
+  out[0] = Math.sin(bodyYaw);
+  out[1] = Math.cos(bodyYaw);
+  return out;
+}
+
 export function headingVector(yaw: number, out: Float64Array = new Float64Array(2)): Float64Array {
   out[0] = -Math.sin(yaw);
   out[1] = -Math.cos(yaw);

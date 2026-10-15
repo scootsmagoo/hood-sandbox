@@ -56,7 +56,7 @@ export interface WeaponTable {
   /** Weapon ids in slot order. */
   order: WeaponId[];
   loadouts: Record<string, WeaponId[]>;
-  player: { default: WeaponId[]; all: WeaponId[] };
+  player: { default: WeaponId[]; all: WeaponId[]; infiniteReserve: boolean; autoReloadIdleS: number };
   lockOn: LockOnRules;
 }
 
@@ -104,7 +104,14 @@ export function parseWeapons(json: unknown): WeaponTable {
     weapons,
     order,
     loadouts,
-    player: { default: ids(j.player?.default ?? ['pistol'], 'player.default'), all: ids(j.player?.all ?? order, 'player.all') },
+    player: {
+      default: ids(j.player?.default ?? ['pistol'], 'player.default'),
+      all: ids(j.player?.all ?? order, 'player.all'),
+      /** Spare rounds never run out for the player (the magazine still empties and reloads). */
+      infiniteReserve: j.player?.infiniteReserve === true,
+      /** A part-empty magazine reloads by itself after this many seconds without a shot (0: never). */
+      autoReloadIdleS: Number(j.player?.autoReloadIdleS ?? 0),
+    },
     lockOn: {
       coneDeg: lo.coneDeg ?? [4.5, 18],
       pull: lo.pull ?? [0.25, 1],

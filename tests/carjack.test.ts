@@ -1,3 +1,4 @@
+import { PED } from '../src/sim/character/locomotion';
 import { describe, expect, it } from 'vitest';
 import { doorGeometry } from '../src/shared/doors';
 import { rotateVec } from '../src/shared/math';
@@ -143,7 +144,8 @@ describe('carjacking', () => {
       events(sim, log);
       if (!sim.registry.get(victim.id)) break;
     }
-    expect(maxSpeed).toBeGreaterThan(6);
+    // Sprinting away, not jogging.
+    expect(maxSpeed).toBeGreaterThan(PED.sprintSpeed - 0.5);
     expect(d0).toBeGreaterThan(0.5);
     expect(log.some((e) => e.type === 'entity:despawn' && e.id === victim.id)).toBe(true);
   });

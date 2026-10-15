@@ -11,7 +11,7 @@
 import { AIM, viewDirection, viewRight } from '../../../shared/aim';
 import { clamp, type Vec3 } from '../../../shared/math';
 import { Axis, Button } from '../../../shared/protocol';
-import { LOCK_ON, WEAPONS, WEAPON_ORDER, lockOnFor } from '../../../shared/weapons';
+import { LOCK_ON, PLAYER_WEAPONS, WEAPONS, WEAPON_ORDER, lockOnFor } from '../../../shared/weapons';
 import { PedEntity, VehicleEntity, type PlayerSlot } from '../../entities';
 import type { Simulation } from '../../Simulation';
 import type { SimSystem } from '../../systems';
@@ -224,7 +224,15 @@ export class WeaponSystem implements SimSystem {
             g.lock = 0;
           }
         }
-      } else if (g.aiming && !ped.vehicleId && !ped.cover) {
+      } else {
+        // A part-empty magazine reloads by itself once the player has stopped shooting for a moment.
+        const idle = PLAYER_WEAPONS.autoReloadIdleS;
+        const m = g.inv[g.weapon];
+        if (idle > 0 && m && g.reloadLeft <= 0 && m.mag > 0 && m.mag < WEAPONS[g.weapon].magazine && (sim.tick - g.lastShotTick) * dt >= idle) {
+          startReload(sim, ped);
+        }
+      }
+      if (ped.role === 'player' && g.aiming && !ped.vehicleId && !ped.cover) {
         // Aiming slows the walk and rules out sprinting.
         const i = ped.input;
         i.moveX *= AIM.moveScale;

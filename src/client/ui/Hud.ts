@@ -54,6 +54,8 @@ export class Hud implements System {
   private clockEl: HTMLElement;
   private speedNum: HTMLElement;
   private speedUnit: HTMLElement;
+  /** The speedometer, shown only in a car. */
+  private speedEl: HTMLElement;
   private stateEl: HTMLElement;
   private promptEl: HTMLElement;
   private toastEl: HTMLElement;
@@ -85,6 +87,7 @@ export class Hud implements System {
     this.clockEl = el('div', 'hud-clock', this.root);
     Object.assign(this.clockEl.style, { position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', color: 'var(--dim)', fontVariantNumeric: 'tabular-nums', fontSize: '13px', letterSpacing: '0.04em' });
     const speed = el('div', 'hud-speed', this.root);
+    this.speedEl = speed;
     this.speedNum = el('span', 'num', speed, '0');
     this.speedUnit = el('span', 'unit', speed, 'mph');
     this.stateEl = el('div', 'hud-state', this.root);
@@ -246,6 +249,8 @@ export class Hud implements System {
     const fps = String(Math.round(g.fps));
     if (fps !== this.cache.fps) this.fpsEl.textContent = `${(this.cache.fps = fps)} fps`;
 
+    const showSpeed = v.inVehicle ? '' : 'none';
+    if (this.speedEl.style.display !== showSpeed) this.speedEl.style.display = showSpeed;
     const mph = Math.round(Math.hypot(st.vx, st.vz) * MPS_TO_MPH);
     const speed = String(mph);
     if (speed !== this.cache.speed) this.speedNum.textContent = this.cache.speed = speed;

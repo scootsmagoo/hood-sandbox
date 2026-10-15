@@ -293,6 +293,7 @@ export function giveStarterWeapons(ped: PedEntity, mode: 'default' | 'all' | 'no
   if (mode === 'none') return;
   const list = mode === 'all' ? PLAYER_WEAPONS.all : PLAYER_WEAPONS.default;
   list.forEach((w, i) => giveWeapon(ped, w, { equip: i === 0, reserve: WEAPONS[w].startReserve }));
+  if (PLAYER_WEAPONS.infiniteReserve && ped.gun) ped.gun.infinite = true;
 }
 
 /** The weapon in hand and its rounds, for a HUD or a test; null when unarmed. */

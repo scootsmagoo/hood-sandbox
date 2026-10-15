@@ -52,6 +52,8 @@ export class Input {
   /** True if pointer, keys or a source turned the camera this frame. */
   lookActive = false;
   device: InputDevice = 'keyboard';
+  /** The left button went down with Ctrl held, so it is acting as the right button until it comes up. */
+  private ctrlClick = false;
   /** Set by the net system each frame: the player is in a car (the pad's triggers are pedals there, so the gun moves to other buttons). */
   inVehicle = false;
 
@@ -396,9 +398,16 @@ export class Input {
         if (this.enabled && !fromTouch) this.requestPointerLock();
         return;
       }
-      this.press(`Mouse${e.button}`);
+      // Ctrl-click is the Mac's right click (a Magic Mouse or trackpad without a secondary click), unless Ctrl is bound.
+      const right = e.button === 0 && e.ctrlKey && !this.codeToActions.has('ControlLeft') && !this.codeToActions.has('ControlRight');
+      this.ctrlClick = right;
+      this.press(`Mouse${right ? 2 : e.button}`);
     });
-    on<MouseEvent>(window, 'mouseup', (e) => this.release(`Mouse${e.button}`));
+    on<MouseEvent>(window, 'mouseup', (e) => {
+      const button = e.button === 0 && this.ctrlClick ? 2 : e.button;
+      if (e.button === 0) this.ctrlClick = false;
+      this.release(`Mouse${button}`);
+    });
     on(this.target, 'contextmenu', (e: Event) => e.preventDefault());
     on<MouseEvent>(window, 'mousemove', (e) => {
       if (!this.locked) return;

@@ -17,6 +17,7 @@ import { HeatPhase, HeliFlag, PedFlag, VehicleFlag } from '../../shared/snapshot
 import type { Game, System } from '../Game';
 import {
   flashPhase,
+  facingVector,
   headingVector,
   radarTransform,
   withinRange,
@@ -325,7 +326,7 @@ export class Minimap implements System {
     ctx.restore();
 
     // The player: an arrow pointing where they face, relative to the camera.
-    const pfv = headingVector(yawOfQuat(st.q), this.pf);
+    const pfv = facingVector(yawOfQuat(st.q), this.pf);
     worldToRadar(pfv[0], pfv[1], fx, fz, 1, tmp);
     this.arrow(cx, cy, Math.atan2(tmp.x, -tmp.y), 11 * dpr);
 

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LOADOUTS, WEAPONS, WEAPON_ORDER, falloffMult, lockOnFor, parseWeapons, spreadDeg } from '../src/shared/weapons';
+import { LOADOUTS, PLAYER_WEAPONS, WEAPONS, WEAPON_ORDER, falloffMult, lockOnFor, parseWeapons, spreadDeg } from '../src/shared/weapons';
 import { PB, PedFlag, SnapshotView, E, gunMag, gunReserve, gunWeapon } from '../src/shared/snapshot';
 import { Axis } from '../src/shared/protocol';
 import { AIM, aimCameraPosition, viewDirection } from '../src/shared/aim';
@@ -23,6 +23,8 @@ async function range(boxes: Parameters<typeof boxTile>[0] = []) {
   (sim.registry.get(sim.vehicleId) as import('../src/sim/entities').VehicleEntity).car.teleport(400, 0.5, 400, 0);
   const p = ped(sim);
   p.controller.teleport(0, 0, 0, 0);
+  // These tests count spare rounds; the player's never-ending reserve (weapons.json) has its own test.
+  if (p.gun) p.gun.infinite = false;
   run(sim, 5, cmd());
   return { sim, p };
 }
@@ -249,6 +251,23 @@ describe('ammo, rate of fire and reloading', () => {
     expect(done / 60).toBeLessThan(WEAPONS.smg.reloadS + 0.2);
     expect(p.gun!.inv.smg!.mag).toBe(WEAPONS.smg.magazine);
     expect(p.gun!.inv.smg!.reserve).toBe(reserve0 - WEAPONS.smg.magazine);
+  });
+
+  it('gives the player spare rounds that never run out, and reloads a part magazine after a pause in the shooting', async () => {
+    const sim = await makeSim(boxTile([]));
+    const p = ped(sim);
+    expect(p.gun!.infinite).toBe(PLAYER_WEAPONS.infiniteReserve);
+    run(sim, 5, cmd());
+    const fired = runLog(sim, 20, () => cmd({ buttons: Button.Fire }));
+    expect(ofType(fired, 'weapon:fire').length).toBeGreaterThan(0);
+    const left = p.gun!.inv.pistol!.mag;
+    expect(left).toBeLessThan(WEAPONS.pistol.magazine);
+    // Not right away: the reload waits for the pause.
+    const soon = runLog(sim, Math.round(PLAYER_WEAPONS.autoReloadIdleS * 60 * 0.5), () => cmd());
+    expect(ofType(soon, 'weapon:reload').length).toBe(0);
+    const later = runLog(sim, Math.round((PLAYER_WEAPONS.autoReloadIdleS + WEAPONS.pistol.reloadS) * 60) + 30, () => cmd());
+    expect(ofType(later, 'weapon:reload').length).toBe(1);
+    expect(p.gun!.inv.pistol!.mag).toBe(WEAPONS.pistol.magazine);
   });
 
   it('spends the reserve, tops up a part magazine, and refuses a reload with nothing to load', async () => {

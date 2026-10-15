@@ -162,7 +162,7 @@ export class NetSystem implements System {
     const aiming = this.game.aim?.intent ?? false;
     const on = (a: Parameters<Game['input']['down']>[0]) => input.down(a) || input.pressed(a);
     return (
-      (on('aim') ? Button.Aim : 0) |
+      (aiming ? Button.Aim : 0) |
       (on('fire') ? Button.Fire : 0) |
       (on('reload') ? Button.Reload : 0) |
       (on('cover') ? Button.Cover : 0) |

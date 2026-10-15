@@ -5,10 +5,10 @@
 import { clamp, lerp } from '../../shared/math';
 
 export const PED = {
-  /** Walking, jogging and sprinting speeds, m/s. */
-  walkSpeed: 1.7,
-  runSpeed: 4.6,
-  sprintSpeed: 7.4,
+  /** Walking, jogging and sprinting speeds, m/s: a normal walk (3.4 mph), an 8-minute-mile jog (7.4 mph) and a fit person's flat-out sprint (12.3 mph). */
+  walkSpeed: 1.5,
+  runSpeed: 3.3,
+  sprintSpeed: 5.5,
   groundAccel: 48,
   groundDecel: 60,
   airAccel: 9,

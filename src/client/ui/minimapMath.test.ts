@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { quatFromYaw, rotateVec } from '../../shared/math';
 import {
   SPAN_FAST_M,
+  facingVector,
   SPAN_REST_M,
   flashPhase,
   headingVector,
@@ -114,5 +115,20 @@ describe('small helpers', () => {
     expect(flashPhase(250)).toBe(1);
     expect(flashPhase(500)).toBe(0);
     expect(flashPhase(750)).toBe(1);
+  });
+});
+
+describe('the player arrow', () => {
+  it('points where the body faces: a ped walking east shows as an arrow to the right when the camera looks north', async () => {
+    const { quatFromYaw, yawOfQuat } = await import('../../shared/math');
+    // The sim turns a ped toward its movement with yaw = atan2(dx, dz): east (+X) is yaw PI/2.
+    const body = yawOfQuat(quatFromYaw(Math.atan2(1, 0)));
+    const f = facingVector(body);
+    expect(f[0]).toBeCloseTo(1, 5);
+    expect(f[1]).toBeCloseTo(0, 5);
+    const cam = headingVector(0); // looking north (-Z)
+    const out = { x: 0, y: 0 };
+    worldToRadar(f[0], f[1], cam[0], cam[1], 1, out);
+    expect(Math.atan2(out.x, -out.y)).toBeCloseTo(Math.PI / 2, 5); // to the right on the radar
   });
 });

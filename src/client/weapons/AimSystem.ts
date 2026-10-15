@@ -9,6 +9,9 @@ import type { SimEvent } from '../../shared/protocol';
 import { WEAPONS, weaponByIndex, type WeaponDef } from '../../shared/weapons';
 import type { Game, System } from '../Game';
 
+/** A press of the aim button longer than this is hold-to-aim; a shorter one toggles the aim. */
+const HOLD_MS = 300;
+
 export interface AimView {
   /** The aim button is held (firing alone shoots from the hip, with the camera left as it is). */
   intent: boolean;
@@ -86,6 +89,37 @@ export class AimSystem implements System {
     }
   }
 
+  /** Keyboard and mouse: a tap of the aim button keeps the aim up until the next tap; a long press is hold-to-aim. */
+  private latched = false;
+  private aimWasDown = false;
+  private aimDownAt = 0;
+  private wasInVehicle = false;
+
+  /**
+   * Whether the player wants the aim up. A one-button mouse (a Magic Mouse, a trackpad) cannot hold aim
+   * and click to fire at once, so on keyboard and mouse a short tap of Z or the right button toggles the aim
+   * and a press longer than HOLD_MS still works as hold-to-aim. A gamepad and the touch screen keep their own
+   * behaviour (hold LT; the touch Aim button is already a toggle).
+   */
+  private aimIntent(input: Game['input']): boolean {
+    const down = input.down('aim');
+    if (input.device !== 'keyboard') {
+      this.latched = false;
+      this.aimWasDown = down;
+      return down;
+    }
+    const now = performance.now();
+    if ((down || input.pressed('aim')) && !this.aimWasDown) {
+      if (this.latched) this.latched = false;
+      else {
+        this.latched = true;
+        this.aimDownAt = now;
+      }
+    } else if (!down && this.aimWasDown && this.latched && now - this.aimDownAt > HOLD_MS) this.latched = false;
+    this.aimWasDown = down;
+    return this.latched;
+  }
+
   update(dt: number) {
     const g = this.game;
     const a = g.aim;
@@ -97,7 +131,7 @@ export class AimSystem implements System {
     a.strip = Math.max(0, a.strip - dt);
     a.empty = Math.max(0, a.empty - dt);
     // The aim camera comes up for the aim button only; the trigger alone fires from the hip.
-    a.intent = input.down('aim');
+    a.intent = this.aimIntent(input);
     if (!ped) {
       a.active = false;
       a.weapon = null;
@@ -115,6 +149,9 @@ export class AimSystem implements System {
     a.inCover = (ped.flags & PedFlag.InCover) !== 0;
     a.crouched = (ped.flags & PedFlag.Crouched) !== 0;
     const alive = (ped.flags & (PedFlag.Dead | PedFlag.Downed | PedFlag.Busy)) === 0 && v.overlay === 0;
+    // Getting in or out of a car, or losing the gun, drops a toggled aim.
+    if (!def || !alive || v.inVehicle !== this.wasInVehicle) this.latched = false;
+    this.wasInVehicle = v.inVehicle;
     a.active = a.intent && !!def && alive && (!v.inVehicle || def.driveBy);
   }
 }
