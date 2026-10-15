@@ -37,8 +37,11 @@ const WARM = 2;
 /** Allowed growth per counter (absolute, or a fraction of the first sample, whichever is larger), by phase. */
 const TOL = {
   reload: { geometries: 0, textures: 0, programs: 0, materials: 0, objects: 0, entities: 3, listeners: 20, domNodes: 20 },
-  // the street fills and empties every cycle: only the entity count is allowed to move
-  crowd: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 90, listeners: 30, domNodes: 40 },
+  // The live phases (`drive`, `crowd`) run with traffic. A traffic car swaps to a full model (55 scene objects, about 10 materials)
+  // while it is touched, smoking or has a door open, and back after, so there the counts step by whole cars: allow three at once.
+  // The frozen phases stay exact, and the soak watches the long run.
+  crowd: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
+  drive: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   default: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
 };
 const COUNTERS = ['geometries', 'textures', 'programs', 'materials', 'objects', 'entities', 'listeners', 'domNodes'];
@@ -147,7 +150,7 @@ for (const phase of phases) {
       let s;
       try { s = await sample(); } catch { break; }
       rows.push(s);
-      console.log(`  cycle ${String(i + 1).padStart(3)}: heap ${s.heapMB} MB · total ${s.totalMB ?? '-'} MB · geo ${s.geometries} · tex ${s.textures} · prog ${s.programs} · mat ${s.materials} · obj ${s.objects} · ent ${s.entities} · listeners ${s.listeners} · dom ${s.domNodes}`);
+      console.log(`  cycle ${String(i + 1).padStart(3)}: heap ${s.heapMB} MB · total ${s.totalMB ?? '-'} MB · geo ${s.geometries} (unused ${s.unusedGeometries}) · tex ${s.textures} · prog ${s.programs} · mat ${s.materials} · obj ${s.objects} · ent ${s.entities} · listeners ${s.listeners} · dom ${s.domNodes}`);
     }
   }
   const first = rows[0], last = rows[rows.length - 1], mid = rows[Math.floor(rows.length / 2)];
@@ -157,6 +160,13 @@ for (const phase of phases) {
     if (per > slope && last.heapMB > mid.heapMB) grew.push(`heap +${(last.heapMB - first.heapMB).toFixed(1)} MB (${per.toFixed(2)} MB/cycle)`);
     const tol = TOL[phase] ?? TOL.default;
     for (const k of COUNTERS) {
+      // Outside `reload`, the raw geometry count also rises once for each chunk or part first drawn as the camera moves, and holds
+      // after: judge the uploaded geometries that nothing in the scene draws any more, as the soak does. `reload` keeps the raw count.
+      if (k === 'geometries' && phase !== 'reload' && first.unusedGeometries !== undefined) {
+        const u1 = last.unusedGeometries - first.unusedGeometries, u2 = last.unusedGeometries - mid.unusedGeometries;
+        if (u1 > tol.geometries && u2 > 0) grew.push(`unused geometries +${u1}`);
+        continue;
+      }
       const d1 = last[k] - first[k], d2 = last[k] - mid[k];
       const allow = Math.max(tol[k], phase === 'reload' ? tol[k] : first[k] * 0.05);
       if (d1 > allow && d2 > 0) grew.push(`${k} +${d1}`);
@@ -172,7 +182,7 @@ if (args.json) writeFileSync(resolve(root, String(args.json)), JSON.stringify(re
 console.log('\nSummary (first sample after warm-up -> last):');
 for (const r of results) {
   const a = r.first, b = r.last;
-  console.log(`  ${r.phase.padEnd(8)} heap ${a.heapMB} -> ${b.heapMB} MB · total ${a.totalMB ?? '-'} -> ${b.totalMB ?? '-'} MB · geo ${a.geometries} -> ${b.geometries} · tex ${a.textures} -> ${b.textures} · prog ${a.programs} -> ${b.programs} · obj ${a.objects} -> ${b.objects} · ${r.grew.length ? 'GROWTH ' + r.grew.join(', ') : 'flat'}`);
+  console.log(`  ${r.phase.padEnd(8)} heap ${a.heapMB} -> ${b.heapMB} MB · total ${a.totalMB ?? '-'} -> ${b.totalMB ?? '-'} MB · geo ${a.geometries} -> ${b.geometries} (unused ${a.unusedGeometries} -> ${b.unusedGeometries}) · tex ${a.textures} -> ${b.textures} · prog ${a.programs} -> ${b.programs} · obj ${a.objects} -> ${b.objects} · ${r.grew.length ? 'GROWTH ' + r.grew.join(', ') : 'flat'}`);
 }
 const pageErrors = [...new Set(errors)];
 if (pageErrors.length) console.log(`errors (${pageErrors.length}):\n  ${pageErrors.slice(0, 10).join('\n  ')}`);
