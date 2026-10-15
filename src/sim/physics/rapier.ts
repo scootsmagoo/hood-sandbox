@@ -33,6 +33,8 @@ export const GROUPS = {
   ped: groups(Group.Ped, Group.World),
   /** The character controller and the wheel rays see the world and vehicles. */
   actorQuery: groups(Group.Query, Group.World | Group.Vehicle),
+  /** Sees other vehicles only (traffic looking for a car ahead). */
+  vehicleQuery: groups(Group.Query, Group.Vehicle),
   /** The camera arm sees only the world. */
   cameraQuery: groups(Group.Query, Group.World),
 } as const;

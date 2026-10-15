@@ -46,3 +46,19 @@ The design is in the README under [Pedestrians and the ambient city](../../READM
 - The engine scales every budget by the graphics tier's density and by a hard cap on entities (`MAX_ENTITIES` in `src/shared/snapshot.ts`, currently 256 for everything, including the player, police and parked cars).
 
 The engine picks the city pack from the tile id (`atlanta/m1-five-points` → `data/cities/atlanta/`), the same way it picks the law data. Missing file → a generic default population in `src/shared/data/`.
+
+## How pedestrians read it (`src/sim/peds/`)
+
+- The director looks at the cells (32 m) round the player. A cell's wish is `its sidewalk length / 100 x slot.peds`, weighted toward the player (3.2x inside 45 m, 1.2x to 75 m, 0.35x to 105 m, 0.1x beyond, so the busy part is the part you can see). If the wishes add up to more than the budget (60 on High, 40 on Medium, 24 on Low, `pedBudget`; never more than the free entity slots minus 28) every cell's wish is scaled down together. `peds: 0` in every slot of a zone means nobody there at that hour.
+- A person is made in a cell that has fewer people than it wishes, about 40 to 120 m from the player and where the camera cannot see (outside its cone, or behind a wall). The first fill, before the first frame, may use the whole ring from 14 m.
+- The slot's `pedGroups` weights pick the group. The group's `behaviour` weights pick *wander* (a walker on a sidewalk) or *scenario* (already doing something at a scenario point in that cell; if there is none free, a walker). `outfits` is a list of outfit indices to pick from, `walkSpeed` the range of the person's pace in m/s.
+- The zone `kind` biases the scenarios: `park` favours lawns and benches, `transit` bus stops, `venue` plazas and eateries, `nightlife` eateries and corners, `business` ATMs.
+- The time is `sim.clock`: `slot` and `weekend` choose the row. The population follows the clock: when the table asks for fewer people the farthest unseen ones leave first, and those in view stay until they walk out of it.
+- Anyone the player touched (hit, carjacked, a witness the law is waiting on a call from, someone who fights back) is never removed while the camera could see them, and not at all within 170 m.
+
+## How traffic reads it (`src/sim/traffic/`)
+
+- Every sample point along the main lanes (one per 20 m) within 230 m of the player counts `slot.cars x lane length / 1000` toward the number of cars wanted, where `slot` is the one of the zone at that point, picked with `sim.clock` (slot and weekend). Lanes are weighted by road class (primary 1.7, secondary 1.5, tertiary 1, residential 0.55, unclassified 0.7, freeways 0.3, ramps 0.6 of that) because `cars` is "per km of driving lane" and the avenues carry the traffic. The sum is scaled by the tier's density (High 1, Medium 0.75, Low 0.5) and capped at 40 cars on High (`TRAFFIC.cap`), and nothing spawns while the registry is within 40 entities of the 256-entity snapshot.
+- A car is made 120 to 230 m from the player, out of the camera's view when it is closer than 200 m, on a lane with 16 m of room; the chance of a spot is `slot.cars x road weight` over the busiest zone's value, a little higher nearer the player. The first fill may use 60 m and up.
+- The slot's `vehicleGroups` weights pick the group, the group's weights the type (a `handling.json` id), and `paints` (hex) its colour, else the stand-in palette.
+- Cars are removed once they are farther than 320 m and out of the camera's view, or farther than 450 m; the table asking for fewer cars never removes one, it only stops new ones.

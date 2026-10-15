@@ -50,6 +50,10 @@ export class ImpairedTransport implements Transport {
     return this.now() + this.imp.lagMs + (this.random() - 0.5) * 2 * this.imp.jitterMs;
   }
 
+  config(c: { pedBudget?: number; traffic?: number }) {
+    this.inner.config?.(c);
+  }
+
   sendInput(cmd: InputCommand) {
     if (this.random() < this.imp.loss) return;
     this.outbound.push({ at: this.delay(), item: cmd });

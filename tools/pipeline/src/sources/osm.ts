@@ -48,6 +48,26 @@ export function overpassNodeQuery(box: TileConfig['queryBox']): string {
 out;`;
 }
 
+/** Street furniture and storefront points that scenario points (sitting, waiting, queueing, chatting) are made from. */
+export function overpassPoiQuery(box: TileConfig['queryBox']): string {
+  const b = `${box.south.toFixed(6)},${box.west.toFixed(6)},${box.north.toFixed(6)},${box.east.toFixed(6)}`;
+  return `[out:json][timeout:180];
+(
+  node["amenity"~"^(bench|atm|restaurant|cafe|fast_food|bar|pub|ice_cream|food_court|bicycle_rental|fountain|marketplace|bank|pharmacy|vending_machine|shelter)$"](${b});
+  node["bench"="yes"](${b});
+  node["leisure"="picnic_table"](${b});
+  node["highway"="bus_stop"](${b});
+  node["public_transport"="platform"](${b});
+  node["shop"](${b});
+  node["tourism"~"^(information|attraction|artwork|viewpoint|museum|gallery)$"](${b});
+  way["amenity"~"^(bench|shelter|restaurant|cafe|fast_food|bar|pub|atm)$"](${b});
+  way["public_transport"="platform"](${b});
+  way["highway"="pedestrian"]["area"="yes"](${b});
+  way["place"="square"](${b});
+);
+out geom;`;
+}
+
 export async function fetchOsm(cfg: TileConfig): Promise<OsmData> {
   return fetchOverpass(cfg, overpassQuery(cfg.queryBox));
 }
@@ -55,6 +75,21 @@ export async function fetchOsm(cfg: TileConfig): Promise<OsmData> {
 /** Tagged nodes of the tile (cached next to the main extract, so a re-bake stays offline). */
 export async function fetchOsmNodes(cfg: TileConfig): Promise<OsmData> {
   return fetchOverpass(cfg, overpassNodeQuery(cfg.queryBox), 'osm-nodes');
+}
+
+/** Scenario-point sources (cached, so a re-bake stays offline). Overpass fails a lot, so this retries each endpoint with a backoff; null if all fail. */
+export async function fetchOsmPois(cfg: TileConfig): Promise<OsmData | null> {
+  const query = overpassPoiQuery(cfg.queryBox);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await fetchOverpass(cfg, query, 'osm-pois');
+    } catch (e) {
+      const wait = 4000 * 2 ** attempt;
+      console.warn(`osm pois: attempt ${attempt + 1} failed (${(e as Error).message}); ${attempt < 3 ? `retrying in ${wait / 1000}s` : 'giving up, scenario points will be synthesised'}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  return null;
 }
 
 async function fetchOverpass(cfg: TileConfig, query: string, prefix = 'osm-overpass'): Promise<OsmData> {

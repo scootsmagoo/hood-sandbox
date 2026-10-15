@@ -33,6 +33,13 @@ import { RaycastCar } from './vehicles/RaycastCar';
 import { planParking } from './streets/parking';
 import { PhysicsWorld } from './World';
 import { GameClock, type ClockOptions } from './clock';
+import { LaneGraph } from './traffic/LaneGraph';
+import { TrafficManager } from './traffic/TrafficManager';
+import { GENERIC_TRAFFIC_POPULATION, loadTrafficPopulationForTile, type TrafficPopulation } from './traffic/population';
+import { AmbientPeds } from './peds/AmbientPeds';
+import { WalkGraph } from './peds/graph';
+import { GENERIC_POPULATION, loadPopulationForTile, type PopulationData } from './peds/population';
+import { ScenarioIndex } from './peds/scenarios';
 
 export interface SimOptions {
   seed: number;
@@ -55,6 +62,16 @@ export interface SimOptions {
   armour?: number;
   /** The law tables (a city pack's jurisdictions). Left out, the pack of the tile's city is loaded, or a generic one. */
   law?: LawData;
+  /** Ambient pedestrians from the tile's walk network (default off here, on in the game; see `SimInit.ambientPeds`). Needs `paths.json`. */
+  ambientPeds?: boolean;
+  /** Most ambient pedestrians at once (default 60). */
+  pedBudget?: number;
+  /** The population table (a city pack's `population.json`). Left out, the generic one. */
+  population?: PopulationData;
+  /** Ambient traffic density, 0 to 1 (default 0: none here, the game asks for it by graphics tier). Needs `lanes.json`. */
+  traffic?: number;
+  /** The traffic half of the population table. Left out, the generic one. */
+  trafficPopulation?: TrafficPopulation;
   /** Start time and pace of the game clock (default Wednesday 14:00, half a game minute per real second). */
   clock?: ClockOptions;
 }
@@ -102,6 +119,12 @@ export class Simulation {
   private ruleEvents: SimEvent[] = [];
   readonly law: Law;
   readonly police: PoliceManager;
+  /** The ambient pedestrian director, when the tile has a walk network and ambient peds are on. */
+  readonly ambient: AmbientPeds | null = null;
+  /** Ambient traffic, when the tile has a lane graph and a density was asked for. */
+  readonly traffic: TrafficManager | null = null;
+  /** Listeners that see every event as it is emitted. */
+  private readonly eventTaps: ((e: SimEvent) => void)[] = [];
   readonly fireRng: Rng;
   private readonly plateRng: Rng;
   private readonly lives = new Map<number, PlayerLife>();
@@ -121,12 +144,31 @@ export class Simulation {
     this.law = new Law(this, opts.law ?? loadedLaw(opts));
     this.police = new PoliceManager(this);
     this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
+    if (opts.ambientPeds && opts.tile.paths) {
+      this.ambient = new AmbientPeds(this, {
+        graph: new WalkGraph(opts.tile.paths),
+        scenarios: new ScenarioIndex(opts.tile.scenarios),
+        population: opts.population ?? GENERIC_POPULATION,
+        junctions: opts.tile.junctions,
+        roads: opts.tile.roads,
+        budget: opts.pedBudget,
+      });
+    }
+    if ((opts.traffic ?? 0) > 0 && opts.tile.lanes) {
+      const graph = new LaneGraph(opts.tile.lanes);
+      if (graph.usable) {
+        this.traffic = new TrafficManager(this, graph, opts.trafficPopulation ?? GENERIC_TRAFFIC_POPULATION, Math.min(1, opts.traffic!));
+        this.eventTaps.push((e) => this.traffic?.onEvent(e));
+      }
+    }
     this.announce = true;
   }
 
   static async create(opts: SimOptions): Promise<Simulation> {
     const law = opts.law ?? (await loadLawForTile(opts.tile.manifest.id));
-    return new Simulation(await initRapier(), { ...opts, law });
+    const population = opts.population ?? (opts.ambientPeds ? await loadPopulationForTile(opts.tile.manifest.id) : undefined);
+    const trafficPopulation = opts.trafficPopulation ?? ((opts.traffic ?? 0) > 0 ? await loadTrafficPopulationForTile(opts.tile.manifest.id) : undefined);
+    return new Simulation(await initRapier(), { ...opts, law, population, trafficPopulation });
   }
 
   get tile(): TileData {
@@ -170,7 +212,7 @@ export class Simulation {
   }
 
   /** Where the body origin sits above flat ground when the car is at rest on its suspension. */
-  private restHeight(h: (typeof HANDLING)[string]): number {
+  restHeight(h: (typeof HANDLING)[string]): number {
     const sus = h.suspension;
     const omega = 2 * Math.PI * sus.frequencyHz;
     const len = sus.travel * sus.restRatio - 9.81 / (omega * omega);
@@ -329,6 +371,8 @@ export class Simulation {
   emit(e: SimEvent) {
     this.events.push(e);
     this.ruleEvents.push(e);
+    this.ambient?.onEvent(e);
+    for (const tap of this.eventTaps) tap(e);
   }
 
   /** The events since the rules module last looked (it looks once a tick). */
@@ -575,7 +619,8 @@ export class Simulation {
       (b?.state === 'flee' ? PedFlag.Fleeing : 0) |
       (b?.state === 'fight' ? PedFlag.Fighting : 0) |
       (b?.state === 'dragged' ? PedFlag.Dragged : 0) |
-      (e.busy ? PedFlag.Busy : 0);
+      (e.busy ? PedFlag.Busy : 0) |
+      ((e.pose & 7) << PedFlag.PoseShift);
     f[o + E.Speed] = c.speed;
     f[o + E.Aux0] = c.yaw;
     f[o + E.Aux1] = e.melee ? Math.min(1, e.melee.t / COMBAT.swingTime) : (b?.swing ?? 0);
@@ -613,7 +658,8 @@ export class Simulation {
       (e.onFire ? VehicleFlag.OnFire : 0) |
       (e.burnt ? VehicleFlag.Burnt : 0) |
       (e.police ? VehicleFlag.Police : 0) |
-      (e.lightbar ? VehicleFlag.Lightbar : 0);
+      (e.lightbar ? VehicleFlag.Lightbar : 0) |
+      (e.trafficCar ? VehicleFlag.Traffic : 0);
     f[o + E.Health] = e.health;
     f[o + E.Health2] = e.engine;
     f[o + E.Aux2] = e.onFire ? Math.min(1, e.burnT / e.burnFor) : 0;

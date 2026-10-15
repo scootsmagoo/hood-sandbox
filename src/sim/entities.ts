@@ -1,8 +1,10 @@
 import { Authority, EntityKind, type EntityBase, type EntityId } from '../shared/entities';
 import type { PedController, PedInput } from './character/PedController';
 import type { PedBrain } from './npc/brain';
+import type { AmbientState } from './peds/state';
 import type { OfficerState } from './police/types';
 import type { RaycastCar, VehicleInput } from './vehicles/RaycastCar';
+import type { TrafficCar } from './traffic/TrafficManager';
 
 export type PedRole = 'player' | 'civilian' | 'police';
 export type PedLife = 'alive' | 'downed' | 'dead';
@@ -41,6 +43,10 @@ export class PedEntity implements EntityBase {
   brain: PedBrain | null = null;
   /** Index into the client's outfit table. */
   outfit = 0;
+  /** Set for the pedestrians the ambient director made: their route, what they are doing, whether the player touched them. */
+  amb: AmbientState | null = null;
+  /** What an idle pedestrian is doing with its body (`PedPose`), for the snapshot. */
+  pose = 0;
   /** Under the sim's control for a scripted moment (a carjack): commands are ignored and the body is moved by hand. */
   busy = false;
 
@@ -84,6 +90,10 @@ export class VehicleEntity implements EntityBase {
   input: VehicleInput = { throttle: 0, brake: 0, steer: 0, handbrake: true };
   /** The driver's door is open (a carjack in progress). */
   doorOpen = false;
+  /** Set for a car the ambient traffic drives (or left behind): the traffic's record of it. */
+  trafficCar: TrafficCar | null = null;
+  /** The body is a kinematic follower of a lane, not simulated: the vehicle system leaves it alone. */
+  kinematic = false;
   /** Where it was parked; it goes back there if it leaves the world. */
   home = { x: 0, y: 0, z: 0, yaw: 0 };
 

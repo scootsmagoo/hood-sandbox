@@ -17,12 +17,16 @@ export interface Tier {
   lodScale: number;
   /** Camera far plane, m. */
   far: number;
+  /** Most ambient pedestrians the sim keeps round the player. */
+  pedBudget: number;
+  /** Ambient traffic density factor: the share of the High tier's cars (40) on this tier. */
+  trafficDensity: number;
 }
 
 export const TIERS: Record<TierName, Tier> = {
-  low: { name: 'low', pixelRatio: 1, shadowMap: 0, shadowRadius: 0, lodScale: 0.55, far: 700 },
-  medium: { name: 'medium', pixelRatio: 1.5, shadowMap: 1024, shadowRadius: 50, lodScale: 0.75, far: 1400 },
-  high: { name: 'high', pixelRatio: 2, shadowMap: 2048, shadowRadius: 80, lodScale: 1, far: 2600 },
+  low: { name: 'low', pixelRatio: 1, shadowMap: 0, shadowRadius: 0, lodScale: 0.55, far: 700, pedBudget: 24, trafficDensity: 0.5 },
+  medium: { name: 'medium', pixelRatio: 1.5, shadowMap: 1024, shadowRadius: 50, lodScale: 0.75, far: 1400, pedBudget: 40, trafficDensity: 0.75 },
+  high: { name: 'high', pixelRatio: 2, shadowMap: 2048, shadowRadius: 80, lodScale: 1, far: 2600, pedBudget: 60, trafficDensity: 1 },
 };
 
 const ORDER: TierName[] = ['low', 'medium', 'high'];

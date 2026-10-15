@@ -119,6 +119,32 @@ export class PedController {
     if (wish.magnitude > 0.05) this.yaw = approachAngle(this.yaw, yawFromDir(wish.x, wish.z), PED.turnRate * dt);
   }
 
+  /**
+   * A cheap step for a pedestrian nobody is near: the same velocity model, but no character
+   * controller queries. The position follows `groundY` (the walk network is clear of walls by
+   * construction). Switch back to `step` and the capsule snaps to the real ground within a frame.
+   */
+  glide(dt: number, input: PedInput, groundY: number) {
+    if (!this.enabled) return;
+    wishVelocity(input.moveX, input.moveY, input.camYaw, false, wish);
+    approachVelocity(this.vel, wish.x, wish.z, true, dt);
+    this.sprinting = false;
+    const fade = Math.exp(-3.5 * dt);
+    this.ext.x *= fade;
+    this.ext.z *= fade;
+    if (Math.abs(this.ext.x) + Math.abs(this.ext.z) < 0.05) this.ext.x = this.ext.z = 0;
+    const mx = (this.vel.x + this.ext.x) * dt, mz = (this.vel.z + this.ext.z) * dt;
+    const dy = groundY - this.y;
+    this.grounded = true;
+    this.vy = 0;
+    if (mx === 0 && mz === 0 && Math.abs(dy) < 0.02) return;
+    this.x += mx;
+    this.z += mz;
+    this.y += dy * Math.min(1, dt * 8);
+    this.body.setNextKinematicTranslation({ x: this.x, y: this.y + PED_FEET_OFFSET, z: this.z });
+    if (wish.magnitude > 0.05) this.yaw = approachAngle(this.yaw, yawFromDir(wish.x, wish.z), PED.turnRate * dt);
+  }
+
   get speed(): number {
     return Math.hypot(this.vel.x, this.vel.z);
   }

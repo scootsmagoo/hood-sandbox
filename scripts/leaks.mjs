@@ -31,20 +31,23 @@ const args = parseArgs();
 const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
-const phases = String(args.phases ?? 'reload,vehicle,tiers,drive').split(',').filter(Boolean);
-const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6 };
+const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd').split(',').filter(Boolean);
+const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12 };
 const WARM = 2;
 /** Allowed growth per counter (absolute, or a fraction of the first sample, whichever is larger), by phase. */
 const TOL = {
   reload: { geometries: 0, textures: 0, programs: 0, materials: 0, objects: 0, entities: 3, listeners: 20, domNodes: 20 },
+  // the street fills and empties every cycle: only the entity count is allowed to move
+  crowd: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 90, listeners: 30, domNodes: 40 },
   default: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
 };
 const COUNTERS = ['geometries', 'textures', 'programs', 'materials', 'objects', 'entities', 'listeners', 'domNodes'];
 
+// (the clock is frozen: the first night-sky draw at dusk would show up as a geometry that appears mid-run)
 const server = await startServer(args);
 const browser = await launch({});
 const { page, cdp, errors, profile, isCrashed } = await openProfile(browser, profileName, args);
-const bootMs = await boot(page, server.base, `graphics=${profile.tier}&start=car`);
+const bootMs = await boot(page, server.base, `graphics=${profile.tier}&start=car&timescale=0&pedbudget=40&traffic=${args.traffic ?? 0.75}${args.query ? `&${args.query}` : ""}`);
 console.log(`booted in ${(bootMs / 1000).toFixed(1)} s (${profileName})`);
 await page.waitForTimeout(3000);
 await page.keyboard.press('Shift');
@@ -93,6 +96,14 @@ const ACTIVITIES = {
     }, i);
     if (!ok) throw new Error('needs the dev server (no --dist) to import src/client/graphics.ts');
   },
+  /** People appear and are removed again: the budget goes between none and the tier's, so the street fills and empties. */
+  async crowd(i) {
+    await page.evaluate(async (full) => {
+      const g = window.__hood.game;
+      g.transport.config?.({ pedBudget: full ? 40 : 0 });
+      await window.__h.sleep(full ? 2500 : 3500);
+    }, i % 2 === 0);
+  },
   async drive() {
     await page.evaluate(async () => {
       const b = window.__h.bot;
@@ -103,12 +114,27 @@ const ACTIVITIES = {
   },
 };
 
+// The street is part of the scene: cars and people come and go, and each car is a few dozen scene objects and a few geometries. The
+// tile, the player's own car and the tier switches are what these phases measure, so they run with the population frozen (nobody new is
+// made; whoever is in view stays). `drive` and `crowd` run with it. The population does not follow the tier here (`pedbudget` and
+// `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
+const FROZEN = { pedBudget: 0, traffic: 0 };
+const LIVE = { pedBudget: 40, traffic: 0.75 };
+const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE };
+const setPopulation = (c) => page.evaluate((c) => window.__hood.game.transport.config?.(c), c);
+let population = null;
 const results = [];
 for (const phase of phases) {
   const act = ACTIVITIES[phase];
   if (!act) { console.log(`unknown phase ${phase}`); continue; }
   const n = Math.max(6, Math.round(CYCLES[phase] * scale));
   console.log(`\n== ${phase}: ${n} cycles after ${WARM} warm-up`);
+  const want = POPULATION[phase] ?? LIVE;
+  if (want !== population) {
+    population = want;
+    await setPopulation(want);
+    await page.waitForTimeout(14000);
+  }
   const run = async (i) => {
     try { await act(i); } catch (e) { errors.push(`[${phase} ${i}] ${e.message.split('\n')[0]}`); }
   };
@@ -137,6 +163,7 @@ for (const phase of phases) {
     }
     if (first.totalMB && last.totalMB && last.totalMB - first.totalMB > Math.max(25, first.totalMB * 0.15) && last.totalMB > mid.totalMB) grew.push(`total memory +${(last.totalMB - first.totalMB).toFixed(0)} MB`);
   } else grew.push('too few samples (crashed?)');
+  if (phase === 'crowd') await setPopulation(LIVE);
   results.push({ phase, cycles: n, first, last, grew });
   console.log(`  ${grew.length ? 'GROWTH: ' + grew.join(', ') : 'flat'}`);
 }

@@ -5,6 +5,8 @@
  * It uses only `fetch` and typed arrays, so it runs in a worker, on the main thread and in Node.
  */
 import { generateProceduralTile } from './proceduralTile';
+import { parseLanes, type LanesData } from './lanes';
+import { parsePaths, parseScenarios, type PathsData, type ScenariosData } from './walk';
 
 export interface TileManifest {
   format: 'hood-tile';
@@ -19,8 +21,14 @@ export interface TileManifest {
   chunks?: { size: number; minX: number; minZ: number; cols: number; rows: number };
   collision: { file: string; vertexCount: number; indexCount: number };
   roads?: string;
-  /** `junctions.json`: junction polygons with their legs, signals, stop signs and crossings (see the contract). Not loaded by the sim yet. */
+  /** `junctions.json`: junction polygons with their legs, signals, stop signs and crossings (see the contract). */
   junctions?: string;
+  /** `lanes.json`: the directed lane graph traffic drives on (see the contract). */
+  lanes?: string;
+  /** `paths.json`: the walk network pedestrians route over (see the contract). */
+  paths?: string;
+  /** `scenarios.json`: where people sit, wait, queue and chat. */
+  scenarios?: string;
   spawns: {
     player: { x: number; y: number; z: number };
     /** `heading` is the three.js `rotation.y` of an object that faces -Z at 0: forward is (-sin h, -cos h). */
@@ -39,6 +47,8 @@ export interface RoadData {
   bridge: boolean;
   layer: number;
   width: number;
+  /** posted speed limit, km/h, when OSM has one */
+  maxspeed?: number;
   /** true for a bridge the pipeline made over a cut or ravine where OSM has none (then `bridge` is true too) */
   derived?: boolean;
   points: [number, number, number][];
@@ -57,6 +67,8 @@ export interface JunctionsData {
     legs: {
       road: string;
       node: number;
+      /** the OSM node's position (x, z) */
+      at?: [number, number];
       /** unit vector (x, z) pointing away from the junction */
       dir: [number, number];
       approach: boolean;
@@ -82,6 +94,13 @@ export interface TileData {
   collisionIndices: Uint32Array;
   /** Road centrelines, when the tile has them. The sim uses them to park cars at the curb. */
   roads?: RoadData[];
+  /** The walk network and the scenario points, when the tile has them. Without a network there are no ambient pedestrians. */
+  paths?: PathsData;
+  scenarios?: ScenariosData;
+  /** `junctions.json`, when the tile has one (pedestrians read the signal groups of the junctions their crossings cross). */
+  junctions?: JunctionsData;
+  /** The lane graph, when the tile has one. Without it there is no ambient traffic. */
+  lanes?: LanesData;
   source: 'baked' | 'procedural';
   /** Why the baked tile was not used. */
   fallbackReason?: string;
@@ -163,6 +182,7 @@ export function parseRoads(json: unknown): RoadData[] {
       bridge: !!r.bridge,
       layer: isNum(r.layer) ? r.layer : 0,
       width: r.width,
+      ...(isNum(r.maxspeed) ? { maxspeed: r.maxspeed } : {}),
       ...(r.derived ? { derived: true } : {}),
       points: r.points,
     });
@@ -175,6 +195,17 @@ async function loadRoads(base: string, manifest: TileManifest, fetchFn: Fetch): 
   try {
     const res = await fetchFn(base + manifest.roads);
     return res.ok ? parseRoads(await res.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads a named optional JSON file of the tile through `parse`; any problem means none. */
+async function loadOptional<T>(base: string, name: string | undefined, parse: (j: unknown) => T | null, fetchFn: Fetch): Promise<T | undefined> {
+  if (!name) return undefined;
+  try {
+    const res = await fetchFn(base + name);
+    return res.ok ? parse(await res.json()) ?? undefined : undefined;
   } catch {
     return undefined;
   }
@@ -195,9 +226,21 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     // A dev server answers unknown paths with index.html, which fails here as a JSON error.
     throw new Error(`no usable tile at ${base} (${(e as Error).message})`);
   }
-  const [h, c, roads] = await Promise.all([get(manifest.heightmap.file), get(manifest.collision.file), loadRoads(base, manifest, fetchFn)]);
+  const [h, c, roads, paths, scenarios, junctions, lanes] = await Promise.all([
+    get(manifest.heightmap.file),
+    get(manifest.collision.file),
+    loadRoads(base, manifest, fetchFn),
+    loadOptional(base, manifest.paths, parsePaths, fetchFn),
+    loadOptional(base, manifest.scenarios, parseScenarios, fetchFn),
+    loadOptional(base, manifest.junctions, (j) => ((j as JunctionsData | null)?.junctions ? (j as JunctionsData) : null), fetchFn),
+    loadOptional(base, manifest.lanes, parseLanes, fetchFn),
+  ]);
   const tile = decodeTile(manifest, await h.arrayBuffer(), await c.arrayBuffer());
   if (roads) tile.roads = roads;
+  if (paths) tile.paths = paths;
+  if (scenarios) tile.scenarios = scenarios;
+  if (junctions) tile.junctions = junctions;
+  if (lanes) tile.lanes = lanes;
   return tile;
 }
 

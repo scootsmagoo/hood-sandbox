@@ -50,9 +50,12 @@ async function main() {
       });
   console.log(`browser: ${browserName} ${browser.version()}`);
   let failures = 0;
+  if (args.only === 'traffic') failures += await trafficSuite();
+  else {
   for (const t of transports) failures += await suite(t);
   if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/tile.json'))) failures += await realTile();
   else console.log('\n(no baked tile in public/tiles: skipping the real-tile check)');
+  }
   await browser.close();
   if (server) await server.close();
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll controls checks passed');
@@ -616,7 +619,7 @@ async function realTile() {
     expect(errors.length === 0, errors.join(' | '));
   });
   await ctx.close();
-  return c.fails() + (await realCarjack()) + (await lawSuite('baked'));
+  return c.fails() + (await realCarjack()) + (await realBystanderJack()) + (await trafficSuite()) + (await lawSuite('baked'));
 }
 
 /** The same flow on the real Five Points tile: sidewalk start, round the car, jack it, drive off. */
@@ -662,6 +665,195 @@ async function realCarjack() {
   return c.fails();
 }
 
+/**
+ * Ambient traffic on the baked tile (run on the loopback transport so the check can look into the sim):
+ * cars are about and drawn as instances, the signals have heads, and a car stopped at a red light can be
+ * jacked with real key presses through the same flow as any other car, with the queue behind it waiting.
+ */
+async function trafficSuite() {
+  console.log('--- traffic on the baked tile');
+  const { page, errors, ctx } = await open('graphics=low&transport=loopback&time=12:00&timescale=0&ambient=0&seed=3');
+  const c = makeChecker(page, 'traffic');
+  const { check, tap, wait, st, expect, k } = c;
+  await wait(1500);
+  await installEventLog(page);
+  const sim = (fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+
+  await check('traffic cars are about, flagged and drawn as instances', async () => {
+    await wait(4000);
+    const info = await page.evaluate(() => {
+      const g = window.__hood.game;
+      let traffic = 0;
+      for (const e of g.view.entities.values()) if (e.kind === 2 && (e.flags & (1 << 13)) !== 0) traffic++;
+      const meshes = [];
+      g.scene.traverse((o) => { if (o.isInstancedMesh && o.name.startsWith('traffic-')) meshes.push({ name: o.name, count: o.count }); });
+      return { traffic, meshes, calls: g.renderer.info.render.calls };
+    });
+    expect(info.traffic >= 8, `${info.traffic} traffic cars in the snapshot`);
+    expect(info.meshes.some((m) => m.count > 0), `no instanced car drawn (${JSON.stringify(info.meshes)})`);
+    return `${info.traffic} cars, ${info.meshes.filter((m) => m.count > 0).length} instanced meshes in use, ${info.calls} draws`;
+  });
+  await check('signal heads stand at the signalised junctions', async () => {
+    const info = await page.evaluate(() => {
+      let heads = 0;
+      window.__hood.game.scene.traverse((o) => { if (o.name === 'signal-heads') heads = o.children.reduce((a, m) => a + (m.count ?? 0), 0); });
+      return heads;
+    });
+    expect(info >= 100, `${info} signal parts`);
+    return `${info} parts (poles, housings, lamps)`;
+  });
+
+  let jackId = 0;
+  await check('a car stops at a red light with a driver at the wheel', async () => {
+    // let the world run until some car is standing at a closed signal, then go and stand near it
+    let found = null;
+    const look = (radius) => sim((s, r) => {
+      const t = s.traffic;
+      const p = s.registry.get(s.playerPedId).controller;
+      let best = null;
+      for (const c of t.cars) {
+        if (c.veh.car.speed > 0.3 || !c.gateWhy.startsWith('signal closed')) continue;
+        const b = c.veh.car.body.translation();
+        const d = Math.hypot(b.x - p.x, b.z - p.z);
+        if (d < r && (!best || d < best.d)) best = { id: c.veh.id, x: b.x, z: b.z, d, phys: c.mode === 'phys' && !!c.veh.occupantId };
+      }
+      return best;
+    }, radius);
+    for (let i = 0; i < 480 && !found; i++) {
+      const cand = await look(900);
+      if (cand && cand.phys && cand.d < 60) found = cand;
+      else if (cand) {
+        await sim((s, c) => {
+          const pl = s.registry.get(s.playerPedId).controller;
+          pl.teleport(c.x + 22, s.groundAt(c.x + 22, c.z) + 0.3, c.z + 3);
+        }, cand);
+        await wait(1200);
+      } else await wait(250);
+    }
+    expect(found, 'no car stood at a red light within two minutes');
+    jackId = found.id;
+    return `car ${jackId} at (${found.x.toFixed(0)}, ${found.z.toFixed(0)})`;
+  });
+  await check('E at its driver door pulls the driver out and puts the player at the wheel', async () => {
+    // put the player on the pavement a few metres from the car, then walk to the door with real keys
+    await sim((s, id) => {
+      const v = s.registry.get(id);
+      const pose = v.car.pose();
+      const pl = s.registry.get(s.playerPedId).controller;
+      // 4 m behind the driver's door line, on the left of the car
+      const yaw = v.car.yaw;
+      const x = pose.x + Math.cos(yaw) * 3.2 - Math.sin(yaw) * 5.5;
+      const z = pose.z - Math.sin(yaw) * 3.2 - Math.cos(yaw) * 5.5;
+      pl.teleport(x, s.groundAt(x, z) + 0.2, z);
+    }, jackId);
+    await wait(500);
+    const r = await walkTo(page, async (s) => { const car = s.cars.find((x) => x.id === jackId); return doorStand(page, car); }, { tol: 0.6, timeoutMs: 15000 });
+    expect(r.ok, `did not reach the door (${r.dist?.toFixed(1)} m)`);
+    await tap('KeyE');
+    const s = await until(page, (x) => x.inCar, 6000, 'the player to be in the car');
+    expect(s.car.id === jackId, 'wrong car');
+    expect((await eventsOf(page, 'carjack')).length >= 1, 'no carjack event');
+    expect((await eventsOf(page, 'crime')).some((e) => e.crime === 'carjack'), 'no crime event');
+    const state = await sim((sm, id) => { const v = sm.registry.get(id); return { traffic: !!v.trafficCar, owner: v.owner }; }, jackId);
+    expect(!state.traffic && state.owner === 1, `still traffic: ${JSON.stringify(state)}`);
+  });
+  await check('and the car drives away', async () => {
+    const a = await st();
+    await k.down('KeyW');
+    await wait(2500);
+    const b = await st();
+    await k.up('KeyW');
+    expect(Math.hypot(b.car.x - a.car.x, b.car.z - a.car.z) > 8, 'did not move');
+  });
+  await check('driving through the traffic: cars keep their lanes and nothing wrecks', async () => {
+    await k.down('KeyW');
+    await wait(5000);
+    await k.up('KeyW');
+    const s = await sim((sm) => ({ cars: sm.traffic.cars.length, free: sm.traffic.count('free'), phys: sm.traffic.count('phys') }));
+    expect(s.cars > 5, `${s.cars} cars`);
+    return `${s.cars} cars, ${s.phys} physical, ${s.free} left behind`;
+  });
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails();
+}
+
+/**
+ * A carjack with people about: the baked tile at lunchtime with ambient pedestrians, four of them put on the
+ * sidewalk near the car. The player pulls the driver out and the sim must report the crime from a bystander,
+ * not only the driver; the bystanders run; and knocking out a caller stops that call.
+ */
+async function realBystanderJack() {
+  console.log('--- carjack with bystanders on the baked tile');
+  const { page, errors, ctx } = await open('graphics=low&driver=flee&transport=loopback&time=12:00&parked=2');
+  const c = makeChecker(page, 'bystander-jack');
+  const { check, tap, wait, st, expect } = c;
+  const sim = (fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  await wait(1200);
+  await installEventLog(page);
+  let heroId = 0;
+  await check('there are ambient pedestrians, and four are standing near the car', async () => {
+    const r = await sim((S) => {
+      const A = S.ambient;
+      if (!A) return { n: 0, near: 0 };
+      const me = S.playerPosition();
+      const g = A.graph;
+      const gid = Object.keys(A.population.pedGroups)[0];
+      // sidewalk nodes 8 to 26 m from the player, nearest first, at least 5 m apart and in sight of the car
+      const cands = [];
+      for (let i = 0; i < g.nodeCount; i++) {
+        const d = Math.hypot(g.x[i] - me.x, g.z[i] - me.z);
+        if (d < 8 || d > 26 || !g.isSpawnEdge(g.adjEdges[g.adjStart[i]])) continue;
+        if (!S.law.clearLine({ x: g.x[i], y: g.y[i] + 1.5, z: g.z[i] }, { x: me.x, y: me.y + 1.2, z: me.z })) continue;
+        cands.push({ i, d });
+      }
+      cands.sort((a, b) => a.d - b.d);
+      const used = [];
+      let made = 0;
+      for (const { i } of cands) {
+        if (made >= 4) break;
+        if (used.some((j) => Math.hypot(g.x[i] - g.x[j], g.z[i] - g.z[j]) < 5)) continue;
+        const p = A.makePed(gid, A.population.pedGroups[gid], g.x[i], g.y[i], g.z[i], i, -1, { yaw: 0, point: -1, slot: 0, count: 1, action: 'wait', dur: 600, type: 'corner' });
+        if (p) { used.push(i); made++; }
+      }
+      return { n: A.count, made };
+    });
+    expect(r.n > 10, `${r.n} ambient pedestrians`);
+    expect(r.made === 4, `${r.made} bystanders placed`);
+    heroId = (await st()).car.id;
+    return `${r.n} people about`;
+  });
+  await check('pulling the driver out gets a report from a bystander', async () => {
+    expect(await walkToDriverDoor(page, heroId), 'did not reach the door');
+    await tap('KeyE');
+    await until(page, (x) => x.inCar, 5000, 'the player to be in the car');
+    await page.waitForFunction(() => window.__events.some((e) => e.type === 'crime:reported' && !e.police), null, { timeout: 25000 });
+    await wait(6000);
+    const r = await page.evaluate(() => {
+      const jack = window.__events.find((e) => e.type === 'carjack');
+      const crime = window.__events.find((e) => e.type === 'crime' && e.crime === 'carjack');
+      const reports = window.__events.filter((e) => e.type === 'crime:reported' && !e.police);
+      return { victim: jack.victimId, witnesses: crime.witnesses, reporters: reports.map((x) => x.reporterId), me: window.__hood.game.view.ped.id };
+    });
+    expect(r.witnesses >= 3, `${r.witnesses} witnesses`);
+    const bystanders = r.reporters.filter((id) => id !== r.victim && id !== r.me);
+    expect(bystanders.length >= 1, `reporters ${JSON.stringify(r.reporters)} (victim ${r.victim})`);
+    return `${r.witnesses} witnesses, ${r.reporters.length} calls, ${bystanders.length} from bystanders`;
+  });
+  await check('the bystanders ran, or cowered, or filmed it', async () => {
+    const n = await page.evaluate(() => window.__events.filter((e) => e.type === 'ped:react').length);
+    expect(n >= 1, `${n} reactions`);
+    return `${n} reactions`;
+  });
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails();
+}
+
 // ------------------------------------------------------------------------------------------------
 // Damage, crime, heat and the police
 
@@ -674,7 +866,8 @@ async function realCarjack() {
 async function lawSuite(kind) {
   console.log(`--- law and damage (${kind})`);
   const tile = kind === 'procedural' ? 'tile=none&' : '';
-  const base = `${tile}graphics=low&transport=loopback`;
+  // (scripted scenes: no ambient crowd to witness them or get in the way)
+  const base = `${tile}graphics=low&transport=loopback&ambient=0`;
   const sim = (page, fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
   const hud = (page) => page.evaluate(HUD);
   const untilHud = async (page, cond, ms, label) => {

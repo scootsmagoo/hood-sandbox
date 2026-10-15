@@ -18,6 +18,8 @@ export interface RoadWay {
   bridge: boolean;
   /** junction=roundabout */
   roundabout?: boolean;
+  /** posted speed limit in km/h (`maxspeed`, "35 mph" converted), when OSM has one */
+  maxspeed?: number;
   nodeIds: number[];
   pts: V2[];
 }
@@ -74,6 +76,15 @@ function parseLayer(t: Record<string, string>): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** OSM `maxspeed` as km/h: "50", "35 mph", "walk" and the like; undefined when absent or not a number. */
+export function parseMaxspeed(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh)?\s*$/i.exec(v.split(';')[0]);
+  if (!m) return undefined;
+  const n = parseFloat(m[1]) * (m[2]?.toLowerCase() === 'mph' ? 1.609344 : 1);
+  return n >= 5 && n <= 200 ? Math.round(n) : undefined;
+}
+
 export function classifyWay(el: OsmElement): Omit<RoadWay, 'pts' | 'nodeIds' | 'id'> | null {
   const t = el.tags ?? {};
   if (t.area === 'yes') return null;
@@ -124,6 +135,7 @@ export function classifyWay(el: OsmElement): Omit<RoadWay, 'pts' | 'nodeIds' | '
     layer: isDeck ? Math.max(layer, 1) : 0,
     bridge: isDeck,
     roundabout,
+    ...(kind === 'car' && parseMaxspeed(t.maxspeed) ? { maxspeed: parseMaxspeed(t.maxspeed) } : {}),
   };
 }
 

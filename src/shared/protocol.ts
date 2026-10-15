@@ -104,9 +104,18 @@ export type SimEvent =
   | { type: 'police:stand-down'; tick: number }
   /** An officer got out to chase on foot. */
   | { type: 'police:dismount'; tick: number; pedId: EntityId; vehicleId: EntityId }
+  /** An ambient pedestrian reacted to something (the audio and the tests listen): ran, cowered, got a phone out, stared, jumped back. */
+  | { type: 'ped:react'; tick: number; pedId: EntityId; reaction: PedReaction; cause: PedCause; x: number; z: number }
+  /** A traffic driver leans on the horn (a car blocks the road, a pedestrian will not move). */
+  | { type: 'traffic:honk'; tick: number; vehicleId: EntityId; x: number; z: number }
+  /** A traffic driver reacted: braked hard, swerved, pulled over for the police or fled danger. */
+  | { type: 'traffic:react'; tick: number; vehicleId: EntityId; reaction: 'brake' | 'swerve' | 'pullover' | 'flee'; x: number; z: number }
   | { type: 'player:wasted'; tick: number; pedId: EntityId; x: number; y: number; z: number }
   | { type: 'player:busted'; tick: number; pedId: EntityId; officerId: EntityId }
   | { type: 'player:respawn'; tick: number; pedId: EntityId; reason: 'wasted' | 'busted'; x: number; y: number; z: number };
+
+export type PedReaction = 'flee' | 'cower' | 'film' | 'look' | 'startle';
+export type PedCause = 'violence' | 'carjack' | 'explosion' | 'crash' | 'wreck' | 'car-on-sidewalk' | 'fast-car';
 
 export type DamageKind = 'melee' | 'vehicle' | 'fall' | 'explosion' | 'fire';
 export type HeatPhaseName = 'none' | 'reported' | 'seen' | 'lost';
@@ -144,6 +153,14 @@ export interface SimInit {
   bystanders?: number;
   /** Starting armour for the player, 0 to 100 (default 0). */
   armour?: number;
+  /** Ambient pedestrians from the tile's walk network and the city's population table (default on; `?ambient=0` turns them off). */
+  ambientPeds?: boolean;
+  /** Most ambient pedestrians at once (the graphics tier sets it: 60 on High). */
+  pedBudget?: number;
+  /** Ambient traffic density, 0 to 1 (the graphics tier sets it: 1 on High, 0.5 on Low). 0 or left out: none. */
+  traffic?: number;
+  /** Game clock start and pace (`?time=`, `?day=`, `?timescale=`). Left out: Wednesday 14:00 at 0.5 game minutes per second. */
+  clock?: { minutes?: number; day?: number; scale?: number };
   /** Run the clock by itself. Tests turn this off and call `advance`. */
   autoRun: boolean;
 }
@@ -174,6 +191,8 @@ export interface SimStats {
 export type ToSim =
   | { type: 'init'; init: SimInit }
   | { type: 'input'; cmd: InputCommand }
+  /** Settings that can change while the sim runs (the graphics tier steps down). */
+  | { type: 'config'; pedBudget?: number; traffic?: number }
   | { type: 'stop' };
 
 export type FromSim =

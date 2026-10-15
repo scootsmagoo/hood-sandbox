@@ -107,7 +107,30 @@ export const PedFlag = {
   Police: 1 << 10,
   /** Mid-punch (`Aux1` is the swing, 0 to 1). The same bit as an NPC's `Fighting`, set for the player too. */
   Punching: 1 << 5,
+  /** Bits 11 to 13 hold what an idle pedestrian is doing (`PedPose`). */
+  PoseShift: 11,
+  PoseMask: 7 << 11,
 } as const;
+
+/** What an ambient pedestrian is doing while it stands (or sits) where it is, in bits 11 to 13 of a ped's flags. */
+export const PedPose = {
+  None: 0,
+  /** On a bench or the grass. */
+  Sit: 1,
+  /** Phone at the ear. */
+  Phone: 2,
+  /** Phone held up, filming. */
+  Film: 3,
+  /** Crouched, arms over the head. */
+  Cower: 4,
+  /** Talking with their hands. */
+  Chat: 5,
+  /** Using a cash machine. */
+  Atm: 6,
+  /** Leaning in to look at a window. */
+  Browse: 7,
+} as const;
+export type PedPose = (typeof PedPose)[keyof typeof PedPose];
 
 export const VehicleFlag = {
   Occupied: 1 << 0,
@@ -129,6 +152,8 @@ export const VehicleFlag = {
   Police: 1 << 11,
   /** Lightbar flashing. */
   Lightbar: 1 << 12,
+  /** Part of the ambient traffic (the client draws these as instances unless they are close). */
+  Traffic: 1 << 13,
 } as const;
 
 export class SnapshotView {

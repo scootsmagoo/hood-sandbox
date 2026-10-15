@@ -17,6 +17,7 @@ import { damagePed } from './combat/damage';
 import { DownedSystem, FallSystem, LifeSystem, MeleeSystem, VehicleDamageSystem, VehicleHitSystem, startMelee } from './combat/systems';
 import { LawSystem } from './law/Law';
 import { PoliceSystem } from './police/PoliceSystem';
+import { TrafficManager } from './traffic/TrafficManager';
 import type { Simulation } from './Simulation';
 import { IDLE_INPUT } from './vehicles/RaycastCar';
 
@@ -162,7 +163,9 @@ export class PedSystem implements SimSystem {
         c.z = p.z + w.z;
         c.yaw = v.car.yaw;
       } else {
-        c.step(dt, e.life === 'alive' ? e.input : NO_INPUT);
+        // Far or standing ambient people skip the character controller (see AmbientPeds.step).
+        if (e.amb?.lite && e.life === 'alive') c.glide(dt, e.input, e.amb.liteY);
+        else c.step(dt, e.life === 'alive' ? e.input : NO_INPUT);
       }
     }
   }
@@ -176,6 +179,8 @@ export class VehicleSystem implements SimSystem {
 
   fixedUpdate(sim: Simulation, dt: number) {
     for (const v of sim.vehicles()) {
+      // A spline follower in the traffic is moved by the traffic system, not by wheels.
+      if (v.kinematic) continue;
       if (v.engineDead || v.burnt) {
         // A dead engine drives nothing; a burnt-out shell does not even roll.
         const i = v.input;
@@ -322,9 +327,12 @@ export class NpcSystem implements SimSystem {
       i.sprint = i.jump = false;
       if (b.state === 'seated' || b.state === 'dragged' || e.busy) continue;
       const c = e.controller;
-      const out = b.update({ dt, x: c.x, z: c.z, threatX: threat.x, threatZ: threat.z, probe: probeFrom(sim, c.x, c.y, c.z) }, this.out);
+      const th = b.threat ?? threat;
+      const out = b.update({ dt, x: c.x, z: c.z, threatX: th.x, threatZ: th.z, probe: probeFrom(sim, c.x, c.y, c.z) }, this.out);
       if (out.escaped) {
-        sim.despawn(e.id);
+        // An ambient pedestrian who got away is only removed once nobody could see it go.
+        if (!e.amb || !sim.ambient || sim.ambient.mayRemove(e)) sim.despawn(e.id);
+        else b.enter('calm');
         continue;
       }
       if (out.speed !== 'stop') {
@@ -345,8 +353,26 @@ export class NpcSystem implements SimSystem {
   }
 }
 
+/** Runs the ambient pedestrians (after the brains have thought, before the bodies move). */
+export class AmbientPedSystem implements SimSystem {
+  readonly name = 'ambientPeds';
+  readonly priority = 16;
+  fixedUpdate(sim: Simulation, dt: number) {
+    sim.ambient?.update(dt);
+  }
+}
+
+/** Drives the ambient traffic: before the physics step, after the police have set their pedals. */
+export class TrafficSystem implements SimSystem {
+  readonly name = 'traffic';
+  readonly priority = 19;
+  fixedUpdate(sim: Simulation, dt: number) {
+    sim.traffic?.update(dt);
+  }
+}
+
 export function defaultSystems(): SimSystem[] {
-  return [new PlayerControlSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new PoliceSystem(), new PedSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem()].sort(
+  return [new PlayerControlSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem()].sort(
     (a, b) => a.priority - b.priority,
   );
 }

@@ -212,6 +212,11 @@ export class AudioSystem implements System {
           this.thud(victim, clamp01(0.15 + amount / 60), 0.6);
           break;
         }
+        case 'traffic:honk': {
+          // A driver leans on the horn: where their car is.
+          this.horn(this.entity(ev.vehicleId));
+          break;
+        }
         // Door clicks come from the door flag in `updateDoors`, not from enter, exit or carjack events,
         // which would click twice.
         // 'crime' and 'heat:change' have no sound yet. Add them here when the law and heat systems want one.
@@ -260,6 +265,33 @@ export class AudioSystem implements System {
     body.connect(out);
     this.play(body, now, 0.25, out);
     this.burst(now, 0.08, 'lowpass', 500, 0.8, out, 0.6);
+  }
+
+  /** A car horn: two square tones a third apart, a short blast. */
+  private horn(st: { x: number; z: number } | null) {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const { gain, pan } = this.spatial(st);
+    if (gain < 0.02) return;
+    const out = ctx.createGain();
+    const now = ctx.currentTime;
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.exponentialRampToValueAtTime(0.16 * gain, now + 0.02);
+    out.gain.setValueAtTime(0.16 * gain, now + 0.26);
+    out.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 2200;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    filter.connect(out).connect(panner).connect(this.master);
+    for (const f of [392, 494]) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      o.connect(filter);
+      this.play(o, now, 0.34, out);
+    }
   }
 
   private doorClick(st: EntityState | null) {

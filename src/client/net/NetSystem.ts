@@ -115,7 +115,7 @@ export class NetSystem implements System {
       const id = b.u32[b.at(i)];
       let st = this.pool.get(id);
       if (!st) this.pool.set(id, (st = newEntityState()));
-      if (!blendEntity(sample, id, st)) continue;
+      if (!blendEntity(sample, id, st, i)) continue;
       v.entities.set(id, st);
       if (id === b.playerPed) v.ped = st;
     }

@@ -8,7 +8,10 @@ import { GamepadSource } from './client/input/gamepad';
 import { TouchControls } from './client/input/touch';
 import { NetSystem } from './client/net/NetSystem';
 import { Atmosphere } from './client/render/Atmosphere';
+import { clockFromParams } from './client/render/timeOfDay';
 import { EntityViews } from './client/render/EntityViews';
+import { loadScenarioProps } from './client/render/ScenarioProps';
+import { loadSignalHeads } from './client/render/SignalHeads';
 import { createTransport } from './client/transport/createTransport';
 import { Hud } from './client/ui/Hud';
 import { createWorldView, type WorldView } from './world/WorldView';
@@ -55,6 +58,12 @@ async function main() {
       parkedCars: params.has('parked') ? Math.max(0, Math.min(20, Number(params.get('parked')) || 0)) : undefined,
       bystanders: params.has('peds') ? Math.max(0, Math.min(12, Number(params.get('peds')) || 0)) : undefined,
       armour: params.has('armour') ? Math.max(0, Math.min(100, Number(params.get('armour')) || 0)) : undefined,
+      clock: clockFromParams(params),
+      // ?traffic=0 turns the ambient cars off; ?traffic=0.5 scales the tier's density.
+      traffic: params.has('traffic') ? Math.max(0, Math.min(1, Number(params.get('traffic')) || 0)) : game.tier.trafficDensity,
+      // ?ambient=0 turns the pedestrians of the sidewalks off; ?pedbudget=N overrides the tier's number.
+      ambientPeds: params.get('ambient') !== '0',
+      pedBudget: params.has('pedbudget') ? Math.max(0, Math.min(150, Number(params.get('pedbudget')) || 0)) : game.tier.pedBudget,
       autoRun: true,
     });
 
@@ -70,6 +79,15 @@ async function main() {
       hooks.world = world;
     };
 
+    // The governor steps the tier down when the frame rate drops; fewer people on the street then too.
+    game.onTierChange((t) => {
+      if (!params.has('pedbudget')) transport.config?.({ pedBudget: t.pedBudget });
+      if (!params.has('traffic')) transport.config?.({ traffic: t.trafficDensity });
+    });
+    const props = await loadScenarioProps(game.scene, tileBase);
+    if (props) game.addSystem(props);
+    const heads = await loadSignalHeads(game, tileBase, game.ready.tile.lanes);
+    if (heads) game.addSystem(heads);
     game.addSystem(new NetSystem(game));
     game.addSystem(new EntityViews(game));
     game.addSystem(new CameraRig(game));

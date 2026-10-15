@@ -429,6 +429,8 @@ export interface JunctionsFile {
     legs: {
       road: string;
       node: number;
+      /** the OSM node's position (x, z), where the leg meets the junction */
+      at: [number, number];
       dir: [number, number];
       approach: boolean;
       departure: boolean;
@@ -472,6 +474,7 @@ export function exportJunctions(
           return {
             road: wayId(l),
             node: l.node,
+            at: [r2(l.p[0]), r2(l.p[1])] as [number, number],
             dir: [r2(l.d[0]), r2(l.d[1])] as [number, number],
             approach: l.approach,
             departure: l.departure,

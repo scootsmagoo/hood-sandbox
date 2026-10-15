@@ -25,6 +25,9 @@ scope.onmessage = (e) => {
     case 'input':
       host.input(msg.cmd);
       break;
+    case 'config':
+      host.config(msg);
+      break;
     case 'stop':
       host.stop();
       break;

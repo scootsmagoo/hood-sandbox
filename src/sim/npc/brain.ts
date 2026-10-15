@@ -87,6 +87,8 @@ export function newBrainOutput(): BrainOutput {
 
 export class PedBrain {
   state: BrainState;
+  /** What to run from when it is not the player (an explosion, a car on the pavement). Cleared when the brain leaves `flee`. */
+  threat: { x: number; z: number } | null = null;
   /** Seconds in the current state. */
   timer = 0;
   /** Punch wind-up progress, 0 to 1 (0 when not swinging). */
@@ -117,7 +119,10 @@ export class PedBrain {
     this.attackCool = 0.25;
     this.cornered = 0;
     this.rethinkIn = 0;
-    if (state !== 'flee') this.heading = null;
+    if (state !== 'flee') {
+      this.heading = null;
+      this.threat = null;
+    }
   }
 
   update(s: BrainSense, out: BrainOutput): BrainOutput {

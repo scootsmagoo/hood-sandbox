@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import type { HandlingData } from '../../shared/handling';
-import { SEATED_SCALE } from '../../shared/doors';
+import { newJoints, solvePose, type PedMode } from './pedPose';
 import { WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
 
 // Boxes of the same size share one geometry, so building and dropping models does not leak.
@@ -70,11 +70,27 @@ const shared = {
   head: new THREE.MeshStandardMaterial({ color: 0xfff1c9, emissive: 0xfff1c9, emissiveIntensity: 0.8 }),
 };
 
+/** How bright the headlamps are drawn, 0.8 by day; the time of day raises it at night. Shared by every car. */
+export function setHeadlights(k: number) {
+  shared.head.emissiveIntensity = k;
+}
+
+/**
+ * Which part of a car a material is, for merging a model into instanced meshes (`TrafficInstances`): its
+ * `userData.part` is `paint` (takes the car's colour), `tail`, `head` (lamps) or unset (fixed colours).
+ */
+shared.head.userData.part = 'head';
+shared.glass.userData.part = 'glass';
+/** Wheel rims are not worth their triangles on an instance. */
+shared.rim.userData.part = 'skip';
+
 export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: ModelLivery): VehicleModel {
   const root = new THREE.Group();
   const owned: THREE.Material[] = [];
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.45 });
   const tail = new THREE.MeshStandardMaterial({ color: 0x5a0d0d, emissive: 0xff1a1a, emissiveIntensity: 0.25 });
+  paint.userData.part = 'paint';
+  tail.userData.part = 'tail';
   const c = h.chassis;
   const [hx, hy, hz] = c.halfExtents;
   root.add(box(hx * 2, hy * 2, hz * 2, paint, c.offset[0], c.offset[1], c.offset[2]));
@@ -92,6 +108,7 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
     const bedLen = bedFront - -hz;
     const bedMid = (bedFront + -hz) / 2;
     const rail = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.8), roughness: 0.5, metalness: 0.3 });
+    rail.userData.part = 'paint';
     owned.push(rail);
     for (const sx of [-1, 1]) root.add(box(0.08, 0.34, bedLen, rail, sx * (hx - 0.04), top + 0.17, bedMid));
     root.add(box(hx * 2, 0.34, 0.08, rail, 0, top + 0.17, -hz + 0.04));
@@ -104,6 +121,7 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
   // The driver's door: a panel on the left side, hinged at its front edge.
   const doorZ = cab.offset[2] + 0.2;
   const doorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.92), roughness: 0.38, metalness: 0.45 });
+  doorMat.userData.part = 'paint';
   owned.push(doorMat);
   const doorLen = 1.0;
   const doorHinge = new THREE.Group();
@@ -211,13 +229,13 @@ export function buildVehicleModel(h: HandlingData, color = 0xb23a2e, livery?: Mo
   };
 }
 
-/** What a ped is doing, for the pose. */
-export type PedMode = 'normal' | 'seated' | 'dragged' | 'fleeing' | 'fighting';
+
+export type { PedMode };
 
 export interface PedModel {
   root: THREE.Group;
-  /** `speed` in m/s; `phase` is advanced by the caller; `swing` is a punch's wind-up, 0 to 1. */
-  pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number): void;
+  /** `speed` in m/s; `phase` is advanced by the caller; `swing` is a punch's wind-up, 0 to 1; `pedPose` is the sim's `PedPose` and `time` seconds. */
+  pose(speed: number, grounded: boolean, phase: number, mode?: PedMode, swing?: number, pedPose?: number, time?: number): void;
   /** Topples the figure: 1 lies on its back (knocked down), -1 face down (dead), 0 stands. A stand-in for a ragdoll. */
   lie(amount: number): void;
 }
@@ -291,75 +309,23 @@ export function buildPedModel(look: PedLook = OUTFITS[0]): PedModel {
   inner.add(legL, legR, torso, armL, armR);
 
   let lying = 0;
+  const j = newJoints();
   return {
     root,
     lie(amount) {
       lying = amount;
     },
-    pose(speed, grounded, phase, mode = 'normal', swing = 0) {
-      inner.scale.setScalar(mode === 'seated' ? SEATED_SCALE : 1);
-      inner.rotation.x = 0;
-      inner.position.y = 0;
-      inner.position.z = 0;
-      if (Math.abs(lying) > 0.02 && mode !== 'seated' && mode !== 'dragged') {
-        // On the ground: the whole figure tips over about its feet, limbs a little flung.
-        inner.rotation.x = -lying * (Math.PI / 2);
-        inner.position.y = 0.17 * Math.abs(lying);
-        inner.position.z = 0.85 * lying;
-        const flop = Math.abs(lying);
-        legL.rotation.x = 0.1 * flop;
-        legR.rotation.x = -0.2 * flop;
-        armL.rotation.x = -0.4 * flop;
-        armR.rotation.x = 0.3 * flop;
-        torso.rotation.x = 0;
-        torso.rotation.y = 0.2 * flop;
-        torso.position.y = 0.9;
-        return;
-      }
-      if (mode === 'seated') {
-        // Thighs forward under the wheel, hands up on it.
-        legL.rotation.x = legR.rotation.x = -1.45;
-        armL.rotation.x = armR.rotation.x = -1.15;
-        torso.rotation.x = 0.05;
-        torso.position.y = 0.9;
-        return;
-      }
-      if (mode === 'dragged') {
-        // Hauled backwards out of the seat: heels trailing, arms flung up.
-        legL.rotation.x = -0.9 + Math.sin(phase * 3) * 0.35;
-        legR.rotation.x = -0.5 - Math.sin(phase * 3) * 0.35;
-        armL.rotation.x = -2.6 + Math.sin(phase * 4) * 0.3;
-        armR.rotation.x = -2.9 - Math.sin(phase * 4) * 0.3;
-        torso.rotation.x = -0.35;
-        torso.position.y = 0.9;
-        return;
-      }
-      const amp = Math.min(1, speed / 4.6) * (mode === 'fleeing' ? 1.2 : 0.95);
-      const s = Math.sin(phase) * amp;
-      if (!grounded) {
-        legL.rotation.x = -0.5;
-        legR.rotation.x = 0.35;
-        armL.rotation.x = -2.2;
-        armR.rotation.x = -2.0;
-        torso.rotation.x = 0.05;
-        torso.position.y = 0.9;
-        return;
-      }
-      legL.rotation.x = s;
-      legR.rotation.x = -s;
-      armL.rotation.x = -s * 0.9;
-      armR.rotation.x = s * 0.9;
-      torso.rotation.x = Math.min(0.25, speed * 0.03) + (mode === 'fleeing' ? 0.18 : 0);
-      torso.position.y = 0.9 + Math.abs(Math.sin(phase)) * 0.04 * amp;
-      if (mode === 'fighting') {
-        // Guard up, then the right hand winds back and whips forward.
-        armL.rotation.x = -1.2;
-        armR.rotation.x = swing > 0 ? 0.9 - swing * 2.7 : -1.3;
-        torso.rotation.x = 0.12 + swing * 0.15;
-        torso.rotation.y = -swing * 0.5;
-      } else {
-        torso.rotation.y = 0;
-      }
+    pose(speed, grounded, phase, mode = 'normal', swing = 0, pedPose = 0, time = 0) {
+      solvePose(j, speed, grounded, phase, mode, swing, pedPose, time, lying);
+      inner.scale.setScalar(j.scale);
+      inner.rotation.x = j.tiltX;
+      inner.position.set(0, j.shiftY, j.shiftZ);
+      legL.rotation.x = j.legL;
+      legR.rotation.x = j.legR;
+      armL.rotation.set(j.armL, 0, j.armLz);
+      armR.rotation.set(j.armR, 0, j.armRz);
+      torso.rotation.set(j.torsoX, j.torsoY, 0);
+      torso.position.y = 0.9 + j.torsoLift;
     },
   };
 }

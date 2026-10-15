@@ -48,6 +48,10 @@ export class SimHost {
         parkedCars: init.parkedCars,
         bystanders: init.bystanders,
         armour: init.armour,
+        clock: init.clock,
+        ambientPeds: init.ambientPeds ?? true,
+        pedBudget: this.pendingBudget ?? init.pedBudget,
+        traffic: this.pendingTraffic ?? init.traffic,
       });
       this.sim = sim;
       if (init.snapshotBuffer) this.ring = new SnapshotRing(init.snapshotBuffer, SNAPSHOT_BYTES);
@@ -70,6 +74,17 @@ export class SimHost {
       this.sink.message({ type: 'error', message: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) });
     }
   }
+
+  /** Settings that change while the sim runs. */
+  config(c: { pedBudget?: number; traffic?: number }) {
+    if (c.traffic !== undefined && this.sim?.traffic) this.sim.traffic.density = Math.max(0, Math.min(1, c.traffic));
+    else if (c.traffic !== undefined) this.pendingTraffic = c.traffic;
+    if (c.pedBudget !== undefined && this.sim?.ambient) this.sim.ambient.budget = c.pedBudget;
+    else if (c.pedBudget !== undefined) this.pendingBudget = c.pedBudget;
+  }
+
+  private pendingBudget: number | undefined;
+  private pendingTraffic: number | undefined;
 
   input(cmd: InputCommand) {
     this.sim?.pushInput(1, cmd);

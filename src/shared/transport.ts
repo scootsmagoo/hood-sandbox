@@ -11,6 +11,8 @@ export interface Transport {
   readonly shared: boolean;
   start(init: SimInit): Promise<SimReady>;
   sendInput(cmd: InputCommand): void;
+  /** Changes a setting while the sim runs (the graphics tier's pedestrian budget). */
+  config?(c: { pedBudget?: number; traffic?: number }): void;
   /** Snapshots that arrived since the last call, oldest first. The caller owns the views. */
   drainSnapshots(): SnapshotView[];
   drainEvents(): SimEvent[];

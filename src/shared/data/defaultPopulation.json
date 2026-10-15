@@ -1,0 +1,519 @@
+{
+  "pedGroups": {
+    "business": {
+      "outfits": [
+        1,
+        2
+      ],
+      "walkSpeed": [
+        1.2,
+        1.5
+      ],
+      "behaviour": {
+        "wander": 0.7,
+        "scenario": 0.3
+      }
+    },
+    "students": {
+      "outfits": [
+        3,
+        4
+      ],
+      "walkSpeed": [
+        1.1,
+        1.5
+      ],
+      "behaviour": {
+        "wander": 0.6,
+        "scenario": 0.4
+      }
+    },
+    "tourists": {
+      "outfits": [
+        3,
+        5
+      ],
+      "walkSpeed": [
+        0.9,
+        1.2
+      ],
+      "behaviour": {
+        "wander": 0.5,
+        "scenario": 0.5
+      }
+    },
+    "locals": {
+      "outfits": [
+        2,
+        4
+      ],
+      "walkSpeed": [
+        1,
+        1.4
+      ],
+      "behaviour": {
+        "wander": 0.8,
+        "scenario": 0.2
+      }
+    },
+    "nightlife": {
+      "outfits": [
+        5
+      ],
+      "walkSpeed": [
+        1,
+        1.3
+      ],
+      "behaviour": {
+        "wander": 0.7,
+        "scenario": 0.3
+      }
+    },
+    "workers": {
+      "outfits": [
+        1,
+        2
+      ],
+      "walkSpeed": [
+        1.3,
+        1.6
+      ],
+      "behaviour": {
+        "wander": 0.9,
+        "scenario": 0.1
+      }
+    },
+    "unhoused": {
+      "outfits": [
+        1,
+        3
+      ],
+      "walkSpeed": [
+        0.9,
+        1.1
+      ],
+      "behaviour": {
+        "wander": 0.3,
+        "scenario": 0.7
+      }
+    }
+  },
+  "vehicleGroups": {
+    "city": [
+      {
+        "type": "sedan",
+        "weight": 6
+      },
+      {
+        "type": "coupe",
+        "weight": 2
+      },
+      {
+        "type": "pickup",
+        "weight": 1
+      }
+    ],
+    "commercial": [
+      {
+        "type": "pickup",
+        "weight": 5
+      },
+      {
+        "type": "sedan",
+        "weight": 2
+      }
+    ],
+    "night": [
+      {
+        "type": "coupe",
+        "weight": 3,
+        "paints": [
+          "#101010",
+          "#1c1f26",
+          "#3a0d0d",
+          "#2b2b33"
+        ]
+      },
+      {
+        "type": "sedan",
+        "weight": 2,
+        "paints": [
+          "#101010",
+          "#1c1f26",
+          "#3a0d0d",
+          "#2b2b33"
+        ]
+      }
+    ],
+    "venue": [
+      {
+        "type": "sedan",
+        "weight": 3
+      },
+      {
+        "type": "pickup",
+        "weight": 1
+      },
+      {
+        "type": "coupe",
+        "weight": 2
+      }
+    ]
+  },
+  "zones": [
+    {
+      "id": "city",
+      "name": "Generic city",
+      "kind": "business",
+      "default": true,
+      "weekday": [
+        {
+          "peds": 1,
+          "cars": 2,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 0,
+          "cars": 1,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 0,
+          "cars": 1,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 4,
+          "pedGroups": {
+            "business": 0.4,
+            "workers": 0.1,
+            "tourists": 0.05,
+            "locals": 0.2,
+            "unhoused": 0.1,
+            "nightlife": 0.15
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 5,
+          "cars": 8,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 7,
+          "cars": 12,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 8,
+          "cars": 14,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 7,
+          "cars": 12,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 6,
+          "cars": 10,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 5,
+          "cars": 8,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 3,
+          "cars": 5,
+          "pedGroups": {
+            "business": 0.4,
+            "workers": 0.1,
+            "tourists": 0.05,
+            "locals": 0.2,
+            "unhoused": 0.1,
+            "nightlife": 0.15
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        }
+      ],
+      "weekend": [
+        {
+          "peds": 2,
+          "cars": 2,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 2,
+          "pedGroups": {
+            "business": 0.4,
+            "workers": 0.1,
+            "tourists": 0.05,
+            "locals": 0.2,
+            "unhoused": 0.1,
+            "nightlife": 0.15
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 3,
+          "cars": 5,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 5,
+          "cars": 8,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 6,
+          "cars": 9,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 6,
+          "cars": 9,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 5,
+          "cars": 8,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 4,
+          "cars": 6,
+          "pedGroups": {
+            "business": 0.6,
+            "workers": 0.2,
+            "tourists": 0.1,
+            "locals": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 3,
+          "cars": 4,
+          "pedGroups": {
+            "business": 0.4,
+            "workers": 0.1,
+            "tourists": 0.05,
+            "locals": 0.2,
+            "unhoused": 0.1,
+            "nightlife": 0.15
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "business": 0.2,
+            "unhoused": 0.2,
+            "nightlife": 0.3,
+            "locals": 0.3
+          },
+          "vehicleGroups": {
+            "night": 0.5,
+            "city": 0.5
+          }
+        }
+      ]
+    }
+  ]
+}

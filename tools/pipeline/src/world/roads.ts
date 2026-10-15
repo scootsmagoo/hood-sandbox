@@ -23,6 +23,8 @@ export interface RoadJson {
   bridge: boolean;
   layer: number;
   width: number;
+  /** posted speed limit, km/h, when OSM has one */
+  maxspeed?: number;
   /** true for a bridge the pipeline made where the ground road dips (a cut, a ravine) and OSM has no bridge */
   derived?: boolean;
   points: V3[];
@@ -506,6 +508,7 @@ function emitPiece(
       bridge: !!deckY,
       layer: deckY ? Math.max(way.layer, 1) : way.layer,
       width: way.width,
+      ...(way.maxspeed ? { maxspeed: way.maxspeed } : {}),
       ...(derived ? { derived: true } : {}),
       points: simp,
     });

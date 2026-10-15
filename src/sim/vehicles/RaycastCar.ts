@@ -199,6 +199,16 @@ export class RaycastCar {
     this.forgetVelocity();
   }
 
+  /** The body was handed over from another mode (a spline follower turned physics car): its current velocity is the baseline, not a crash. */
+  adopt() {
+    const lv = this.body.linvel();
+    this.prevVel.x = lv.x;
+    this.prevVel.y = lv.y;
+    this.prevVel.z = lv.z;
+    this.prevTravelYaw = Math.atan2(lv.x, lv.z);
+    this.impactSpeedLoss = 0;
+  }
+
   /** A move by hand is not a crash: the next step compares against rest. */
   private forgetVelocity() {
     this.prevVel.x = this.prevVel.y = this.prevVel.z = 0;

@@ -12,6 +12,7 @@ import type { Game, System } from '../Game';
 import { codeLabel } from '../input/bindings';
 import { padButtonFor, padButtonLabel, type GamepadSource } from '../input/gamepad';
 import type { TouchControls } from '../input/touch';
+import { formatClock } from '../render/timeOfDay';
 
 const MPS_TO_MPH = 2.23694;
 /** Same rules as the sim's enter and exit (systems.ts). */
@@ -49,6 +50,7 @@ export class Hud implements System {
   readonly priority = 200;
   private root: HTMLElement;
   private fpsEl: HTMLElement;
+  private clockEl: HTMLElement;
   private speedNum: HTMLElement;
   private speedUnit: HTMLElement;
   private stateEl: HTMLElement;
@@ -70,7 +72,7 @@ export class Hud implements System {
   private helpUntil = performance.now() + 25000;
   private debugOn: boolean;
   private slow = 0;
-  private cache = { speed: '', state: '', prompt: '', fps: '', health: '', armour: '', stars: '', cool: '', overlay: '' };
+  private cache = { speed: '', state: '', prompt: '', fps: '', health: '', armour: '', stars: '', cool: '', overlay: '', clock: '' };
 
   constructor(private readonly game: Game) {
     game.hud = this;
@@ -78,6 +80,9 @@ export class Hud implements System {
     this.root.textContent = '';
     this.debugOn = game.params.has('debug');
     this.fpsEl = el('div', 'hud-fps', this.root);
+    // The game clock, top centre: "Wed 14:00".
+    this.clockEl = el('div', 'hud-clock', this.root);
+    Object.assign(this.clockEl.style, { position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', color: 'var(--dim)', fontVariantNumeric: 'tabular-nums', fontSize: '13px', letterSpacing: '0.04em' });
     const speed = el('div', 'hud-speed', this.root);
     this.speedNum = el('span', 'num', speed, '0');
     this.speedUnit = el('span', 'unit', speed, 'mph');
@@ -220,6 +225,10 @@ export class Hud implements System {
       this.toastEl.classList.remove('on');
       this.toastUntil = 0;
     }
+
+    const clock = g.clockView;
+    const clockText = v.sample ? formatClock(clock.minutes, clock.day) : '';
+    if (clockText !== this.cache.clock) this.clockEl.textContent = this.cache.clock = clockText;
 
     const st = v.controlled;
     if (!st) return;

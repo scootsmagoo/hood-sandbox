@@ -8,13 +8,16 @@ import { MeshBuilder } from './mesh/builder.js';
 import { makeChunkGrid, splitMesh, type ChunkGrid } from './mesh/chunks.js';
 import { extrudeFootprint } from './mesh/extrude.js';
 import { fetchDem, type Dem } from './sources/dem.js';
-import { fetchOsm, fetchOsmNodes } from './sources/osm.js';
+import { fetchOsm, fetchOsmNodes, fetchOsmPois } from './sources/osm.js';
 import { fetchOvertureBuildings, type OvertureBuilding } from './sources/overture.js';
 import { buildBuildings, styleBuilding } from './world/buildings.js';
 import { clipBuildingsToRoads } from './world/clip.js';
 import { parseNodeTags } from './world/nodes.js';
 import { parseOsm } from './world/osm.js';
 import { buildRoads, planRoads } from './world/roads.js';
+import { buildLanes } from './world/lanes.js';
+import { addSyntheticSidewalkMesh, buildPaths } from './world/paths.js';
+import { buildScenarios } from './world/scenarios.js';
 import { pickSpawns } from './world/spawns.js';
 import { buildGroundMesh, heightmapFromDem, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
 
@@ -183,6 +186,20 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const spawns = pickSpawns({ roads: roads.json, ways: world.roads, footprints: kept, hm, bounds: b });
   log(`spawns: player ${JSON.stringify(spawns.player)}, vehicle ${JSON.stringify(spawns.vehicle)}`);
 
+  // the walk network (paths.json); the synthetic sidewalks it adds also get a ribbon in the sidewalk mesh
+  const deckY = new Map<number, number>();
+  plan.deckWays.forEach((di, k) => plan.dense[di].nodeIds.forEach((id, i) => { if (id > 0 && plan.dense[di].w.kind === 'ped') deckY.set(id, plan.deckY[k][i]); }));
+  const crossingSignals = new Map(roads.crossings.map((c) => [c.id, c.signals]));
+  const ground = (x: number, z: number) => surfaceHeight(hm, x, z);
+  const paths = buildPaths({ ways: world.roads, roads: roads.json, junctions: roads.exported, crossingSignals, footprints: kept, bounds: b, ground, deckY });
+  const ps = paths.file.stats;
+  addSyntheticSidewalkMesh(roads.sidewalk, paths.syntheticLines, ground);
+  log(`paths: ${ps.nodes} nodes, ${ps.edges} edges, ${(ps.lengthM / 1000).toFixed(1)} km (${(ps.syntheticM / 1000).toFixed(1)} km synthetic), ${ps.components} components (largest ${(ps.largestShare * 100).toFixed(1)}%), ${ps.crossings.total} crossings (${ps.crossings.signals} signalised, ${ps.crossings.atJunctions} at junctions, ${ps.crossings.made} made), ${ps.droppedByBuildings} vertices cut by buildings`);
+
+  const pois = await fetchOsmPois(cfg);
+  const scenarios = buildScenarios({ pois, projector: cfg.projector, paths: paths.file, roads: roads.json, areas: world.areas, footprints: kept, bounds: b, ground });
+  log(`scenarios: ${scenarios.stats.total} points (${scenarios.stats.osm} from OSM, ${scenarios.stats.synth} synthesised${pois ? '' : '; the POI query failed'}) ${JSON.stringify(scenarios.stats.byType)}`);
+
   // write
   const out = cfg.outDir;
   const sizes: Record<string, number> = {};
@@ -210,6 +227,11 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   sizes['collision.bin'] = write(path.join(out, 'collision.bin'), collisionBytes(collision.positions, collision.indices));
   sizes['roads.json'] = write(path.join(out, 'roads.json'), JSON.stringify({ roads: roads.json }));
   sizes['junctions.json'] = write(path.join(out, 'junctions.json'), JSON.stringify(roads.exported));
+  const lanes = buildLanes(roads.json, roads.exported);
+  sizes['lanes.json'] = write(path.join(out, 'lanes.json'), JSON.stringify(lanes));
+  log(`lanes: ${lanes.stats.lanes} lanes (${lanes.stats.laneKm} km), ${lanes.stats.connectors} connectors, ${lanes.stats.junctions} junctions and ${lanes.stats.implicitJunctions} places where roads meet without one; largest strongly connected part ${(lanes.stats.largestComponent * 100).toFixed(1)}% of lane length (${(lanes.stats.largestComponentStreets * 100).toFixed(1)}% of surface streets)`);
+  sizes['paths.json'] = write(path.join(out, 'paths.json'), JSON.stringify(paths.file));
+  sizes['scenarios.json'] = write(path.join(out, 'scenarios.json'), JSON.stringify(scenarios));
 
   const attribution = [cfg.city.sources.osm.attribution];
   if (used.overture) attribution.push(cfg.city.sources.overture.attribution);
@@ -236,6 +258,9 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     collision: { file: 'collision.bin', vertexCount: collision.vertexCount, indexCount: collision.indices.length },
     roads: 'roads.json',
     junctions: 'junctions.json',
+    lanes: 'lanes.json',
+    paths: 'paths.json',
+    scenarios: 'scenarios.json',
     spawns,
     attribution,
     sources: {
@@ -258,6 +283,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     roads: { ...roads.stats, triangles: roads.asphalt.triangleCount + roads.sidewalk.triangleCount + roads.crosswalk.triangleCount + roads.rail.triangleCount + roads.concrete.triangleCount + roads.markings.triangleCount, markings: roads.markingStats, junctions: roads.junctionStats },
     buildings: { count: kept.length, skipped, sources: bstats, triangles: wall.triangleCount + roof.triangleCount + glassWall.triangleCount },
     collision: { vertices: collision.vertexCount, triangles: collision.triangleCount, buildingTriangles: buildingCollisionTris },
+    lanes: lanes.stats,
     spawns,
     seconds: (Date.now() - t0) / 1000,
   };

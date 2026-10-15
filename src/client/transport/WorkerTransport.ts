@@ -63,6 +63,10 @@ export class WorkerTransport implements Transport {
     this.post({ type: 'input', cmd });
   }
 
+  config(c: { pedBudget?: number; traffic?: number }) {
+    this.post({ type: 'config', ...c });
+  }
+
   drainSnapshots(): SnapshotView[] {
     if (this.ring) {
       const view = new SnapshotView();

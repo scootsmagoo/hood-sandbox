@@ -134,13 +134,15 @@ export class SnapshotInterpolator {
  * Blends one entity between the two snapshots of a sample into `out`. Returns false when the
  * newer snapshot does not have it. An entity new in `b` is shown where it is.
  */
-export function blendEntity(s: Sample, id: EntityId, out: EntityState): boolean {
-  const ib = s.b.indexOf(id);
+export function blendEntity(s: Sample, id: EntityId, out: EntityState, hint = -1): boolean {
+  // `hint` is the record index the caller is already at: records keep their order from snapshot to snapshot, so it is nearly always right
+  // (looking an id up by scanning is O(n), and with a crowd that is O(n^2) a frame).
+  const ib = hint >= 0 && hint < s.b.count && s.b.u32[s.b.at(hint) + E.Id] === id ? hint : s.b.indexOf(id);
   if (ib < 0) return false;
   const ob = s.b.at(ib);
   const fb = s.b.f32;
   const ub = s.b.u32;
-  const ia = s.a === s.b ? ib : s.a.indexOf(id);
+  const ia = s.a === s.b ? ib : ib < s.a.count && s.a.u32[s.a.at(ib) + E.Id] === id ? ib : s.a.indexOf(id);
   const hasA = ia >= 0;
   const oa = hasA ? s.a.at(ia) : ob;
   const fa = hasA ? s.a.f32 : fb;

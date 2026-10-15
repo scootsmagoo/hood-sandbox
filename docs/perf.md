@@ -69,6 +69,52 @@ Same scripted route, before = the tile above, after = the tile with road profile
 
 Draw calls do not grow (markings add one draw per visible chunk, and take away the crosswalk ribbon draws; the route differs a little from run to run). Triangles grow by 10 to 15%. The tile grows from 5.7 MB to 7.3 MB (`roads.glb` 1.3 -> 2.0 MB for the markings, junction surfaces and the bridges the pipeline made; `junctions.json` 0.9 MB, 0.15 MB gzipped; `collision.bin` 1.40 -> 1.72 MB for the derived bridges).
 
+## Ambient pedestrians (2026-10-15)
+
+What a crowd costs, measured on the same tree with `?ambient=0` against the default (traffic, lighting and everything else the same in both). Maximum over each phase; the route differs a little between runs, so draw counts move by up to 100 either way and mean nothing below that.
+
+| Profile | People | Triangles, no peds -> peds | Draws | Main-thread CPU, mean | Sim step, worst |
+|---|---|---|---|---|---|
+| desktop-high | 60 | 234-267k -> 256-283k (+15 to +25k, 6 to 10%) | 5 for the crowd, 5 more in the shadow pass; no change beyond the noise | within +-0.3 ms | 3.4 ms against 2.2 |
+| desktop-medium | 40 | 210-236k -> 225-251k (+15k) | no change | within noise | 4.0 against 3.3 |
+| desktop-low | 24 | 134-164k -> 139-168k (+4k) | no change | within noise | 3.5 against 2.7 |
+| phone-low (4x CPU) | 24 | 98-124k -> 102-114k | no change | 2.2-2.5 against 2.0-2.5 ms | 3.0 against 2.1 |
+
+How it stays cheap:
+
+- **Drawing.** A per-ped model is thirteen meshes, so 60 people would have been about 800 draws. Everyone except the player and officers is drawn by `PedCrowd` (`src/client/render/PedCrowd.ts`): five instanced meshes (torso, head, arms, legs, cap), 192 people at most, one set of matrices a person per frame from the shared pose solver (`pedPose.ts`). Benches and bus stops are two more instanced meshes for the whole tile (`ScenarioProps.ts`). Nothing is allocated or disposed when people come and go (a swap-remove in the instance arrays), so churn cannot leak.
+- **The sim.** A person near the player costs a character-controller step (27 us); 60 of them were 1.6 ms of a 1.8 ms tick in Node. People standing still, and walkers more than 46 m away, skip it (`PedController.glide`; the walk network is clear of walls by construction), which brings 60 people to 0.17 ms a tick on top of 0.24 for the rest of the sim. The ambient logic itself is 0.05 ms a tick.
+- **The snapshot.** The director never fills the 256 entities: it keeps 28 slots free for police, traffic and the player, and counts every entity that is not one of its own.
+- `blendEntity` found each entity in the snapshot by scanning (O(n^2) a frame with a crowd); `NetSystem` now passes the record index it is already at.
+
+The budgets in `scripts/perf-budget.json` were re-baselined on 2026-10-15 from two runs of the whole tree with ambient people and ambient traffic on (the budgets from the roads pass did not hold any more: traffic and the time-of-day sky landed in the same days as the crowd, and 60 people are about a tenth of the new triangles and none of the new draws). Worst phase of each profile, budget now: desktop-high 800 draws, 370k triangles; desktop-medium 820, 330k; desktop-low 530, 220k; phone-low 420, 170k.
+
+**The harnesses with a crowd about.** The soak (5 min, desktop-medium, people and traffic on) passes: heap 35.6 -> 35.7 MB, no GPU growth, 0 slow frames. `leaks` was failing in the `vehicle` and `reload` phases when cars and people started to come and go, because the street is part of the scene (a car is 30 scene objects and a few geometries) and the reload phase allows no growth at all. The harness now freezes the population (`pedBudget` and `traffic` through `transport.config`) in the phases that measure the tile, the player's car and the tier switches, fixes both in the URL so the tier switches do not move them, and freezes the game clock (`timescale=0`: the night sky's first draw at dusk looked like a leaked geometry). A new `crowd` phase fills and empties the street twelve times (the ped budget goes between none and 40) and must stay flat: geometries, materials and objects exactly, heap within 1.5 MB a cycle.
+
+## Ambient traffic (2026-10-15)
+
+What the cars and the signal heads cost, measured on the same tree with `?traffic=0` against the default (pedestrians, lighting and the rest the same in both; the signal heads are in both). Maximum over each phase, one run each; the route differs a little between runs.
+
+| Profile | Cars | Draws, no traffic -> traffic | Triangles, no traffic -> traffic | Main-thread CPU, mean |
+|---|---|---|---|---|
+| desktop-high | 40 | 396-536 -> 423-554 (+18 to +41) | 214-265k -> 256-282k (+18 to +44k) | +0.1 to +0.2 ms (1.1-1.4 -> 1.2-1.4) |
+| desktop-low | 20 | 225-387 -> 243-407 (+18 to +35) | 128-161k -> 139-167k (+6 to +11k) | +0.1 ms (0.8 -> 0.9) |
+
+The sim side is small: 60 s of Downtown with 40 cars (7 of them physics cars) costs about 0.4 ms a tick in Node, with the ped crowd and police included (the soak's worst step was 5 ms, from the pedestrians and the physics). Cars farther than 80 m are spline followers: a speed integration and one `setNextKinematicTranslation` each.
+
+How it stays cheap:
+
+- **Drawing.** A full car model is 25 meshes, so 40 of them would have been a thousand draws and a model built and torn down for every car that came and went. Every traffic car is drawn by `TrafficInstances` (`src/client/render/TrafficInstances.ts`) instead: the stand-in model is merged once per vehicle type into six parts (paint, trim, glass, tail lamps, headlamps, wheel), each an InstancedMesh, with the paint, the brake lights and the headlamps set per instance and the four wheels as instances of their own, so they roll and steer. That is 6 draws per type in use (3 at most), 18 in the shadow pass on High. A car that smokes, burns or has a door open (or is no longer traffic: a carjacked one) gets a full model, and its meshes are disposed when it goes. The first version let cars within 46 m use full models and cost +250 draws in the drive phase and a scene-object count that wandered with the number of cars near the camera, which the `leaks` reload phase read as growth.
+- **Signal heads.** 112 signalised junctions have 319 heads. They are drawn in 400 m chunks, two instanced meshes a chunk (pole, arm and housing in one geometry, 8-sided lamp discs), so the chunks behind the camera are culled; lamp colours change only when a phase changes.
+- **The sim.** Spline followers keep a speed along a lane and write a pose; only the 16 nearest cars are physics cars. Cars far away and out of sight are removed, so the count never grows.
+- **The snapshot.** A spline follower is an ordinary vehicle entity (36 words). Its driver is not: a far car has no ped entity, the driver ped is made when the car turns into a physics car and removed when it turns back, so 40 cars cost 40 + about 16 entities. Traffic keeps 40 entities free in the 256.
+
+The budgets in `scripts/perf-budget.json` were re-baselined on 2026-10-15 from two runs of the whole tree (traffic, pedestrians, signal heads, time of day) with `--write-budget`: draws 620 -> 740, 590 -> 730, 430 -> 540 and 330 -> 430, triangles 300k -> 380k, 260k -> 330k, 190k -> 220k and 140k -> 170k (desktop-high, medium, low, phone-low). Traffic is about a fifth of that growth in draws and a third in triangles; the rest is the crowd, the lighting and the tile. `npm run perf-budget` and `perf-budget:phone` pass on them.
+
+**Harnesses with traffic about.** The soak (desktop-medium, 5 min, traffic at 0.75) and `leaks` (every phase flat, `--traffic 0` to take the cars out) pass. The bot drives through the traffic; the cars dodge it, honk at it when it stops in a lane and are otherwise undisturbed.
+
+`node scripts/traffic-shots.mjs` takes the traffic screenshots into `.shots/` (a busy street, a red-light queue, signal heads, a carjack at a light with real key presses).
+
 ## Road markings: first-visit uploads (2026-10-14)
 
 The re-baked tile has one road-markings mesh per 256 m chunk (62 of them), drawn only within 320 m x lodScale and hidden beyond. The soak's raw `geometries` count then rose by about 22 in the window it judges, and the soak failed against its limit of 8. The cause is not a leak: three.js uploads a geometry the first time it draws one of its objects, and frees it only on `dispose()`. Hiding a chunk does not free it, and does not need to. So the raw count rises once for every chunk the camera first sees, whatever its type (markings, ground levels, roads, buildings) and whatever the route, and never falls.
@@ -158,6 +204,7 @@ Touch devices start on Medium and the governor steps down after 3 s above 24 ms;
 
 ## Next
 
+- A cheaper crowd for Low: far people could drop their limbs (one instance each) and skip the pose solver.
 - Merge materials to cut draws: walls and roofs differ only by roughness (0.9, 0.95); the road materials differ by colour and roughness and could carry the colour in the vertex colours. That removes about a quarter of the draws.
 - Bigger chunks (512 m) for roads and buildings if draws bite.
 - Far building and road impostors (README: "impostors for far buildings"): they are the next triangle cost once towers get detail.

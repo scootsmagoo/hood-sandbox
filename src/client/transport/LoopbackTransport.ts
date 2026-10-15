@@ -44,6 +44,10 @@ export class LoopbackTransport implements Transport {
     this.host.input(cmd);
   }
 
+  config(c: { pedBudget?: number; traffic?: number }) {
+    this.host.config(c);
+  }
+
   /** Runs ticks now. Manual clock only. */
   advance(ticks: number) {
     this.host.advance(ticks);
