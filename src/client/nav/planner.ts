@@ -3,7 +3,7 @@
  * `Route` with its turns (`driveRoute`, `walkRoute`). Pure: no DOM, no three.js.
  */
 import { inRect } from './tiles';
-import { DriveNet, DriveSearch, Turn, type DriveGoal, type DriveResult, type DriveSource } from './driveNet';
+import { DriveNet, DriveSearch, Turn, type DriveGoal, type DriveResult, type DriveSource, type LaneHit } from './driveNet';
 import { newHit } from './geom';
 import { Route, RouteBuilder, type RouteStep } from './route';
 import { WalkNet, WalkSearch, type WalkHit, type WalkResult } from './walkNet';
@@ -16,7 +16,7 @@ export interface Pose {
 }
 
 /** The search a request needs, or why there is none. */
-export type DrivePlan = { search: DriveSearch; frontier: boolean } | { error: 'no-road' | 'no-graph' };
+export type DrivePlan = { search: DriveSearch; frontier: boolean; turnaround: boolean } | { error: 'no-road' | 'no-graph' };
 
 /** A leg longer than this from the road to the waypoint is drawn as a straight dashed tail. */
 const TAIL_MIN_M = 8;
@@ -24,13 +24,23 @@ const TAIL_MIN_M = 8;
 export function planDrive(net: DriveNet, from: Pose, to: { x: number; z: number }): DrivePlan {
   if (net.count === 0) return { error: 'no-graph' };
   const heading = from.heading ?? null;
-  let cands = [] as ReturnType<DriveNet['near']>;
+  // the lanes that run the way the car faces, nearest first, the nearest radius that has one first. Only when there is none within
+  // 120 m does the search take the lanes that run against it (a one-way, facing the wrong way): their cost below is high
+  let cands: LaneHit[] = [];
   for (const r of [14, 40, 120]) {
     cands = net.near(from.x, from.z, r, heading, 0.15);
-    if (cands.length === 0 && heading) cands = net.near(from.x, from.z, r, null);
     if (cands.length) break;
   }
+  if (!cands.length && heading) {
+    for (const r of [14, 40, 120]) {
+      cands = net.near(from.x, from.z, r, heading, -2);
+      if (cands.length) break;
+    }
+  }
   if (!cands.length) return { error: 'no-road' };
+  // facing against the lane it is on (a one-way's wrong way): the route starts on a lane that runs the car's way, and says to turn round
+  const own = heading ? net.near(from.x, from.z, 14, heading, -2)[0] : undefined;
+  const turnaround = own !== undefined && own.align < -0.5;
   const sources: DriveSource[] = cands.slice(0, 8).map((c) => ({ edge: c.edge, s: c.s, cost: c.dist * 0.12 + (heading ? (1 - c.align) * 6 : 0) }));
   // the goal: the lanes of the nearest road, both directions, when the waypoint is in the loaded area
   let goals: DriveGoal[] | null = null;
@@ -51,13 +61,16 @@ export function planDrive(net: DriveNet, from: Pose, to: { x: number; z: number 
       if (any.length) goals = pick(any);
     }
   }
-  return { search: new DriveSearch(net, sources, goals, to.x, to.z), frontier: goals === null };
+  return { search: new DriveSearch(net, sources, goals, to.x, to.z), frontier: goals === null, turnaround };
 }
 
-/** The route of a finished car search. `to` is the waypoint (a dashed tail runs to it when the road ends short of it). */
-export function driveRoute(net: DriveNet, res: DriveResult, to: { x: number; z: number }): Route {
+/**
+ * The route of a finished car search. `to` is the waypoint (a dashed tail runs to it when the road ends short of it). `turnaround` is
+ * set when the car faces against the road it is on: the route then starts with a U-turn.
+ */
+export function driveRoute(net: DriveNet, res: DriveResult, to: { x: number; z: number }, turnaround = false): Route {
   const b = new RouteBuilder();
-  const steps: RouteStep[] = [];
+  const steps: RouteStep[] = turnaround ? [{ s: 0, kind: 'turnaround', street: '' }] : [];
   const E = res.edges;
   let dist = 0;
   const hit = newHit();

@@ -10,7 +10,7 @@
  *   reload   24  drop the drawn tile (every geometry, material and texture of the world) and build it
  *                again from the .glb files: the "tile reload" a streaming world does all the time
  *   vehicle  30  get into the parked car, brake, get out: the sim's enter and exit and the
- *                client's views of them
+ *                client's views of them (the car left behind stays a full model within 20 m: one whole car of allowance)
  *   tiers    18  switch the graphics tier round (shadow maps are made and dropped, the camera's far
  *                plane and the fog change). Needs the dev server (it imports src/client/graphics.ts).
  *   drive    6   drive 20 s of street, park, get out and in: streaming of views and snapshots
@@ -60,6 +60,10 @@ const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
 /** Allowed growth per counter (absolute, or a fraction of the first sample, whichever is larger), by phase. */
 const TOL = {
   reload: { geometries: 0, textures: 0, programs: 0, materials: 0, objects: 0, entities: 3, listeners: 20, domNodes: 20 },
+  // `vehicle` steps by one whole car, once: the car you get out of stays a full model within 20 m of the player (by design, so it plateaus
+  // and is not a leak), about 155 scene objects and 10 materials, all in the first cycles. Allow exactly that one car, and nothing more.
+  // A second car, or a leak that adds up over the cycles, still fails.
+  vehicle: { geometries: 4, textures: 2, programs: 4, materials: 12, objects: 160, entities: 12, listeners: 30, domNodes: 40 },
   // The live phases (`drive`, `crowd`) run with traffic. A traffic car swaps to a full model (55 scene objects, about 10 materials)
   // while it is touched, smoking or has a door open, and back after, so there the counts step by whole cars: allow three at once.
   // The frozen phases stay exact, and the soak watches the long run.

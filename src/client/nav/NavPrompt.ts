@@ -12,6 +12,7 @@ const ARROW: Record<TurnKind, { rot: number; path: string }> = {
   straight: { rot: 0, path: 'M12 20V6M12 6L6 12M12 6l6 6' },
   ramp: { rot: 20, path: 'M12 20V6M12 6L6 12M12 6l6 6' },
   uturn: { rot: 180, path: 'M12 20V6M12 6L6 12M12 6l6 6' },
+  turnaround: { rot: 180, path: 'M12 20V6M12 6L6 12M12 6l6 6' },
   arrive: { rot: 0, path: 'M12 3l6 9-6 9-6-9z' },
 };
 

@@ -5,7 +5,7 @@
 import { abbreviateStreet } from '../ui/streetNameMath';
 
 export type RouteMode = 'drive' | 'walk';
-export type TurnKind = 'left' | 'right' | 'uturn' | 'straight' | 'ramp' | 'arrive';
+export type TurnKind = 'left' | 'right' | 'uturn' | 'turnaround' | 'straight' | 'ramp' | 'arrive';
 
 export interface RouteStep {
   /** Metres along the route where the manoeuvre starts. */
@@ -222,6 +222,8 @@ export function describeStep(step: RouteStep): string {
       return `Turn right${onto}`;
     case 'uturn':
       return 'Make a U-turn';
+    case 'turnaround':
+      return 'Make a U-turn when possible';
     case 'ramp':
       return street ? `Take the ramp to ${street}` : 'Take the ramp';
     case 'straight':

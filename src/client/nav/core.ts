@@ -53,7 +53,7 @@ export const SNAP_RADIUS_M = 150;
 export const CLEAR_RADIUS_M = 25;
 
 type Job =
-  | { kind: 'drive'; search: DriveSearch; reason: string; to: { x: number; z: number }; frontier: boolean }
+  | { kind: 'drive'; search: DriveSearch; reason: string; to: { x: number; z: number }; frontier: boolean; turnaround: boolean }
   | { kind: 'walk'; search: WalkSearch; reason: string; to: { x: number; z: number }; start: WalkHit; goal: WalkHit };
 
 export class NavCore {
@@ -192,7 +192,7 @@ export class NavCore {
     if (p.inVehicle) {
       const plan = planDrive(this.drive, pose, to);
       if ('error' in plan) return this.fail(p, wp, reason);
-      this.job = { kind: 'drive', search: plan.search, reason, to, frontier: plan.frontier };
+      this.job = { kind: 'drive', search: plan.search, reason, to, frontier: plan.frontier, turnaround: plan.turnaround };
     } else {
       const plan = planWalk(this.walk, pose, to, (x, z) => this.roads.nameAt(x, z));
       if ('error' in plan) return this.fail(p, wp, reason);
@@ -217,7 +217,7 @@ export class NavCore {
     }
     if (job.kind === 'drive') {
       const res = (job.search as DriveSearch).result!;
-      this.accept(driveRoute(this.drive, res, job.to), job.reason);
+      this.accept(driveRoute(this.drive, res, job.to, job.turnaround), job.reason);
     } else {
       const res = (job.search as WalkSearch).result!;
       this.accept(walkRoute(this.walk, res, job.start, job.goal, job.to, (x, z) => this.roads.nameAt(x, z)), job.reason);

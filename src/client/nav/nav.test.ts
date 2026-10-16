@@ -31,7 +31,21 @@ function runDrive(core: NavCore, from: { x: number; z: number; heading?: { x: nu
   const plan = planDrive(core.drive, from, to);
   if ('error' in plan) throw new Error(plan.error);
   expect(plan.search.step(1000)).toBe('found');
-  return { route: driveRoute(core.drive, plan.search.result!, to), res: plan.search.result!, frontier: plan.frontier };
+  return { route: driveRoute(core.drive, plan.search.result!, to, plan.turnaround), res: plan.search.result!, frontier: plan.frontier };
+}
+
+/** The direction of traffic on the fixture's "One Way" street (x = 480): +1 runs towards +z, -1 towards -z. */
+function oneWayAlong(core: NavCore): number {
+  const net = core.drive;
+  let dir = 0;
+  for (let e = 0; e < net.count && !dir; e++) {
+    if (net.conn[e] || net.streetName(e) !== 'One Way') continue;
+    const o = net.ptOff[e] * 3;
+    const last = (net.ptOff[e + 1] - 1) * 3;
+    dir = Math.sign(net.pts[last + 2] - net.pts[o + 2]);
+  }
+  expect(dir).not.toBe(0);
+  return dir;
 }
 
 function simulate(core: NavCore, p: NavPlayer, seconds: number, dt = 1 / 30) {
@@ -49,17 +63,7 @@ describe('routing over the lane graph', () => {
 
   it('respects one-ways: against the street the route goes round the block', async () => {
     const { core } = await city(['1_0']);
-    // "One Way" runs north-south along x = 480 in the middle tile column of the fixture
-    const net = core.drive;
-    let dir = 0;
-    for (let e = 0; e < net.count && !dir; e++) {
-      if (net.conn[e] || net.streetName(e) !== 'One Way') continue;
-      const o = net.ptOff[e] * 3;
-      const last = (net.ptOff[e + 1] - 1) * 3;
-      dir = Math.sign(net.pts[last + 2] - net.pts[o + 2]);
-    }
-    expect(dir).not.toBe(0);
-    const along = dir; // +1: traffic runs towards +z
+    const along = oneWayAlong(core);
     // (the one-way's lanes start at a junction and run to the next: the points are between 4th St and the avenue)
     const upstream = { x: 481, z: along > 0 ? 125 : 260 };
     const downstream = { x: 481, z: along > 0 ? 260 : 125 };
@@ -73,6 +77,27 @@ describe('routing over the lane graph', () => {
     for (let i = 0; i + 1 < r.count; i++) {
       if (Math.abs(r.xs[i] - 480) < 3 && Math.abs(r.xs[i + 1] - 480) < 3 && Math.abs(r.zs[i + 1] - r.zs[i]) > 0.5) {
         expect(Math.sign(r.zs[i + 1] - r.zs[i])).toBe(along);
+      }
+    }
+  });
+
+  it('a car facing against a one-way is told to turn round, and the route then starts with the traffic', async () => {
+    const { core } = await city(['1_0']);
+    const along = oneWayAlong(core);
+    // in the one-way, facing against the traffic, short of the goal: no road that runs the car's way within 120 m, so the
+    // route starts on the lane the traffic uses, after a U-turn
+    const here = { x: 481, z: along > 0 ? 200 : 185, heading: { x: 0, z: -along } };
+    const goal = { x: 481, z: along > 0 ? 260 : 125 };
+    const { route } = runDrive(core, here, goal);
+    expect(route.steps[0]).toMatchObject({ s: 0, kind: 'turnaround' });
+    // the first leg is in the legal direction
+    let k = 1;
+    while (k < route.count - 1 && Math.hypot(route.xs[k] - route.xs[0], route.zs[k] - route.zs[0]) < 2) k++;
+    expect((route.zs[k] - route.zs[0]) * along).toBeGreaterThan(0);
+    // and nothing on the one-way runs against the traffic
+    for (let i = 0; i + 1 < route.count; i++) {
+      if (Math.abs(route.xs[i] - 480) < 3 && Math.abs(route.xs[i + 1] - 480) < 3 && Math.abs(route.zs[i + 1] - route.zs[i]) > 0.5) {
+        expect(Math.sign(route.zs[i + 1] - route.zs[i])).toBe(along);
       }
     }
   });
