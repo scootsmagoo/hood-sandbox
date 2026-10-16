@@ -52,5 +52,5 @@ export type EntityDef = VehicleDef | PedDef | HelicopterDef | SpikeStripDef;
 
 /** Paint colours the sim picks from for parked cars, 0xRRGGBB. */
 export const PAINTS = [0xb23a2e, 0x2f5d8a, 0xd9d6cf, 0x1f2326, 0x6b7a4a, 0xc79a2a, 0x7a2f55, 0x8d949b] as const;
-/** How many outfits the client has for pedestrians. */
-export const OUTFIT_COUNT = 6;
+/** How many outfits the client has for pedestrians (src/client/render/chars/outfits.ts has one entry each; a test keeps them equal). */
+export const OUTFIT_COUNT = 21;

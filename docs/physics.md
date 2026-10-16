@@ -6,7 +6,7 @@ The target is GTA IV's feel: heavy cars with momentum, soft suspension you can s
 
 A car is one Rapier rigid body (two convex hulls: a body with sloped bumpers, bonnet and boot, and a cabin with a raked windscreen and a roof narrower than the waist) on four ray-cast wheels. Each tick (`RaycastCar.step`):
 
-1. **Suspension.** Each wheel's ray gives a suspension length. A spring (`frequencyHz`) and a damper (softer in bump than in rebound) give a normal load, applied at the hub. Anti-roll bars move load between the wheels of an axle. A stiff bump stop catches the last 4 cm.
+1. **Suspension.** Each wheel's ray gives a suspension length. The rays see only the world (`GROUPS.wheelQuery`: the ground, the decks, walls and roofs), not street furniture or other cars, which the hull meets instead. A spring (`frequencyHz`) and a damper (softer in bump than in rebound) give a normal load, applied at the hub. Anti-roll bars move load between the wheels of an axle. A stiff bump stop catches the last 4 cm.
 2. **Tyres** (`tireForce` in `dynamics.ts`):
    - **Lateral:** the slip angle goes through a curve that rises to a peak at `peakSlipDeg`, then falls to `slideRatio` of the peak by `falloff` peak angles. Past the peak a slide feeds itself unless the driver catches it.
    - **Load sensitivity:** the friction coefficient falls as the load rises (`loadSensitivity`). Moving weight across an axle costs that axle grip, which is what makes lift-off oversteer and entry understeer happen without any special code.
@@ -18,7 +18,8 @@ A car is one Rapier rigid body (two convex hulls: a body with sloped bumpers, bo
 5. **Engine.** A low-gear push (`driveForce`), then constant power (`powerPerKg / speed`), then the limiter at `maxFlatVel`. There is also rolling resistance, engine braking and quadratic drag.
 6. **Burnout.** Throttle with the brake (or the handbrake) while nearly stopped spins the rear tyres while the front brakes hold the car. With the wheel turned, the front brakes let go and the car swings round its front axle (a donut, driven by the spinning rear, not by an assist).
 7. **Kerb trips.** A wheel sliding sideways faster than 2.2 m/s into a near-vertical face 9 cm above the road (a kerb) loses most of its sideways momentum at that low point (`TRIP`). This is how rollovers start: the rays alone would just climb the step.
-8. **Crashes.** The hulls have restitution 0.32 with the max rule and friction 0.4 with the min rule (a flank or a belly slides). The measured coefficient of restitution against a wall is 0.13 to 0.28, and car to car about 0.15 to 0.2. Soft CCD (contacts predicted a step ahead) keeps fast cars out of thin walls. Hard CCD was dropped because it clamped the car's motion against ragdolls.
+8. **The ground under the hull.** The hulls meet their own copy of the ground and the decks, built with Rapier's `FIX_INTERNAL_EDGES` (`World.ts`): without it the hull's predicted contacts took the normals of the edges between the heightfield's cells and the solver threw cars off flat roads (`docs/ground-audit.md`, `npm run audit:ground`). Walls and everything else stay plain.
+9. **Crashes.** The hulls have restitution 0.32 with the max rule and friction 0.4 with the min rule (a flank or a belly slides). The measured coefficient of restitution against a wall is 0.13 to 0.28, and car to car about 0.15 to 0.2. Soft CCD (contacts predicted a step ahead) keeps fast cars out of thin walls. Hard CCD was dropped because it clamped the car's motion against ragdolls.
 
 `dynamics.ts` holds the pure functions, with unit tests in `src/sim/vehicles/dynamics.test.ts`. `RaycastCar.ts` holds the per-tick integration.
 

@@ -15,6 +15,29 @@
       "groundMeshStep": 1
     }
   ],
+  "grids": [
+    {
+      "id": "m2",
+      "name": "M2: Intown and the river",
+      "origin": { "lat": 33.7543, "lon": -84.3898 },
+      "baseElevation": 318.59,
+      "tileSizeM": 1024,
+      "heightmapCellSizeM": 4,
+      "groundMeshStep": 1,
+      "chunkSizeM": 256,
+      "queryMarginM": 160,
+      "out": "public/tiles/atlanta/m2",
+      "regions": [
+        { "id": "downtown", "name": "Downtown, Five Points, the Connector", "cells": [[-2, -2], [1, 1]] },
+        { "id": "midtown", "name": "Midtown, Atlantic Station, Piedmont Park, Ponce City Market", "cells": [[-1, -5], [2, -2]] },
+        { "id": "eastside", "name": "Old Fourth Ward, Krog Street, Inman Park, Little Five Points, Freedom Park, Candler Park, Lake Claire, Edgewood", "cells": [[2, -2], [5, 0]] },
+        { "id": "peachtree", "name": "Peachtree Road and the Connector north to Buckhead", "cells": [[-1, -9], [1, -6]] },
+        { "id": "buckhead", "name": "Buckhead, Lenox, West Paces Ferry", "cells": [[-2, -11], [2, -10]] },
+        { "id": "west-paces", "name": "West Paces Ferry and I-75 to the river", "cells": [[-6, -12], [-3, -10]] },
+        { "id": "vinings", "name": "Over the Chattahoochee to Vinings", "cells": [[-8, -13], [-7, -11]] }
+      ]
+    }
+  ],
   "sources": {
     "osm": {
       "name": "OpenStreetMap",

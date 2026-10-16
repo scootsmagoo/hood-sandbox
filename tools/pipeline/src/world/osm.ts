@@ -38,6 +38,13 @@ export interface OsmBuilding {
   rings: V2[][];
 }
 
+/** A way tagged `building:part` and not `building`: a setback, a podium or a crown of a building drawn as another way (Simple 3D Buildings). */
+export interface OsmPart {
+  id: string;
+  tags: Record<string, string>;
+  rings: V2[][];
+}
+
 const CAR = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'service', 'road', 'busway']);
 const PED = new Set(['footway', 'path', 'pedestrian', 'steps', 'cycleway', 'bridleway', 'track']);
 
@@ -225,12 +232,15 @@ export interface OsmWorld {
   roads: RoadWay[];
   areas: Area[];
   buildings: OsmBuilding[];
+  /** `building:part` ways that are not also buildings */
+  parts?: OsmPart[];
 }
 
 export function parseOsm(data: OsmData, proj: Projector): OsmWorld {
   const roads: RoadWay[] = [];
   const areas: Area[] = [];
   const buildings: OsmBuilding[] = [];
+  const parts: OsmPart[] = [];
 
   for (const el of data.elements) {
     const tags = el.tags ?? {};
@@ -259,6 +269,8 @@ export function parseOsm(data: OsmData, proj: Projector): OsmWorld {
       if (ring.length < 3) continue;
       if (tags.building) {
         buildings.push({ id: `osm:way/${el.id}`, tags, rings: [ring] });
+      } else if (tags['building:part'] && tags['building:part'] !== 'no') {
+        parts.push({ id: `osm:way/${el.id}`, tags, rings: [ring] });
       } else {
         const kind = areaKindOf(tags);
         if (kind) areas.push({ kind, rings: [ring] });
@@ -282,7 +294,7 @@ export function parseOsm(data: OsmData, proj: Projector): OsmWorld {
       }
     }
   }
-  return { roads, areas, buildings };
+  return { roads, areas, buildings, parts };
 }
 
 export { signedArea };

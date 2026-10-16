@@ -10,3 +10,6 @@ tools/pipeline/cache/
 public/tiles/
 # wrangler local state
 .wrangler/
+# Python bytecode from the Blender build scripts
+__pycache__/
+*.pyc

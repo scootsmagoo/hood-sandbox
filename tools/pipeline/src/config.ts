@@ -25,11 +25,31 @@ export interface CityFile {
     /** side of the square chunks the meshes are split into, m (default 256) */
     chunkSizeM?: number;
   }[];
+  /** Multi-tile grids (docs/contracts/city-tiles.md section 1); baked by `npm run bake:m2` (src/city/). */
+  grids?: CityGridSpec[];
   sources: {
     osm: { endpoints: string[]; attribution: string };
     overture: { bucket: string; release: string; attribution: string };
     elevation: { endpoint: string; pixelSizeM: number; attribution: string };
   };
+}
+
+/** A grid of square cells in the city frame (x = E - E0, z = -(N - N0) about `origin`), baked tile by tile. */
+export interface CityGridSpec {
+  id: string;
+  name: string;
+  origin: { lat: number; lon: number };
+  /** the datum of the city frame: y = elevation - baseElevation in every tile */
+  baseElevation: number;
+  tileSizeM: number;
+  heightmapCellSizeM: number;
+  groundMeshStep?: number;
+  chunkSizeM?: number;
+  queryMarginM: number;
+  /** output directory, relative to the repo root */
+  out: string;
+  /** inclusive cell rects [[iMin, jMin], [iMax, jMax]], in bake order; a cell in two regions belongs to the first */
+  regions: { id: string; name: string; cells: [[number, number], [number, number]] }[];
 }
 
 export interface TileConfig {
@@ -49,6 +69,11 @@ export interface TileConfig {
   rows: number;
   outDir: string;
   cacheDir: string;
+  /**
+   * Optional (set only by the grid configs of src/city/grid.ts): snap the DEM request outward to a lon/lat pixel grid with
+   * these steps, anchored at (lon0, lat0), so neighbouring tiles sample the same pixels at their seam.
+   */
+  demAlign?: { lonStep: number; latStep: number; lon0: number; lat0: number };
 }
 
 export function loadTileConfig(cityId = 'atlanta', tileId = 'm1-five-points'): TileConfig {

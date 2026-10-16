@@ -28,6 +28,8 @@ import {
 
 /** Road atlas resolution: pixels per metre. */
 const ATLAS_PX_PER_M = 1;
+/** A streamed city's per-tile atlases: half a pixel a metre. */
+const STREAM_PX_PER_M = 0.5;
 const SIZE_DESKTOP = 180;
 const SIZE_PHONE = 132;
 /** Gap from the radar to the screen edge, css px (the left edge is the HUD's 12 px gutter). */
@@ -91,6 +93,8 @@ export class Minimap implements System {
   private readonly size: number;
   private readonly dpr: number;
   private atlas: HTMLCanvasElement | null = null;
+  /** A streamed city's atlases, one per loaded tile (`setRoadTiles`), at `STREAM_PX_PER_M`. */
+  private tileAtlases = new Map<string, { canvas: HTMLCanvasElement; bounds: { minX: number; minZ: number; maxX: number; maxZ: number } }>();
   private span = SPAN_REST_M;
   private readonly tf = new Float64Array(6);
   private readonly fwd = new Float64Array(2);
@@ -103,6 +107,11 @@ export class Minimap implements System {
   private ox = 0;
   private oz = 0;
   private drawn = false;
+  private lastX = 0;
+  private lastZ = 0;
+  private lastYaw = 0;
+  private lastFacing = 0;
+  private lastDraw = 0;
   private disposed = false;
 
   constructor(
@@ -145,9 +154,19 @@ export class Minimap implements System {
     }
   }
 
-  private buildAtlas(roads: RoadData[]): HTMLCanvasElement {
-    const b = this.game.ready.tile.bounds;
-    const A = ATLAS_PX_PER_M;
+  /**
+   * A streamed city (docs/contracts/city-tiles.md): the roads of each loaded tile, by tile. An atlas is drawn for each new tile (half
+   * a pixel a metre: 1 MB for a 1 km tile) and dropped with it.
+   */
+  setRoadTiles(tiles: readonly { id: string; bounds: { minX: number; minZ: number; maxX: number; maxZ: number }; roads: RoadData[] }[]) {
+    const want = new Set(tiles.map((t) => t.id));
+    for (const id of [...this.tileAtlases.keys()]) if (!want.has(id)) this.tileAtlases.delete(id);
+    for (const t of tiles) if (!this.tileAtlases.has(t.id)) this.tileAtlases.set(t.id, { canvas: this.buildAtlas(t.roads, t.bounds, STREAM_PX_PER_M), bounds: t.bounds });
+    this.drawn = false;
+  }
+
+  private buildAtlas(roads: RoadData[], bounds?: { minX: number; minZ: number; maxX: number; maxZ: number }, A = ATLAS_PX_PER_M): HTMLCanvasElement {
+    const b = bounds ?? this.game.ready.tile.bounds;
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.ceil((b.maxX - b.minX) * A));
     c.height = Math.max(1, Math.ceil((b.maxZ - b.minZ) * A));
@@ -181,6 +200,24 @@ export class Minimap implements System {
       if (this.drawn) this.clear();
       return;
     }
+    // Standing still with the camera still and no heat, nothing on the radar moves (only parked cars, and they are redrawn
+    // four times a second): the canvas keeps the last picture and the page does not repaint it.
+    const now = performance.now();
+    const facing = yawOfQuat(st.q);
+    const still =
+      this.drawn &&
+      v.heat < 1 &&
+      Math.abs(st.x - this.lastX) < 0.02 &&
+      Math.abs(st.z - this.lastZ) < 0.02 &&
+      Math.abs(g.cameraArm.yaw - this.lastYaw) < 0.0004 &&
+      Math.abs(facing - this.lastFacing) < 0.0004 &&
+      Math.abs(zoomForSpeed(Math.hypot(st.vx, st.vz)) - this.span) < 0.05;
+    if (still && now - this.lastDraw < 250) return;
+    this.lastX = st.x;
+    this.lastZ = st.z;
+    this.lastYaw = g.cameraArm.yaw;
+    this.lastFacing = facing;
+    this.lastDraw = now;
     this.drawn = true;
     const dpr = this.dpr;
     const S = this.canvas.width;
@@ -232,6 +269,22 @@ export class Minimap implements System {
         ctx.drawImage(this.atlas, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
+    }
+    for (const t of this.tileAtlases.values()) {
+      const A = STREAM_PX_PER_M;
+      const b = t.bounds;
+      const ax = (st.x - b.minX) * A;
+      const ay = (st.z - b.minZ) * A;
+      const h = span * Math.SQRT2 * A;
+      const x0 = Math.max(0, ax - h);
+      const y0 = Math.max(0, ay - h);
+      const x1 = Math.min(t.canvas.width, ax + h);
+      const y1 = Math.min(t.canvas.height, ay + h);
+      if (x1 <= x0 || y1 <= y0) continue;
+      radarTransform(fx, fz, ax, ay, cx, cy, pxPerM / A, this.tf);
+      ctx.setTransform(this.tf[0], this.tf[1], this.tf[2], this.tf[3], this.tf[4], this.tf[5]);
+      ctx.drawImage(t.canvas, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     const heatOn = v.heat >= 1;

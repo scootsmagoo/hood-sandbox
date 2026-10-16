@@ -28,7 +28,9 @@ import type { PedBrain } from '../npc/brain';
 import type { Simulation } from '../Simulation';
 import { EdgeClearance } from './clearance';
 import { cellKey, PAVEMENT_KINDS, WalkGraph } from './graph';
-import { RoadMask } from './roadMask';
+import { RoadMask, RoadMaskSet } from './roadMask';
+import type { StreamListener } from '../stream/TileStreamer';
+import { namespaceJunctions } from '../stream/TileStreamer';
 import { slotOf, zoneAt, type PedGroup, type PopulationData, type PopSlot } from './population';
 import { ScenarioIndex, slotPosition } from './scenarios';
 import { newAmbientState, type AmbientState, type ScenarioAction } from './state';
@@ -87,6 +89,8 @@ export interface AmbientOptions {
   /** The streets, to tell a car on the pavement from a car on the road. */
   roads?: RoadData[];
   budget?: number;
+  /** A streamed city: the tiles' junctions, streets and scenario points come and go (`streamListener`). */
+  stream?: boolean;
 }
 
 export class AmbientPeds {
@@ -103,7 +107,7 @@ export class AmbientPeds {
   removed = 0;
   private readonly rng: Rng;
   private readonly junctionOf = new Map<string, SignalJunction>();
-  private readonly roadMask: RoadMask;
+  private readonly roadMask: RoadMask | RoadMaskSet;
   /** How far off the middle of each edge a person can walk (measured against the real walls and props as edges are first used). */
   readonly clearance: EdgeClearance;
   private inbox: SimEvent[] = [];
@@ -132,7 +136,7 @@ export class AmbientPeds {
     this.budget = opts.budget ?? 60;
     this.rng = sim.rng.fork('ambient');
     for (const j of opts.junctions?.junctions ?? []) this.junctionOf.set(j.id, j);
-    this.roadMask = new RoadMask(opts.roads, opts.junctions);
+    this.roadMask = opts.stream ? new RoadMaskSet() : new RoadMask(opts.roads, opts.junctions);
     this.clearance = new EdgeClearance(opts.graph, sim.physics);
     opts.graph.passable = (e) => !this.clearance.isBlocked(e);
   }
@@ -140,6 +144,38 @@ export class AmbientPeds {
   get count(): number {
     return this.list.length;
   }
+
+  /** How the pedestrians follow a streamed city's tiles (docs/contracts/city-tiles.md section 9). */
+  streamListener(): StreamListener {
+    return {
+      tileAdded: (key, r, tile) => {
+        if (tile.scenarios) this.scenarios.addTile(key, tile.scenarios);
+        const jd = namespaceJunctions(tile.junctions, r.ns);
+        for (const j of jd?.junctions ?? []) this.junctionOf.set(j.id, j);
+        if (this.roadMask instanceof RoadMaskSet) this.roadMask.add(key, tile.roads, jd);
+        this.tileJunctions.set(key, (jd?.junctions ?? []).map((j) => j.id));
+      },
+      tileDropping: (_key, rect) => {
+        for (const p of this.list) {
+          const c = p.controller;
+          if (c.x >= rect.minX && c.x <= rect.maxX && c.z >= rect.minZ && c.z <= rect.maxZ) this.remove(p);
+        }
+      },
+      tileRemoved: (key) => {
+        this.scenarios.removeTile(key);
+        for (const id of this.tileJunctions.get(key) ?? []) this.junctionOf.delete(id);
+        this.tileJunctions.delete(key);
+        if (this.roadMask instanceof RoadMaskSet) this.roadMask.remove(key);
+        // anyone standing on what went (a dead edge) goes too
+        for (const p of this.list) {
+          const a = p.amb;
+          if (a && a.node >= 0 && this.graph.degree(a.node) === 0) this.remove(p);
+        }
+      },
+    };
+  }
+
+  private readonly tileJunctions = new Map<string, string[]>();
 
   // ----------------------------------------------------------------------------------------------
   // The tick
@@ -776,7 +812,8 @@ export class AmbientPeds {
       if (e >= 0) return this.takeEdge(a, e, m);
       a.route = null;
     }
-    const s = g.adjStart[n], t = g.adjStart[n + 1];
+    const at = g.edgesAt(n);
+    const s = 0, t = at.length;
     if (t === s) {
       this.remove(ped);
       return false;
@@ -786,7 +823,7 @@ export class AmbientPeds {
     let sum = 0;
     const ws: number[] = [];
     for (let k = s; k < t; k++) {
-      const e = g.adjEdges[k];
+      const e = at[k];
       const m = g.other(e, n);
       let w = 1;
       if (m === a.prev && t - s > 1) w = 0.03;
@@ -808,7 +845,7 @@ export class AmbientPeds {
     }
     if (sum <= 0) {
       // nowhere they like: the way back, or any way that is open, or any way
-      for (let k = s; k < t; k++) ws[k - s] = this.clearance.isBlocked(g.adjEdges[k]) ? 0 : 1;
+      for (let k = s; k < t; k++) ws[k - s] = this.clearance.isBlocked(at[k]) ? 0 : 1;
       sum = ws.reduce((x, y) => x + y, 0);
       if (sum <= 0) {
         ws.fill(1);
@@ -821,7 +858,7 @@ export class AmbientPeds {
       pick -= ws[k];
       if (pick <= 0) break;
     }
-    const e = g.adjEdges[s + k];
+    const e = at[s + k];
     return this.takeEdge(a, e, g.other(e, n));
   }
 

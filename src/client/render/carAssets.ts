@@ -17,6 +17,7 @@
  * into instanced parts. If loading fails the game keeps the stand-in box cars (models.ts).
  */
 import * as THREE from 'three';
+import { freezeStatic } from './freeze';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -325,5 +326,5 @@ export function carAssetHolder(): THREE.Group {
     m.frustumCulled = false;
     g.add(m);
   }
-  return g;
+  return freezeStatic(g);
 }

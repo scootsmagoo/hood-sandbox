@@ -116,7 +116,7 @@ describe.skipIf(!have)('collision audit', () => {
     const warp = () => {
       for (let k = 0; k < 50; k++) {
         const n = rng.int(0, graph.nodeCount - 1);
-        if (graph.adjStart[n + 1] - graph.adjStart[n] < 1) continue;
+        if (graph.degree(n) < 1) continue;
         player.controller.teleport(graph.x[n], graph.y[n] + 0.1, graph.z[n]);
         route = [];
         return;

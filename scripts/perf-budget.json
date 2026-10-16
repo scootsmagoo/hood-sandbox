@@ -9,8 +9,8 @@
           "cpuP95": 5.4,
           "gpuP50": 1.2,
           "gpuP95": 1.7,
-          "draws": 550,
-          "triangles": 340000,
+          "draws": 300,
+          "triangles": 530000,
           "slowFrames": 6
         },
         "walk": {
@@ -20,8 +20,8 @@
           "cpuP95": 3.5,
           "gpuP50": 1.2,
           "gpuP95": 1.6,
-          "draws": 680,
-          "triangles": 360000,
+          "draws": 330,
+          "triangles": 700000,
           "slowFrames": 6
         },
         "drive": {
@@ -31,8 +31,8 @@
           "cpuP95": 5.1,
           "gpuP50": 1.3,
           "gpuP95": 1.6,
-          "draws": 640,
-          "triangles": 370000,
+          "draws": 340,
+          "triangles": 690000,
           "slowFrames": 6
         },
         "look": {
@@ -42,8 +42,8 @@
           "cpuP95": 4.4,
           "gpuP50": 1.2,
           "gpuP95": 1.6,
-          "draws": 740,
-          "triangles": 380000,
+          "draws": 320,
+          "triangles": 580000,
           "slowFrames": 6
         },
         "gunfire": {
@@ -53,15 +53,15 @@
           "cpuP95": 4.2,
           "gpuP50": 1.2,
           "gpuP95": 1.4,
-          "draws": 290,
-          "triangles": 230000,
+          "draws": 240,
+          "triangles": 440000,
           "slowFrames": 6
         }
       },
-      "bootMs": 1194,
-      "heapMB": 60,
-      "geometries": 880,
-      "textures": 14
+      "bootMs": 1290,
+      "heapMB": 76,
+      "geometries": 793,
+      "textures": 29
     },
     "desktop-medium": {
       "phases": {
@@ -72,8 +72,8 @@
           "cpuP95": 3,
           "gpuP50": 1.2,
           "gpuP95": 1.5,
-          "draws": 530,
-          "triangles": 300000,
+          "draws": 270,
+          "triangles": 450000,
           "slowFrames": 6
         },
         "walk": {
@@ -83,8 +83,8 @@
           "cpuP95": 3.2,
           "gpuP50": 1.2,
           "gpuP95": 1.6,
-          "draws": 600,
-          "triangles": 320000,
+          "draws": 280,
+          "triangles": 500000,
           "slowFrames": 6
         },
         "drive": {
@@ -94,8 +94,8 @@
           "cpuP95": 3,
           "gpuP50": 1.3,
           "gpuP95": 1.5,
-          "draws": 610,
-          "triangles": 330000,
+          "draws": 310,
+          "triangles": 560000,
           "slowFrames": 6
         },
         "look": {
@@ -105,8 +105,8 @@
           "cpuP95": 4.9,
           "gpuP50": 1.3,
           "gpuP95": 1.6,
-          "draws": 730,
-          "triangles": 330000,
+          "draws": 350,
+          "triangles": 520000,
           "slowFrames": 6
         },
         "gunfire": {
@@ -116,15 +116,15 @@
           "cpuP95": 5.2,
           "gpuP50": 1.1,
           "gpuP95": 1.4,
-          "draws": 290,
-          "triangles": 220000,
+          "draws": 250,
+          "triangles": 410000,
           "slowFrames": 6
         }
       },
-      "bootMs": 870,
-      "heapMB": 60,
-      "geometries": 860,
-      "textures": 14
+      "bootMs": 1230,
+      "heapMB": 76,
+      "geometries": 804,
+      "textures": 24
     },
     "desktop-low": {
       "phases": {
@@ -135,8 +135,8 @@
           "cpuP95": 3,
           "gpuP50": 1.3,
           "gpuP95": 1.3,
-          "draws": 320,
-          "triangles": 190000,
+          "draws": 180,
+          "triangles": 290000,
           "slowFrames": 6
         },
         "walk": {
@@ -146,8 +146,8 @@
           "cpuP95": 3.2,
           "gpuP50": 1.3,
           "gpuP95": 1.4,
-          "draws": 470,
-          "triangles": 220000,
+          "draws": 200,
+          "triangles": 340000,
           "slowFrames": 6
         },
         "drive": {
@@ -157,8 +157,8 @@
           "cpuP95": 3.2,
           "gpuP50": 1.3,
           "gpuP95": 1.4,
-          "draws": 410,
-          "triangles": 210000,
+          "draws": 230,
+          "triangles": 350000,
           "slowFrames": 6
         },
         "look": {
@@ -168,8 +168,8 @@
           "cpuP95": 4.1,
           "gpuP50": 1.3,
           "gpuP95": 1.4,
-          "draws": 540,
-          "triangles": 220000,
+          "draws": 240,
+          "triangles": 370000,
           "slowFrames": 6
         },
         "gunfire": {
@@ -179,15 +179,15 @@
           "cpuP95": 4.9,
           "gpuP50": 1.3,
           "gpuP95": 1.4,
-          "draws": 220,
-          "triangles": 150000,
+          "draws": 160,
+          "triangles": 250000,
           "slowFrames": 6
         }
       },
-      "bootMs": 936,
-      "heapMB": 59,
-      "geometries": 860,
-      "textures": 8
+      "bootMs": 1230,
+      "heapMB": 75,
+      "geometries": 775,
+      "textures": 16
     },
     "phone-low": {
       "phases": {
@@ -198,8 +198,8 @@
           "cpuP95": 7.4,
           "gpuP50": 1.1,
           "gpuP95": 1.2,
-          "draws": 220,
-          "triangles": 140000,
+          "draws": 150,
+          "triangles": 250000,
           "slowFrames": 6
         },
         "walk": {
@@ -209,8 +209,8 @@
           "cpuP95": 6.4,
           "gpuP50": 1.1,
           "gpuP95": 1.2,
-          "draws": 270,
-          "triangles": 170000,
+          "draws": 160,
+          "triangles": 290000,
           "slowFrames": 6
         },
         "drive": {
@@ -220,8 +220,8 @@
           "cpuP95": 8.2,
           "gpuP50": 1.1,
           "gpuP95": 1.2,
-          "draws": 280,
-          "triangles": 160000,
+          "draws": 180,
+          "triangles": 300000,
           "slowFrames": 6
         },
         "look": {
@@ -231,8 +231,8 @@
           "cpuP95": 9.2,
           "gpuP50": 1.1,
           "gpuP95": 1.2,
-          "draws": 430,
-          "triangles": 150000,
+          "draws": 170,
+          "triangles": 270000,
           "slowFrames": 6
         },
         "gunfire": {
@@ -242,15 +242,15 @@
           "cpuP95": 8.2,
           "gpuP50": 1.1,
           "gpuP95": 1.2,
-          "draws": 160,
-          "triangles": 110000,
+          "draws": 140,
+          "triangles": 170000,
           "slowFrames": 6
         }
       },
-      "bootMs": 1710,
-      "heapMB": 60,
-      "geometries": 780,
-      "textures": 8
+      "bootMs": 2760,
+      "heapMB": 75,
+      "geometries": 741,
+      "textures": 13
     }
   },
   "note": "Budgets for scripts/perf-budget.mjs: what the scripted Downtown run measured, plus headroom (timings x2 (at least 1 ms of slack), counts x1.3, slow frames at least 6, heap x1.4 + 10 MB). Chromium on the dev box (AMD Radeon 8060S, Vulkan), frame-rate limit off. Regenerate with --write-budget after a change that is meant to cost more or less, and say why.",

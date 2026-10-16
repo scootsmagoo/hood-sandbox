@@ -455,10 +455,15 @@ export function installHarness(cfg) {
     let objects = 0;
     const mats = new Set();
     const sceneGeos = new Set();
-    g.scene.traverse((o) => {
+    const count = (o) => {
       objects++;
       if (o.geometry) sceneGeos.add(o.geometry.uuid);
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) mats.add(m.uuid);
+    };
+    g.scene.traverse((o) => {
+      count(o);
+      // a car model keeps the levels of detail it is not drawing out of the scene graph (they would cost a matrix each every frame): count them as part of the car
+      if (o.userData && o.userData.lodGroups) for (const l of o.userData.lodGroups) if (l.group && !l.group.parent) l.group.traverse(count);
     });
     let usedGeos = 0;
     for (const u of sceneGeos) if (drawn.has(u)) usedGeos++;

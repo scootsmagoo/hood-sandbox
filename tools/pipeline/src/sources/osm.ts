@@ -84,6 +84,31 @@ export function overpassPropsQuery(box: TileConfig['queryBox']): string {
 out geom;`;
 }
 
+/** Simple 3D Buildings parts that are not buildings of their own (`building:part` without `building`): setbacks, podiums, crowns. */
+export function overpassBuildingPartsQuery(box: TileConfig['queryBox']): string {
+  const b = `${box.south.toFixed(6)},${box.west.toFixed(6)},${box.north.toFixed(6)},${box.east.toFixed(6)}`;
+  return `[out:json][timeout:120];
+(
+  way["building:part"]["building:part"!="no"][!"building"](${b});
+);
+out geom;`;
+}
+
+/** The OSM building parts of the tile (cached next to the main extract). Retried with a backoff; null if all attempts fail (towers then have their Overture parts only). */
+export async function fetchOsmBuildingParts(cfg: TileConfig): Promise<OsmData | null> {
+  const query = overpassBuildingPartsQuery(cfg.queryBox);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await fetchOverpass(cfg, query, 'osm-parts');
+    } catch (e) {
+      const wait = 4000 * 2 ** attempt;
+      console.warn(`osm building parts: attempt ${attempt + 1} failed (${(e as Error).message}); ${attempt < 3 ? `retrying in ${wait / 1000}s` : 'giving up, only the Overture parts will be used'}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  return null;
+}
+
 export async function fetchOsm(cfg: TileConfig): Promise<OsmData> {
   return fetchOverpass(cfg, overpassQuery(cfg.queryBox));
 }

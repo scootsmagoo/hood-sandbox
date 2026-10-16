@@ -1,0 +1,987 @@
+{
+ "_about": "Known heights of Atlanta buildings over 300 ft (Wikipedia, List of tallest buildings in Atlanta; heights include spires, not antenna masts). Matched to footprints by position. `label` is for humans: it is never baked into a tile. Refresh with `npx tsx src/facts-import.ts` in tools/pipeline.",
+ "_fetched": "2026-10-16",
+ "heights": [
+  {
+   "label": "Bank of America Plaza",
+   "lat": 33.770863,
+   "lon": -84.38613,
+   "height": 311.8,
+   "floors": 55,
+   "year": 1992,
+   "use": "office"
+  },
+  {
+   "label": "Truist Plaza",
+   "lat": 33.762696,
+   "lon": -84.38655,
+   "height": 264.3,
+   "floors": 60,
+   "year": 1992,
+   "use": "office"
+  },
+  {
+   "label": "One Atlantic Center",
+   "lat": 33.787081,
+   "lon": -84.387367,
+   "height": 249.9,
+   "floors": 50,
+   "year": 1987,
+   "use": "office"
+  },
+  {
+   "label": "191 Peachtree Tower",
+   "lat": 33.758995,
+   "lon": -84.386735,
+   "height": 234.7,
+   "floors": 50,
+   "year": 1992,
+   "use": "office"
+  },
+  {
+   "label": "1072 West Peachtree Street",
+   "lat": 33.784031,
+   "lon": -84.388256,
+   "height": 228.3,
+   "floors": 61,
+   "year": 2026,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Westin Peachtree Plaza Hotel",
+   "lat": 33.759431,
+   "lon": -84.388565,
+   "height": 220.4,
+   "floors": 73,
+   "year": 1976,
+   "use": "hotel"
+  },
+  {
+   "label": "Georgia Pacific Tower",
+   "lat": 33.757451,
+   "lon": -84.387222,
+   "height": 212.5,
+   "floors": 51,
+   "year": 1981,
+   "use": "office"
+  },
+  {
+   "label": "Promenade II",
+   "lat": 33.787891,
+   "lon": -84.385142,
+   "height": 210.6,
+   "floors": 40,
+   "year": 1989,
+   "use": "office"
+  },
+  {
+   "label": "Tower Square",
+   "lat": 33.7727537,
+   "lon": -84.386577,
+   "height": 206.4,
+   "floors": 47,
+   "year": 1980,
+   "use": "office"
+  },
+  {
+   "label": "3344 Peachtree",
+   "lat": 33.847087,
+   "lon": -84.368586,
+   "height": 202.7,
+   "floors": 48,
+   "year": 2008,
+   "use": "mixed-use"
+  },
+  {
+   "label": "1180 Peachtree",
+   "lat": 33.786924,
+   "lon": -84.383857,
+   "height": 200.2,
+   "floors": 41,
+   "year": 2006,
+   "use": "office"
+  },
+  {
+   "label": "GLG Grand-Four Seasons",
+   "lat": 33.78628,
+   "lon": -84.38536,
+   "height": 185.6,
+   "floors": 53,
+   "year": 1992,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Waldorf Astoria Atlanta Buckhead",
+   "lat": 33.849539,
+   "lon": -84.366645,
+   "height": 176.8,
+   "floors": 42,
+   "year": 2008,
+   "use": "mixed-use"
+  },
+  {
+   "label": "The Atlantic",
+   "lat": 33.79089,
+   "lon": -84.397534,
+   "height": 175.9,
+   "floors": 46,
+   "year": 2009,
+   "use": "residential"
+  },
+  {
+   "label": "State of Georgia Building",
+   "lat": 33.754158,
+   "lon": -84.390589,
+   "height": 169.5,
+   "floors": 44,
+   "year": 1967,
+   "use": "office"
+  },
+  {
+   "label": "Atlanta Marriott Marquis",
+   "lat": 33.7613,
+   "lon": -84.3847,
+   "height": 168.9,
+   "floors": 52,
+   "year": 1985,
+   "use": "hotel"
+  },
+  {
+   "label": "The Hue Midtown",
+   "lat": 33.78616,
+   "lon": -84.388085,
+   "height": 157,
+   "floors": 39,
+   "year": 2018,
+   "use": "residential"
+  },
+  {
+   "label": "ViewPoint",
+   "lat": 33.7779,
+   "lon": -84.383862,
+   "height": 152.7,
+   "floors": 36,
+   "year": 2008,
+   "use": "residential"
+  },
+  {
+   "label": "TWELVE Centennial Park Tower I",
+   "lat": 33.765045,
+   "lon": -84.388105,
+   "height": 149.7,
+   "floors": 39,
+   "year": 2007,
+   "use": "residential"
+  },
+  {
+   "label": "1075 Peachtree Office Tower",
+   "lat": 33.7838,
+   "lon": -84.3827,
+   "height": 148.7,
+   "floors": 38,
+   "year": 2010,
+   "use": "office"
+  },
+  {
+   "label": "Park Avenue Condominiums",
+   "lat": 33.8553,
+   "lon": -84.3618,
+   "height": 148.1,
+   "floors": 44,
+   "year": 2000,
+   "use": "residential"
+  },
+  {
+   "label": "Terminus 100",
+   "lat": 33.8441,
+   "lon": -84.3715,
+   "height": 147.9,
+   "floors": 26,
+   "year": 2007,
+   "use": "office"
+  },
+  {
+   "label": "The Paramount at Buckhead",
+   "lat": 33.851218,
+   "lon": -84.367475,
+   "height": 145.7,
+   "floors": 40,
+   "year": 2004,
+   "use": "residential"
+  },
+  {
+   "label": "The Ritz-Carlton Residences",
+   "lat": 33.8544,
+   "lon": -84.3584,
+   "height": 143,
+   "floors": 40,
+   "year": 2010,
+   "use": "mixed-use"
+  },
+  {
+   "label": "101 Marietta Street",
+   "lat": 33.7568,
+   "lon": -84.3919,
+   "height": 140,
+   "floors": 36,
+   "year": 1976,
+   "use": "office"
+  },
+  {
+   "label": "Equitable Building",
+   "lat": 33.756774,
+   "lon": -84.388577,
+   "height": 138.1,
+   "floors": 34,
+   "year": 1967,
+   "use": "office"
+  },
+  {
+   "label": "Spire",
+   "lat": 33.7782,
+   "lon": -84.3846,
+   "height": 138,
+   "floors": 28,
+   "year": 2005,
+   "use": "residential"
+  },
+  {
+   "label": "Buckhead Grand",
+   "lat": 33.848793,
+   "lon": -84.370816,
+   "height": 137.5,
+   "floors": 38,
+   "year": 2004,
+   "use": "residential"
+  },
+  {
+   "label": "One Park Tower",
+   "lat": 33.7547,
+   "lon": -84.3894,
+   "height": 133.8,
+   "floors": 32,
+   "year": 1961,
+   "use": "office"
+  },
+  {
+   "label": "1105 West Peachtree",
+   "lat": 33.784722,
+   "lon": -84.3875,
+   "height": 133.2,
+   "floors": 32,
+   "year": 2021,
+   "use": "office"
+  },
+  {
+   "label": "1100 Peachtree",
+   "lat": 33.784755,
+   "lon": -84.38354,
+   "height": 130.5,
+   "floors": 28,
+   "year": 1990,
+   "use": "office"
+  },
+  {
+   "label": "Atlanta Plaza 1",
+   "lat": 33.8466,
+   "lon": -84.3571,
+   "height": 129.5,
+   "floors": 32,
+   "year": 1985,
+   "use": "office"
+  },
+  {
+   "label": "Park Place",
+   "lat": 33.82749,
+   "lon": -84.38815,
+   "height": 128,
+   "floors": 40,
+   "year": 1986,
+   "use": "residential"
+  },
+  {
+   "label": "Elora at Buckhead",
+   "lat": 33.84873,
+   "lon": -84.36698,
+   "height": 128,
+   "floors": 35,
+   "year": 2019,
+   "use": "residential"
+  },
+  {
+   "label": "2828 Peachtree",
+   "lat": 33.833007,
+   "lon": -84.385404,
+   "height": 127.9,
+   "floors": 33,
+   "year": 2002,
+   "use": "residential"
+  },
+  {
+   "label": "1280 West",
+   "lat": 33.789,
+   "lon": -84.388,
+   "height": 125,
+   "floors": 38,
+   "year": 1989,
+   "use": "residential"
+  },
+  {
+   "label": "1010 Midtown",
+   "lat": 33.78376,
+   "lon": -84.38385,
+   "height": 124,
+   "floors": 36,
+   "year": 2009,
+   "use": "residential"
+  },
+  {
+   "label": "Peachtree Summit",
+   "lat": 33.7653,
+   "lon": -84.38707,
+   "height": 123.8,
+   "floors": 31,
+   "year": 1975,
+   "use": "office"
+  },
+  {
+   "label": "One Coca-Cola Plaza",
+   "lat": 33.7709,
+   "lon": -84.3965,
+   "height": 122.8,
+   "floors": 29,
+   "year": 1980,
+   "use": "office"
+  },
+  {
+   "label": "Tower Place 100",
+   "lat": 33.84745,
+   "lon": -84.37098,
+   "height": 122.2,
+   "floors": 29,
+   "year": 1974,
+   "use": "office"
+  },
+  {
+   "label": "1081 Juniper I",
+   "lat": 33.784096,
+   "lon": -84.381973,
+   "height": 121.9,
+   "floors": 36,
+   "year": 2024,
+   "use": "residential"
+  },
+  {
+   "label": "1020 Spring",
+   "lat": 33.782813,
+   "lon": -84.390222,
+   "height": 121.9,
+   "floors": 25,
+   "year": 2024,
+   "use": "office"
+  },
+  {
+   "label": "Kinetic",
+   "lat": 33.78263,
+   "lon": -84.3888,
+   "height": 121.9,
+   "floors": 34,
+   "year": 2024,
+   "use": "residential"
+  },
+  {
+   "label": "999 Peachtree",
+   "lat": 33.781151,
+   "lon": -84.383636,
+   "height": 120.7,
+   "floors": 28,
+   "year": 1987,
+   "use": "office"
+  },
+  {
+   "label": "Mayfair Renaissance",
+   "lat": 33.785725,
+   "lon": -84.381096,
+   "height": 120.4,
+   "floors": 35,
+   "year": 2002,
+   "use": "residential"
+  },
+  {
+   "label": "171 17th Street",
+   "lat": 33.791534,
+   "lon": -84.393875,
+   "height": 120,
+   "floors": 23,
+   "year": 2004,
+   "use": "office"
+  },
+  {
+   "label": "Coda at Tech Square",
+   "lat": 33.775517,
+   "lon": -84.387672,
+   "height": 118.9,
+   "floors": 21,
+   "year": 2019,
+   "use": "office"
+  },
+  {
+   "label": "Sam Nunn Atlanta Federal Center",
+   "lat": 33.75383,
+   "lon": -84.393913,
+   "height": 118.3,
+   "floors": 24,
+   "year": 1997,
+   "use": "office"
+  },
+  {
+   "label": "Loews Midtown",
+   "lat": 33.783314,
+   "lon": -84.383286,
+   "height": 118.2,
+   "floors": 39,
+   "year": 2010,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Monarch Tower",
+   "lat": 33.851715,
+   "lon": -84.364365,
+   "height": 118,
+   "floors": 24,
+   "year": 1997,
+   "use": "office"
+  },
+  {
+   "label": "Atlanta Hilton Hotel",
+   "lat": 33.761524,
+   "lon": -84.383522,
+   "height": 116.7,
+   "floors": 30,
+   "year": 1974,
+   "use": "hotel"
+  },
+  {
+   "label": "Richard B. Russell Federal Building",
+   "lat": 33.753311,
+   "lon": -84.395966,
+   "height": 116.7,
+   "floors": 26,
+   "year": 1978,
+   "use": "office"
+  },
+  {
+   "label": "230 Peachtree Building",
+   "lat": 33.760143,
+   "lon": -84.388115,
+   "height": 116.4,
+   "floors": 29,
+   "year": 1965,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Harris Tower",
+   "lat": 33.760719,
+   "lon": -84.386459,
+   "height": 116.4,
+   "floors": 31,
+   "year": 1975,
+   "use": "office"
+  },
+  {
+   "label": "Southern Bell Telephone Company Building",
+   "lat": 33.755871,
+   "lon": -84.385597,
+   "height": 115.8,
+   "floors": 14,
+   "year": 1963,
+   "use": "office"
+  },
+  {
+   "label": "1081 Juniper II",
+   "lat": 33.783504,
+   "lon": -84.382042,
+   "height": 115.8,
+   "floors": 33,
+   "year": 2024,
+   "use": "residential"
+  },
+  {
+   "label": "Marquis I",
+   "lat": 33.761192,
+   "lon": -84.385597,
+   "height": 115.2,
+   "floors": 30,
+   "year": 1985,
+   "use": "office"
+  },
+  {
+   "label": "Marquis II",
+   "lat": 33.761986,
+   "lon": -84.385582,
+   "height": 115.2,
+   "floors": 30,
+   "year": 1986,
+   "use": "office"
+  },
+  {
+   "label": "25 Park Place",
+   "lat": 33.755199,
+   "lon": -84.387779,
+   "height": 114.9,
+   "floors": 28,
+   "year": 1971,
+   "use": "education"
+  },
+  {
+   "label": "Coastal States Insurance Building",
+   "lat": 33.761471,
+   "lon": -84.387894,
+   "height": 114.9,
+   "floors": 27,
+   "year": 1971,
+   "use": "office"
+  },
+  {
+   "label": "Peachtree Center International Tower",
+   "lat": 33.759899,
+   "lon": -84.386459,
+   "height": 114.6,
+   "floors": 30,
+   "year": 1972,
+   "use": "office"
+  },
+  {
+   "label": "BB&T Tower",
+   "lat": 33.791576,
+   "lon": -84.395721,
+   "height": 114.3,
+   "floors": 25,
+   "year": 2009,
+   "use": "office"
+  },
+  {
+   "label": "Midtown Union Office Building",
+   "lat": 33.791435,
+   "lon": -84.38868,
+   "height": 114,
+   "floors": 26,
+   "year": 2022,
+   "use": "office"
+  },
+  {
+   "label": "Realm",
+   "lat": 33.845917,
+   "lon": -84.369331,
+   "height": 113.7,
+   "floors": 29,
+   "year": 2006,
+   "use": "mixed-use"
+  },
+  {
+   "label": "One Georgia Center",
+   "lat": 33.77079,
+   "lon": -84.387901,
+   "height": 113.1,
+   "floors": 24,
+   "year": 1968,
+   "use": "office"
+  },
+  {
+   "label": "Mayfair Tower Condominiums",
+   "lat": 33.786144,
+   "lon": -84.380699,
+   "height": 112.8,
+   "floors": 34,
+   "year": 1990,
+   "use": "residential"
+  },
+  {
+   "label": "Terminus 200",
+   "lat": 33.846001,
+   "lon": -84.37188,
+   "height": 112.7,
+   "floors": 25,
+   "year": 2009,
+   "use": "office"
+  },
+  {
+   "label": "The Campanile",
+   "lat": 33.785995,
+   "lon": -84.382553,
+   "height": 111.9,
+   "floors": 20,
+   "year": 1987,
+   "use": "office"
+  },
+  {
+   "label": "Regions Plaza",
+   "lat": 33.786873,
+   "lon": -84.388268,
+   "height": 111.9,
+   "floors": 24,
+   "year": 2001,
+   "use": "office"
+  },
+  {
+   "label": "Society Atlanta",
+   "lat": 33.777222,
+   "lon": -84.383888,
+   "height": 109.7,
+   "floors": 31,
+   "year": 2024,
+   "use": "residential"
+  },
+  {
+   "label": "Atlantic House",
+   "lat": 33.785889,
+   "lon": -84.38739,
+   "height": 109,
+   "floors": 32,
+   "year": 2016,
+   "use": "residential"
+  },
+  {
+   "label": "Resurgens Plaza",
+   "lat": 33.846661,
+   "lon": -84.35601,
+   "height": 108.5,
+   "floors": 25,
+   "year": 1988,
+   "use": "office"
+  },
+  {
+   "label": "903 Peachtree",
+   "lat": 33.7793476,
+   "lon": -84.3838188,
+   "height": 108,
+   "floors": 31,
+   "year": 2022,
+   "use": "residential"
+  },
+  {
+   "label": "Three Alliance Center",
+   "lat": 33.852032,
+   "lon": -84.36731,
+   "height": 107,
+   "floors": 29,
+   "year": 2017,
+   "use": "office"
+  },
+  {
+   "label": "Hanover Midtown",
+   "lat": 33.787991,
+   "lon": -84.388125,
+   "height": 107,
+   "floors": 31,
+   "year": 2023,
+   "use": "residential"
+  },
+  {
+   "label": "The Proscenium",
+   "lat": 33.786331,
+   "lon": -84.383698,
+   "height": 104.9,
+   "floors": 24,
+   "year": 2001,
+   "use": "office"
+  },
+  {
+   "label": "Hyatt Regency Atlanta",
+   "lat": 33.761482,
+   "lon": -84.386795,
+   "height": 103.6,
+   "floors": 24,
+   "year": 1967,
+   "use": "hotel"
+  },
+  {
+   "label": "The Pinnacle",
+   "lat": 33.850915,
+   "lon": -84.36071,
+   "height": 102.7,
+   "floors": 22,
+   "year": 1998,
+   "use": "office"
+  },
+  {
+   "label": "Twelve Atlantic Station",
+   "lat": 33.79158,
+   "lon": -84.398109,
+   "height": 102.4,
+   "floors": 26,
+   "year": 2005,
+   "use": "mixed-use"
+  },
+  {
+   "label": "The Grandview",
+   "lat": 33.849121,
+   "lon": -84.357086,
+   "height": 102,
+   "floors": 36,
+   "year": 1990,
+   "use": "residential"
+  },
+  {
+   "label": "Peachtree Center South",
+   "lat": 33.760136,
+   "lon": -84.387062,
+   "height": 101.2,
+   "floors": 27,
+   "year": 1969,
+   "use": "office"
+  },
+  {
+   "label": "Peachtree Center North",
+   "lat": 33.760498,
+   "lon": -84.387047,
+   "height": 100.9,
+   "floors": 27,
+   "year": 1967,
+   "use": "office"
+  },
+  {
+   "label": "W Downtown Atlanta Hotel & Residences",
+   "lat": 33.765045,
+   "lon": -84.389229,
+   "height": 100.9,
+   "floors": 28,
+   "year": 2009,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Linea Midtown",
+   "lat": 33.780056,
+   "lon": -84.390129,
+   "height": 100,
+   "floors": 29,
+   "year": 2017,
+   "use": "residential"
+  },
+  {
+   "label": "Ascent Peachtree",
+   "lat": 33.75936,
+   "lon": -84.385333,
+   "height": 99,
+   "floors": 29,
+   "year": 2020,
+   "use": "residential"
+  },
+  {
+   "label": "Colony Square 100",
+   "lat": 33.786956,
+   "lon": -84.38272,
+   "height": 96,
+   "floors": 24,
+   "year": 1969,
+   "use": "office"
+  },
+  {
+   "label": "Crown Plaza & Staybridge Suites Atlanta Midtown",
+   "lat": 33.770235,
+   "lon": -84.38829,
+   "height": 96,
+   "floors": 25,
+   "year": 1972,
+   "use": "hotel"
+  },
+  {
+   "label": "The Mark at Atlanta",
+   "lat": 33.7810463,
+   "lon": -84.388689,
+   "height": 96,
+   "floors": 28,
+   "year": 2020,
+   "use": "residential"
+  },
+  {
+   "label": "Anthem Technology Center I",
+   "lat": 33.774774,
+   "lon": -84.387749,
+   "height": 95.4,
+   "floors": 21,
+   "year": 2020,
+   "use": "office"
+  },
+  {
+   "label": "The Starling",
+   "lat": 33.786983,
+   "lon": -84.381717,
+   "height": 94.5,
+   "floors": 28,
+   "year": 1974,
+   "use": "hotel"
+  },
+  {
+   "label": "Omni Atlanta Hotel at Centennial Park",
+   "lat": 33.758998,
+   "lon": -84.394866,
+   "height": 94.3,
+   "floors": 28,
+   "year": 2003,
+   "use": "hotel"
+  },
+  {
+   "label": "Museum Tower at Centennial Hill",
+   "lat": 33.762611,
+   "lon": -84.391762,
+   "height": 94,
+   "floors": 24,
+   "year": 2002,
+   "use": "residential"
+  },
+  {
+   "label": "Colony Square 400",
+   "lat": 33.787632,
+   "lon": -84.382957,
+   "height": 93.9,
+   "floors": 22,
+   "year": 1973,
+   "use": "office"
+  },
+  {
+   "label": "The Concorde",
+   "lat": 33.833794,
+   "lon": -84.385742,
+   "height": 93.5,
+   "floors": 31,
+   "year": 1987,
+   "use": "residential"
+  },
+  {
+   "label": "The Huntley Buckhead",
+   "lat": 33.855034,
+   "lon": -84.362846,
+   "height": 92,
+   "floors": 27,
+   "year": 2018,
+   "use": "residential"
+  },
+  {
+   "label": "Altitude Apartments",
+   "lat": 33.761501,
+   "lon": -84.382507,
+   "height": 91.8,
+   "floors": 23,
+   "year": 1974,
+   "use": "residential"
+  },
+  {
+   "label": "AMLI Arts Center",
+   "lat": 33.788757,
+   "lon": -84.388313,
+   "height": 91.7,
+   "floors": 30,
+   "year": 2017,
+   "use": "residential"
+  },
+  {
+   "label": "Square On Fifth",
+   "lat": 33.778,
+   "lon": -84.38922,
+   "height": 91.7,
+   "floors": 26,
+   "year": 2015,
+   "use": "residential"
+  },
+  {
+   "label": "Merchandise Mart",
+   "lat": 33.760612,
+   "lon": -84.388641,
+   "height": 91.4,
+   "floors": 22,
+   "year": 1961,
+   "use": "office"
+  },
+  {
+   "label": "Concourse Corporate Center V",
+   "lat": 33.91703,
+   "lon": -84.354575,
+   "height": 173.7,
+   "floors": 34,
+   "year": 1988,
+   "use": "office"
+  },
+  {
+   "label": "Concourse Corporate Center VI",
+   "lat": 33.917055,
+   "lon": -84.3558,
+   "height": 168.6,
+   "floors": 34,
+   "year": 1991,
+   "use": "office"
+  },
+  {
+   "label": "TKE Innovation and Qualification Center Tower",
+   "lat": 33.88651,
+   "lon": -84.46972,
+   "height": 135.8,
+   "floors": 13,
+   "year": 2022,
+   "use": "mixed-use"
+  },
+  {
+   "label": "Three Ravinia Drive",
+   "lat": 33.92072,
+   "lon": -84.33494,
+   "height": 135.3,
+   "floors": 33,
+   "year": 1991,
+   "use": "office"
+  },
+  {
+   "label": "Summit One",
+   "lat": 33.91575,
+   "lon": -84.34105,
+   "height": 116.1,
+   "floors": 27,
+   "year": 1995,
+   "use": "office"
+  },
+  {
+   "label": "Riverwood 100 Tower",
+   "lat": 33.87791,
+   "lon": -84.45806,
+   "height": 110.3,
+   "floors": 26,
+   "year": 1989,
+   "use": "office"
+  },
+  {
+   "label": "Park Towers II",
+   "lat": 33.9177,
+   "lon": -84.36004,
+   "height": 106.7,
+   "floors": 33,
+   "year": 1999,
+   "use": "residential"
+  },
+  {
+   "label": "Park Center 2",
+   "lat": 33.91983,
+   "lon": -84.346163,
+   "height": 98.4,
+   "floors": 22,
+   "year": 2020,
+   "use": "office"
+  },
+  {
+   "label": "Park Center 1",
+   "lat": 33.91993,
+   "lon": -84.34456,
+   "height": 96.5,
+   "floors": 22,
+   "year": 2016,
+   "use": "office"
+  },
+  {
+   "label": "The Manhattan",
+   "lat": 33.93073,
+   "lon": -84.34305,
+   "height": 93,
+   "floors": 27,
+   "year": 2006,
+   "use": "residential"
+  }
+ ]
+}

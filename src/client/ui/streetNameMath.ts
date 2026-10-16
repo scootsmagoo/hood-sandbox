@@ -318,3 +318,40 @@ export class Debounced<T> {
     return false;
   }
 }
+
+/**
+ * Like `Debounced`, but a candidate of `null` is a value too: it replaces the shown one once it has held for `holdMs`.
+ * The landmark under the label (null away from every landmark) uses it, so the name clears when you leave and does not
+ * flicker at the edge of a footprint.
+ */
+export class Settled<T> {
+  private shown: T | null = null;
+  private pending: T | null = null;
+  private since = 0;
+  private holding = false;
+
+  constructor(readonly holdMs = STREET_HOLD_MS) {}
+
+  get value(): T | null {
+    return this.shown;
+  }
+
+  offer(candidate: T | null, now: number): boolean {
+    if (candidate === this.shown) {
+      this.holding = false;
+      return false;
+    }
+    if (!this.holding || candidate !== this.pending) {
+      this.pending = candidate;
+      this.since = now;
+      this.holding = true;
+      return false;
+    }
+    if (now - this.since >= this.holdMs) {
+      this.shown = candidate;
+      this.holding = false;
+      return true;
+    }
+    return false;
+  }
+}

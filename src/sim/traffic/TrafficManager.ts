@@ -28,7 +28,9 @@ import type { Simulation } from '../Simulation';
 import { steerLock } from '../vehicles/dynamics';
 import type { WalkGraph } from '../peds/graph';
 import { Ctl, LaneGraph, type EdgePoint, type SpawnSpot } from './LaneGraph';
-import { YIELD, crossingBusy, indexCrossings, type LaneCrossing } from './crossings';
+import { YIELD, crossingBusy, indexCrossingRange, indexCrossings, type LaneCrossing } from './crossings';
+import type { StreamListener } from '../stream/TileStreamer';
+import type { StreamJob } from '../stream/StreamPhysics';
 import { DEFAULT_IDM, MAX_BRAKE, freeAccel, idmAccel, mobilChange, stoppingDistance, type IdmParams } from './idm';
 import { Arbiter, type Probe } from './junction';
 import { carSlot, carZoneAt, pickVehicle, type TrafficPopulation } from './population';
@@ -242,6 +244,7 @@ export class TrafficManager implements Probe {
   private readonly walkers: { x: number; z: number; vx: number; vz: number; player: boolean }[] = [];
   /** the unsignalled crossings each lane crosses (none without the walk network) */
   private readonly crossings: LaneCrossing[][] | null;
+  private readonly walk: WalkGraph | undefined;
   /** Vehicles that are not driven by the traffic and stand still: parked cars, wrecks, the player's car at rest. */
   private readonly statics: { x: number; z: number; fx: number; fz: number; hl: number; hw: number; player: boolean }[] = [];
   private box: RAPIER.Cuboid | null = null;
@@ -264,7 +267,51 @@ export class TrafficManager implements Probe {
     this.rng = sim.rng.fork('traffic');
     this.arbiter = new Arbiter(graph);
     this.density = density;
+    this.walk = walk;
     this.crossings = walk ? indexCrossings(graph, walk) : null;
+  }
+
+  /**
+   * How the traffic follows a streamed city's tiles (docs/contracts/city-tiles.md section 9): a new tile's lanes get their crossings
+   * indexed (a job per 400 lanes), the cars on a dropping tile go, and so do the cars whose lane went; routes stop where they would
+   * have run into a dropped tile.
+   */
+  streamListener(): StreamListener {
+    return {
+      tileAdded: (_key, r) => {
+        const range = r.lanes;
+        if (!range || !this.crossings || !this.walk) return;
+        const jobs: StreamJob[] = [];
+        for (let a = range.base; a < range.base + range.n; a += 400) {
+          const b = Math.min(range.base + range.n, a + 400);
+          jobs.push({ name: `traffic:crossings:${a}`, cost: (b - a) * 6, run: () => (indexCrossingRange(this.graph, this.walk!, a, b, this.crossings!), true) });
+        }
+        return jobs;
+      },
+      tileDropping: (_key, rect) => {
+        for (const c of [...this.cars]) {
+          const p = c.veh.car.body.translation();
+          if (p.x >= rect.minX && p.x <= rect.maxX && p.z >= rect.minZ && p.z <= rect.maxZ) this.remove(c);
+        }
+      },
+      tileRemoved: () => this.pruneDead(),
+    };
+  }
+
+  /** Cars on dead edges go; routes are cut before the first dead edge. */
+  pruneDead() {
+    const g = this.graph;
+    for (const c of [...this.cars]) {
+      if (c.mode !== 'free' && !g.alive[c.edge]) {
+        this.remove(c);
+        continue;
+      }
+      const k = c.route.findIndex((e) => !g.alive[e]);
+      if (k >= 0) {
+        c.route.length = k;
+        if (c.dest >= 0 && !g.alive[c.dest]) c.dest = -1;
+      }
+    }
   }
 
   // -------------------------------------------------------------------------------------------

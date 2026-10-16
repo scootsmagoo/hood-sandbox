@@ -813,7 +813,7 @@ async function realBystanderJack() {
       const cands = [];
       for (let i = 0; i < g.nodeCount; i++) {
         const d = Math.hypot(g.x[i] - me.x, g.z[i] - me.z);
-        if (d < 8 || d > 26 || !g.isSpawnEdge(g.adjEdges[g.adjStart[i]])) continue;
+        if (d < 8 || d > 26 || !g.edgesAt(i).length || !g.isSpawnEdge(g.edgesAt(i)[0])) continue;
         if (!S.law.clearLine({ x: g.x[i], y: g.y[i] + 1.5, z: g.z[i] }, { x: me.x, y: me.y + 1.2, z: me.z })) continue;
         cands.push({ i, d });
       }
@@ -1664,7 +1664,13 @@ async function policeSuite() {
     await check('on the freeway the Highway Patrol (GHP) runs alongside, matches speed and PITs: the car is spun', async () => {
       const r = await sim(page, (host, S) => {
         const v = S.registry.get(S.vehicleId);
-        const rd = S.tile.roads.filter((x) => x.class === 'motorway' && !x.bridge && x.points.length > 6).sort((a, b) => Math.hypot(b.points[b.points.length - 1][0] - b.points[0][0], b.points[b.points.length - 1][2] - b.points[0][2]) - Math.hypot(a.points[a.points.length - 1][0] - a.points[0][0], a.points[a.points.length - 1][2] - a.points[0][2]))[0];
+        // The Downtown Connector northbound at (842, -734) (osm:way/337901445), where this check has always run. It used to take the
+        // longest straight motorway in roads.json, and a bake that turned a bridge the pipeline made into an embankment made that the
+        // southbound Connector at (781, 387): seven lanes beside a diverging exit ramp, where the cruiser, put down at 19 m/s on the
+        // centreline, takes its route onto the ramp at full lock and spins off the road before it ever gets alongside (a set-up the
+        // game does not make: a patrol car joins the motorway from a lane). Falls back to the old rule on a tile without that way.
+        const motorways = S.tile.roads.filter((x) => x.class === 'motorway' && !x.bridge && x.points.length > 6);
+        const rd = motorways.find((x) => x.id === 'osm:way/337901445') ?? motorways.sort((a, b) => Math.hypot(b.points[b.points.length - 1][0] - b.points[0][0], b.points[b.points.length - 1][2] - b.points[0][2]) - Math.hypot(a.points[a.points.length - 1][0] - a.points[0][0], a.points[a.points.length - 1][2] - a.points[0][2]))[0];
         const cum = [0];
         for (let i = 1; i < rd.points.length; i++) cum.push(cum[i - 1] + Math.hypot(rd.points[i][0] - rd.points[i - 1][0], rd.points[i][2] - rd.points[i - 1][2]));
         const at = (d) => {

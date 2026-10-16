@@ -4,19 +4,66 @@ import { cellKey } from './graph';
 
 const CELL = 32;
 
+/** A point of a dropped tile: nobody can use it (its cap is 0). */
+const DEAD: ScenarioPoint = { id: '', type: 'plaza', x: NaN, y: 0, z: NaN, yaw: 0, cap: 0, src: 'synth' };
+
 export class ScenarioIndex {
-  readonly points: readonly ScenarioPoint[];
-  readonly used: Int32Array;
+  readonly points: ScenarioPoint[] = [];
+  used = new Int32Array(0);
   readonly cells = new Map<number, number[]>();
+  /** A streamed city's tiles: the range of point ids each holds (docs/contracts/city-tiles.md). */
+  private readonly tiles = new Map<string, { base: number; n: number }>();
+  private readonly freeRanges: { base: number; n: number }[] = [];
 
   constructor(data: ScenariosData | undefined) {
-    this.points = data?.points ?? [];
-    this.used = new Int32Array(this.points.length);
-    this.points.forEach((p, i) => {
+    if (data) this.addTile('', data);
+  }
+
+  /** Adds a tile's points at ids that do not move while it is loaded. */
+  addTile(key: string, data: ScenariosData) {
+    const n = data.points.length;
+    let base = this.points.length;
+    const fi = this.freeRanges.findIndex((f) => f.n >= n);
+    if (fi >= 0) {
+      base = this.freeRanges[fi].base;
+      this.freeRanges[fi].base += n;
+      this.freeRanges[fi].n -= n;
+      if (this.freeRanges[fi].n === 0) this.freeRanges.splice(fi, 1);
+    }
+    if (base + n > this.used.length) {
+      const u = new Int32Array(Math.max(base + n, Math.ceil(this.used.length * 1.5)));
+      u.set(this.used);
+      this.used = u;
+    }
+    data.points.forEach((p, k) => {
+      const i = base + k;
+      this.points[i] = p;
+      this.used[i] = 0;
+      const key2 = cellKey(Math.floor(p.x / CELL), Math.floor(p.z / CELL));
+      const a = this.cells.get(key2);
+      if (a) a.push(i); else this.cells.set(key2, [i]);
+    });
+    this.tiles.set(key, { base, n });
+  }
+
+  /** Drops a tile's points (they stay in the arrays as unusable until reused). */
+  removeTile(key: string) {
+    const r = this.tiles.get(key);
+    if (!r) return;
+    this.tiles.delete(key);
+    for (let i = r.base; i < r.base + r.n; i++) {
+      const p = this.points[i];
       const k = cellKey(Math.floor(p.x / CELL), Math.floor(p.z / CELL));
       const a = this.cells.get(k);
-      if (a) a.push(i); else this.cells.set(k, [i]);
-    });
+      if (a) {
+        const j = a.indexOf(i);
+        if (j >= 0) a.splice(j, 1);
+        if (a.length === 0) this.cells.delete(k);
+      }
+      this.points[i] = DEAD;
+      this.used[i] = 0;
+    }
+    if (r.n > 0) this.freeRanges.push({ base: r.base, n: r.n });
   }
 
   free(i: number): number {

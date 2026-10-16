@@ -26,10 +26,10 @@ import { buildVehicleModel } from './models';
 import { carAsset, LAMP_HEAD, LAMP_TAIL, type CarAsset, type CarMat, type CarPartName } from './carAssets';
 import { pickLod } from './carLod';
 import { BURNT, newCarUniforms, newGlass, newLamp, newPaint, patchCar } from './carMaterials';
+import { ownDepth } from './depthMaterials';
 
 type Part = 'paint' | 'detail' | 'glass' | 'lamp' | 'wheel';
 const PARTS: Part[] = ['paint', 'detail', 'glass', 'lamp', 'wheel'];
-const BODY_PARTS: Part[] = ['paint', 'detail', 'glass', 'lamp'];
 const MAX_PER_SET = 64;
 /** Instanced traffic is only drawn at LOD0 this close (m, at lodScale 1): the full model is 8k triangles. */
 export const TRAFFIC_LOD0 = 9;
@@ -168,6 +168,7 @@ export class TrafficInstances {
 
   constructor() {
     this.group.name = 'traffic-instances';
+    this.group.matrixAutoUpdate = false;
     const detail = patchCar(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 }), { kind: 'detail', instanced: true });
     const u = newCarUniforms();
     this.mats = {
@@ -213,6 +214,9 @@ export class TrafficInstances {
       lampB.setUsage(THREE.DynamicDrawUsage);
       geos.paint.setAttribute('aDirt', dirt);
       geos.lamp.setAttribute('aLampB', lampB);
+      // the four body parts sit where the car sits: one matrix buffer for them, written and uploaded once
+      const bodyMatrix = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_SET * 16), 16);
+      bodyMatrix.setUsage(THREE.DynamicDrawUsage);
       for (const p of PARTS) {
         const cap = p === 'wheel' ? MAX_PER_SET * WHEEL_COUNT : MAX_PER_SET;
         const m = new THREE.InstancedMesh(geos[p], this.mats[p], cap);
@@ -220,11 +224,14 @@ export class TrafficInstances {
         m.count = 0;
         m.visible = false;
         m.frustumCulled = false;
+        m.matrixAutoUpdate = false; // (identity: the instances carry the poses)
+        if (p !== 'wheel') m.instanceMatrix = bodyMatrix;
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         if (p === 'paint') {
           m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
           m.instanceColor.setUsage(THREE.DynamicDrawUsage);
         }
+        ownDepth(m);
         m.receiveShadow = p === 'paint' || p === 'detail';
         if (p === 'glass') m.renderOrder = 2;
         this.group.add(m);
@@ -285,7 +292,7 @@ export class TrafficInstances {
     tmpP.set(x, y, z);
     tmpQ.set(q.x, q.y, q.z, q.w);
     tmpM.compose(tmpP, tmpQ, one);
-    for (const p of BODY_PARTS) s.meshes[p].setMatrixAt(i, tmpM);
+    s.meshes.paint.setMatrixAt(i, tmpM); // (the body parts share this buffer)
     // paint: the car's colour, worn toward char
     tmpColor.setHex(color);
     const k = Math.min(0.55, wear * 0.55);
@@ -333,7 +340,7 @@ export class TrafficInstances {
           m.count = p === 'wheel' ? s.count * WHEEL_COUNT : s.count;
           m.visible = s.count > 0;
           if (!m.visible) continue;
-          m.instanceMatrix.needsUpdate = true;
+          if (p === 'paint' || p === 'wheel') m.instanceMatrix.needsUpdate = true;
           if (m.instanceColor) m.instanceColor.needsUpdate = true;
         }
         if (s.count > 0) {

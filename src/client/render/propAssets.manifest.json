@@ -1,0 +1,35 @@
+{
+  "_comment": "Written by tools/blender/build.mjs (npm run assets). Do not edit.",
+  "props": {
+    "furniture": {
+      "file": "assets/props/furniture.glb",
+      "hash": "b8df246d8f35",
+      "bytes": 38656,
+      "tris": [
+        260,
+        336,
+        280,
+        336,
+        200,
+        180
+      ]
+    },
+    "trees": {
+      "file": "assets/props/trees.glb",
+      "hash": "a668bd460dec",
+      "bytes": 196084,
+      "tris": [
+        956,
+        468,
+        998,
+        476,
+        794,
+        468,
+        728,
+        380,
+        1218,
+        448
+      ]
+    }
+  }
+}

@@ -32,10 +32,16 @@ export interface TileManifest {
   scenarios?: string;
   /** `props.json`: tree, street lamp and street furniture anchors (see the contract). */
   props?: string;
-  /** 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)" in the contract; absent in an older bake. */
+  /** `landmarks.json`: the landmarks of the city pack in the tile and the hero models that stand in it (see the contract). */
+  landmarks?: string;
+  /** 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)" in the contract, 3 when the buildings also carry `_LOOK` ("Building appearance (meshFormat 3)"); absent in an older bake. */
   meshFormat?: number;
   /** Names of the building kind ids (`_BLD.x`) and ground class ids (`_LAND.x`), in id order. */
   buildingKinds?: string[];
+  /** Names of the facade material ids (`_LOOK.x` on walls), the style ids (`_LOOK.y`) and the roof material ids (`_LOOK.x` on roofs), in id order. meshFormat 3. */
+  buildingMaterials?: string[];
+  buildingStyles?: string[];
+  roofMaterials?: string[];
   landClasses?: string[];
   spawns: {
     player: { x: number; y: number; z: number };

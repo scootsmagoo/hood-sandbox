@@ -26,7 +26,7 @@ describe.skipIf(!have)('collision on the baked Five Points tile', () => {
   it('has a solid pole for every signal head it draws, and a bench or shelter for every one of those', async () => {
     const sim = await realSim({ ambientPeds: false, traffic: 0 });
     const tile = sim.tile;
-    const props = collectProps(tile.lanes?.junctions, tile.scenarios?.points);
+    const props = collectProps(tile.lanes?.junctions, tile.scenarios?.points, tile.anchors);
     expect(props.filter((p) => p.kind === 'signal').length).toBeGreaterThan(100);
     expect(sim.physics.props.length).toBe(props.length);
     let missing = 0;

@@ -22,6 +22,7 @@ export function declareWallChannels(mb: MeshBuilder): MeshBuilder {
   mb.channel('wall', 4);
   mb.channel('bld', 4);
   mb.channel('bid', 2);
+  mb.channel('look', 4);
   mb.channel('ao', 1, [1]);
   return mb;
 }
@@ -31,6 +32,7 @@ export function declareRoofChannels(mb: MeshBuilder): MeshBuilder {
   mb.channel('uv', 2);
   mb.channel('bld', 4);
   mb.channel('bid', 2);
+  mb.channel('look', 4);
   mb.channel('srf', 4);
   mb.channel('ao', 1, [1]);
   return mb;
@@ -64,6 +66,8 @@ export interface PieceInput {
   hidden?: (a: V2, b: V2, outward: V2) => boolean;
   /** whether this piece may carry rooftop equipment */
   equipment?: boolean;
+  /** the dressing of the piece, for `_LOOK` (meshFormat 3): material and style ids, the material of the ground band, the crown in m, the roof material id and the provenance flags */
+  look?: { material: number; style: number; bandMaterial: number; crown: number; roofMaterial: number; flags: number };
 }
 
 export interface WriteEnv {
@@ -113,6 +117,10 @@ export function writePiece(env: WriteEnv, pc: PieceInput): PieceStats {
   const wallTopY = datum + wallTopH;
   const bld = [KIND_ID[pc.kind], pc.era, Math.min(255, pc.floors), Math.min(255, Math.round(pc.band * 10))];
   const bid = [pc.hash16, pc.flags];
+  const lk = pc.look ?? { material: 0, style: 0, bandMaterial: 0, crown: 0, roofMaterial: 0, flags: 0 };
+  // walls: (material, style, band material | crown in 2 m steps << 3, provenance); roofs: (roof material, style, wall material, provenance)
+  const lookWall = [lk.material, lk.style, (lk.bandMaterial & 7) | (Math.min(15, Math.round(lk.crown / 2)) << 3), lk.flags];
+  const lookRoof = [lk.roofMaterial, lk.style, lk.material, lk.flags];
 
   // ---- walls
   const edgeInfo: { a: V2; b: V2; n: V2; u0: number; len: number }[] = [];
@@ -140,6 +148,7 @@ export function writePiece(env: WriteEnv, pc: PieceInput): PieceStats {
         wallMb.set('wall', i0, ...wspan);
         wallMb.set('bld', i0, ...bld);
         wallMb.set('bid', i0, ...bid);
+        wallMb.set('look', i0, ...lookWall);
         wallMb.set('ao', i0, ao);
         return i0;
       };
@@ -159,6 +168,7 @@ export function writePiece(env: WriteEnv, pc: PieceInput): PieceStats {
     roofMb.set('uv', i, q32(u), q32(v));
     roofMb.set('bld', i, ...bld);
     roofMb.set('bid', i, ...bid);
+    roofMb.set('look', i, ...lookRoof);
     roofMb.set('srf', i, surface, ROOF_SHAPE_ID[pc.roof?.shape ?? 'flat'], equip, Math.round(slope));
     roofMb.set('ao', i, ao);
     return i;

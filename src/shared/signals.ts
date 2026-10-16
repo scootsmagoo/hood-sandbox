@@ -50,6 +50,8 @@ export const WALK_FLASH_S = 7;
 
 interface Timing {
   plan: SignalPlan;
+  /** The six stage lengths: green 0, amber, all red, green 1, amber, all red. */
+  len: readonly number[];
   cycle: number;
   offset: number;
   axis: number;
@@ -84,7 +86,7 @@ function timingOf(j: SignalJunction): Timing {
     const a = Math.atan2(l.dir[0], l.dir[1]);
     groups[i] = Math.abs(Math.sin(a - axis)) < Math.SQRT1_2 ? 0 : 1;
   });
-  t = { plan, cycle, offset, axis, groups };
+  t = { plan, len: [plan.green[0], plan.amber, plan.allRed, plan.green[1], plan.amber, plan.allRed], cycle, offset, axis, groups };
   cache.set(j, t);
   return t;
 }
@@ -110,10 +112,9 @@ const out: SignalPhase = { groups: ['red', 'red'], stage: 0, stageT: 0, stageLef
  * The phase at time `t` seconds. The returned object is reused by the next call; copy what you keep.
  */
 export function phaseOf(j: SignalJunction, t: number): SignalPhase {
-  const { plan, cycle, offset } = timingOf(j);
+  const { len, cycle, offset } = timingOf(j);
   let c = (t + offset) % cycle;
   if (c < 0) c += cycle;
-  const len = [plan.green[0], plan.amber, plan.allRed, plan.green[1], plan.amber, plan.allRed];
   let stage = 0;
   while (stage < 5 && c >= len[stage]) {
     c -= len[stage];

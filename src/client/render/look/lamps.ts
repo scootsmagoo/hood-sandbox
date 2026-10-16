@@ -9,22 +9,30 @@
  *           asphalt stays dark, which an additive card would flatten into a uniform orange disc; a weak
  *           additive twin gives the black asphalt a little light of its own. Lifted 14 cm with a polygon
  *           offset so a slope does not swallow it
- *   pole    a thin pole with an arm and a head (a short post with a lantern for the pedestrian lamps),
- *           lit like any other prop, by day as well
+ *   pole    the lamp post: the Blender models of tools/blender/props/furniture.py (cobra-head arm, post-top
+ *           lantern, highway mast: `lamp_cobra`, `lamp_post`, `lamp_mast`), scaled evenly to the anchor's pole
+ *           height and turned by its yaw, lit like any other prop, by day as well. Until the models have
+ *           loaded (or if they fail) the simple procedural poles below stand in. The glow and the pool are put
+ *           at the model's lamp head (its `<name>_anchor`), so they follow the model
+ *   sodium  the 8 lamps nearest a point ahead of the camera are handed to the car, person and tree materials
+ *           (`sodium.ts`), so they pick up the orange too
  *
  * **Where the lamps are.** The tile's `props.json` (docs/contracts/m1-tile-format.md) lists them
  * with a yaw (the way the arm points, toward the road), a pole height and a kind (0 cobra-head arm
  * lamp, 1 pedestrian post-top lamp, 2 tall highway mast). A tile without it gets a stand-in: along
  * every street that is not a motorway or a service road, one lamp every 34 m (44 m on small streets),
  * alternating sides, 1.1 m past the kerb, not within 11 m of a junction centre or 12 m of another
- * lamp (`placeLamps`, from `roads.json` and `junctions.json`). The poles are visual only: nothing in
- * the sim knows about them (the signal poles and bus stops are solid; these would need colliders).
+ * lamp (`placeLamps`, from `roads.json` and `junctions.json`). The poles of `props.json` are solid in the
+ * sim (shared/props.ts: the pole's radius is the model's); the stand-in lamps have no colliders.
  *
  * The lists are rebuilt when the camera has moved 15 m (at most every 0.4 s), and not at all by day.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { parseProps } from '../../../shared/tile';
+import { LAMP_MODELS, lampScale } from '../../../shared/props';
+import { parseProps, type PropsData } from '../../../shared/tile';
+import type { PropAssets } from '../propAssets';
+import { sodiumField, sodiumUniforms } from './sodium';
 import { U } from './uniforms';
 
 interface RoadJson {
@@ -272,7 +280,18 @@ export class StreetLamps {
   private level: 0 | 1 | 2 = 2;
   private readonly cobras: THREE.InstancedMesh;
   private readonly posts: THREE.InstancedMesh;
+  private readonly masts: THREE.InstancedMesh;
   private readonly poleMat: THREE.MeshStandardMaterial;
+  /** The lamp head of each model (cobra, post, mast) in the model's frame: x 0, y up, z along the arm. */
+  private heads: { y: number; z: number }[] = [
+    { y: POLE_H - 0.2, z: ARM - 0.1 },
+    { y: 4.25, z: 0 },
+    { y: POLE_H - 0.2, z: ARM - 0.1 },
+  ];
+  private modelled = false;
+  private sodium = new Float32Array(0);
+  private sodiumCool = 0;
+  private readonly sodiumCam = new THREE.Vector3(1e9, 0, 1e9);
   private readonly poolGeo: THREE.InstancedBufferGeometry;
   private readonly glowGeo: THREE.InstancedBufferGeometry;
   private readonly poolMat: THREE.ShaderMaterial;
@@ -298,12 +317,14 @@ export class StreetLamps {
     this.poleMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.25 });
     this.cobras = new THREE.InstancedMesh(cobraGeometry(), this.poleMat, maxPole);
     this.posts = new THREE.InstancedMesh(postGeometry(), this.poleMat, maxPole);
-    for (const m of [this.cobras, this.posts]) {
+    this.masts = new THREE.InstancedMesh(cobraGeometry(), this.poleMat, 24);
+    for (const m of [this.cobras, this.posts, this.masts]) {
       m.count = 0;
       m.frustumCulled = false;
     }
     this.cobras.name = 'lamp-poles';
     this.posts.name = 'lamp-posts';
+    this.masts.name = 'lamp-masts';
 
     const quad = new THREE.PlaneGeometry(2, 2);
     this.poolGeo = new THREE.InstancedBufferGeometry();
@@ -373,14 +394,50 @@ export class StreetLamps {
     glows.name = 'lamp-glows';
 
     this.group.name = 'street-lamps';
-    this.group.add(this.cobras, this.posts, pools, poolsAdd, glows);
+    this.group.add(this.cobras, this.posts, this.masts, pools, poolsAdd, glows);
     this.group.visible = false;
     scene.add(this.group);
   }
 
+  /** Swaps the stand-in poles for the Blender models, and puts the glow and the pool at their lamp heads. */
+  setModels(assets: PropAssets): void {
+    const f = assets.furniture;
+    const swap = (m: THREE.InstancedMesh, g: THREE.BufferGeometry) => {
+      m.geometry.dispose();
+      m.geometry = g.clone();
+    };
+    swap(this.cobras, f.lamp_cobra);
+    swap(this.posts, f.lamp_post);
+    swap(this.masts, f.lamp_mast);
+    this.heads = assets.lampHeads.map((h) => ({ y: h.y, z: h.z }));
+    this.modelled = true;
+    this.indexSodium();
+    this.lastCam.set(1e9, 0, 1e9);
+  }
+
   setLamps(lamps: LampSet): void {
     this.lamps = lamps;
+    this.indexSodium();
     this.lastCam.set(1e9, 0, 1e9);
+  }
+
+  /** The head of every lamp in world space and its reach, for the sodium light of cars, people and trees. */
+  private indexSodium(): void {
+    const L = this.lamps;
+    if (!L) return;
+    this.sodium = new Float32Array(L.count * 4);
+    const REACH = [18, 9, 24];
+    for (let i = 0; i < L.count; i++) {
+      const kind = Math.min(2, L.kind[i]);
+      const s = this.modelled ? lampScale(kind, L.h[i]) : 1;
+      const head = this.heads[kind];
+      const reach = kind === 1 ? 0 : head.z * s;
+      this.sodium[i * 4] = L.x[i] + Math.sin(L.inward[i]) * reach;
+      this.sodium[i * 4 + 1] = L.y[i] + (this.modelled ? head.y * s : kind === 1 ? L.h[i] + 0.25 : L.h[i] - 0.2);
+      this.sodium[i * 4 + 2] = L.z[i] + Math.cos(L.inward[i]) * reach;
+      this.sodium[i * 4 + 3] = REACH[kind];
+    }
+    this.sodiumCam.set(1e9, 0, 1e9);
   }
 
   setLevel(level: 0 | 1 | 2): void {
@@ -400,6 +457,16 @@ export class StreetLamps {
     this.glowMat.uniforms.uOn.value = on;
     this.poolMat.uniforms.uFogFar.value = fogFar;
     this.glowMat.uniforms.uFogFar.value = fogFar;
+    sodiumUniforms.uSodOn.value = on;
+    this.sodiumCool -= dt;
+    if (on > 0.001 && this.sodiumCool <= 0) {
+      const c = camera.position;
+      if ((c.x - this.sodiumCam.x) ** 2 + (c.z - this.sodiumCam.z) ** 2 > 1) {
+        this.sodiumCool = 0.1;
+        this.sodiumCam.copy(c);
+        sodiumField.select(this.sodium, this.lamps.count, camera, this.level === 1 ? 4 : 8);
+      }
+    }
     this.cool -= dt;
     const cam = camera.position;
     const moved = (cam.x - this.lastCam.x) ** 2 + (cam.z - this.lastCam.z) ** 2 > 225;
@@ -432,6 +499,7 @@ export class StreetLamps {
 
     let nCobra = 0;
     let nPost = 0;
+    let nMast = 0;
     let nPool = 0;
     let nGlow = 0;
     const pa = this.poolA.array as Float32Array;
@@ -447,16 +515,21 @@ export class StreetLamps {
       const h = L.h[i];
       const post = kind === 1;
       const mast = kind === 2;
-      if (d < rPole && nCobra + nPost < caps.pole) {
+      const mdl = this.modelled;
+      const us = mdl ? lampScale(kind, h) : 1;
+      const head = this.heads[Math.min(2, kind)];
+      if (d < rPole && nCobra + nPost + nMast < caps.pole + (mast ? 8 : 0)) {
         this.q.setFromAxisAngle(this.up, iy);
-        this.pos.set(L.x[i], L.y[i] - 0.1, L.z[i]);
-        this.sc.set(1, post ? h / 4 : h / POLE_H, 1);
+        this.pos.set(L.x[i], L.y[i] - (mdl ? 0.04 : 0.1), L.z[i]);
+        if (mdl) this.sc.setScalar(us);
+        else this.sc.set(1, post ? h / 4 : h / POLE_H, 1);
         this.m.compose(this.pos, this.q, this.sc);
         if (post) this.posts.setMatrixAt(nPost++, this.m);
+        else if (mast && mdl) this.masts.setMatrixAt(nMast++, this.m);
         else this.cobras.setMatrixAt(nCobra++, this.m);
       }
       if (nPool < caps.pool && d < rPool * (post ? 0.6 : 1)) {
-        const reach = post ? 0 : mast ? 4 : 3.2;
+        const reach = post ? 0 : mdl ? head.z * us + (mast ? 2.2 : 0.9) : mast ? 4 : 3.2;
         pa[nPool * 4] = L.x[i] + fx * reach;
         pa[nPool * 4 + 1] = L.y[i];
         pa[nPool * 4 + 2] = L.z[i] + fz * reach;
@@ -467,19 +540,21 @@ export class StreetLamps {
         nPool++;
       }
       if (nGlow < caps.glow && d < rGlow) {
-        const reach = post ? 0 : ARM - 0.1;
+        const reach = post ? 0 : mdl ? head.z * us : ARM - 0.1;
         gp[nGlow * 4] = L.x[i] + fx * reach;
-        gp[nGlow * 4 + 1] = L.y[i] + (post ? h + 0.25 : h - 0.2);
+        gp[nGlow * 4 + 1] = L.y[i] + (mdl ? head.y * us : post ? h + 0.25 : h - 0.2);
         gp[nGlow * 4 + 2] = L.z[i] + fz * reach;
         gp[nGlow * 4 + 3] = post ? 0.6 : mast ? 1.25 : 1;
         nGlow++;
       }
-      if (nCobra + nPost >= caps.pole && nPool >= caps.pool && nGlow >= caps.glow) break;
+      if (nCobra + nPost + nMast >= caps.pole && nPool >= caps.pool && nGlow >= caps.glow) break;
     }
     this.cobras.count = nCobra;
     this.posts.count = nPost;
+    this.masts.count = nMast;
     this.cobras.instanceMatrix.needsUpdate = true;
     this.posts.instanceMatrix.needsUpdate = true;
+    this.masts.instanceMatrix.needsUpdate = true;
     this.poolGeo.instanceCount = nPool;
     this.poolA.needsUpdate = true;
     this.poolB.needsUpdate = true;
@@ -489,12 +564,12 @@ export class StreetLamps {
 
   /** Counts for tests and diagnostics. */
   stats() {
-    return { lamps: this.lamps?.count ?? 0, poles: this.cobras.count + this.posts.count, pools: this.poolGeo.instanceCount, glows: this.glowGeo.instanceCount };
+    return { lamps: this.lamps?.count ?? 0, poles: this.cobras.count + this.posts.count + this.masts.count, pools: this.poolGeo.instanceCount, glows: this.glowGeo.instanceCount };
   }
 
   dispose(): void {
     this.group.removeFromParent();
-    for (const m of [this.cobras, this.posts]) {
+    for (const m of [this.cobras, this.posts, this.masts]) {
       m.geometry.dispose();
       m.dispose();
     }
@@ -511,9 +586,10 @@ export class StreetLamps {
  * The lamps of a tile: the anchors of `props.json` when the tile names one (`propsFile`) and it has
  * lamps, else the stand-in placement from `roads.json` and `junctions.json`. Null when neither loads.
  */
-export async function loadLamps(tileBase: string, propsFile: string | undefined, signal?: AbortSignal): Promise<LampSet | null> {
+export async function loadLamps(tileBase: string, propsFile: string | undefined, signal?: AbortSignal, loaded?: PropsData | null): Promise<LampSet | null> {
   try {
-    if (propsFile) {
+    if (loaded && loaded.lamps.length > 0) return lampsFromProps(loaded.lamps);
+    if (propsFile && loaded === undefined) {
       const pr = await fetch(new URL(propsFile, tileBase), { signal });
       if (pr.ok) {
         const props = parseProps(await pr.json());

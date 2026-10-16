@@ -21,6 +21,10 @@
  *   wrecks   20  three cars (a sedan, a pickup, a police cruiser) beside the player are crashed (dents, bumpers off, the bonnet, windows,
  *                one blown up) through the client's event path, then removed: their models, dented geometry copies and damage state go
  *                with them, the fallen bumpers stay in a capped pool. Needs the sim on the main thread: `--query transport=loopback`.
+ *   stream   12  a streamed city (`?tiles=fixture:3`, the sim on the main thread; the page is booted again for it, so it runs last): the
+ *                player is sent 1.6 km away and back, so most of the near tiles are dropped and loaded again in the sim (colliders,
+ *                graphs, seams) and on the client (tile meshes, far skyline meshes, the city-wide trees, lamps, signal heads and
+ *                minimap atlases). The sim's colliders and live graph edges must come back to the same counts every cycle.
  *   ragdoll  20  eight people are thrown (killed or knocked down), drawn as ragdolls, then removed: the sim's bodies and joints and the
  *                client's pooled ragdoll figures must not grow. Needs the sim on the main thread: `--query transport=loopback`.
  * Counted after each cycle: JS heap, renderer geometries, textures, programs, materials and objects in
@@ -40,8 +44,8 @@ const args = parseArgs();
 const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
-const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire').split(',').filter(Boolean);
-const CYCLES = { reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20 };
+const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire,stream').split(',').filter(Boolean);
+const CYCLES = { stream: 12, reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20 };
 const WARM = 2;
 /** Longest a single cycle may take before it is counted as stuck. */
 const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
@@ -53,6 +57,7 @@ const TOL = {
   // The frozen phases stay exact, and the soak watches the long run.
   crowd: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   drive: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
+  stream: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
   default: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
 };
 const COUNTERS = ['geometries', 'textures', 'programs', 'materials', 'objects', 'entities', 'listeners', 'domNodes'];
@@ -246,7 +251,43 @@ const ACTIVITIES = {
       await b.parkAndExit();
     });
   },
+  /** Away and back across the streamed fixture city: tiles drop and load again in the sim and on the client. */
+  async stream() {
+    const counts = await page.evaluate(async () => {
+      const h = window.__hood;
+      const S = h.game.transport.host?.simulation;
+      if (!S?.stream) throw new Error('the stream phase needs the streamed city with the sim on the main thread');
+      const settle = async () => {
+        for (let i = 0; i < 400; i++) {
+          await window.__h.sleep(50);
+          if (S.stream.settled && h.stream.settled && !S.playerHeld) return;
+        }
+      };
+      const go = async (x, z) => {
+        const ped = S.registry.get(S.playerPedId);
+        if (ped.vehicleId) S.ejectPed(ped);
+        ped.controller.teleport(x, S.groundAt(x, z) + 0.1, z);
+        await window.__h.sleep(300);
+        await settle();
+      };
+      const home = S.tile.manifest.spawns.player;
+      await go(1300, -900);
+      await go(home.x, home.z);
+      await window.__h.sleep(400);
+      let live = 0;
+      for (let e = 0; e < S.stream.lanes.count; e++) live += S.stream.lanes.alive[e];
+      return { colliders: S.stream.stats().colliders, lanes: live, walk: S.stream.walk.linkCount, tiles: S.stream.readyIds().join(','), drawn: h.stream.builtIds().join(',') };
+    });
+    streamWorld.push(counts);
+  },
 };
+/** The stream phase's sim after each cycle: back home, the same tiles, colliders and graph edges. */
+const streamWorld = [];
+async function bootStream() {
+  await boot(page, server.base, `graphics=${profile.tier}&tiles=fixture:3&transport=loopback&timescale=0&pedbudget=0&traffic=0${args.query ? `&${args.query}` : ''}`);
+  await page.waitForTimeout(3000);
+  await page.keyboard.press('Shift');
+}
 
 // The street is part of the scene: cars and people come and go, and each car is a few dozen scene objects and a few geometries. The
 // tile, the player's own car and the tier switches are what these phases measure, so they run with the population frozen (nobody new is
@@ -254,10 +295,11 @@ const ACTIVITIES = {
 // `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
 const FROZEN = { pedBudget: 0, traffic: 0 };
 const LIVE = { pedBudget: 40, traffic: 0.75 };
-const POPULATION = { reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN, wrecks: FROZEN };
+const POPULATION = { stream: FROZEN, reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN, wrecks: FROZEN };
 /** The ragdoll phase's physics world after each cycle: its bodies and joints must come back to the same count. */
 const ragdollWorld = [];
-const setPopulation = (c) => page.evaluate((c) => window.__hood.game.transport.config?.(c), c);
+// (the people drawn as skinned actors are held as they are too, so a walker crossing the near range is not counted as growth)
+const setPopulation = (c) => page.evaluate((c) => { window.__hood.game.views.peds.pinned = c.pedBudget === 0; return window.__hood.game.transport.config?.(c); }, c);
 let population = null;
 const results = [];
 for (const phase of phases) {
@@ -265,6 +307,10 @@ for (const phase of phases) {
   if (!act) { console.log(`unknown phase ${phase}`); continue; }
   const n = Math.max(6, Math.round(CYCLES[phase] * scale));
   console.log(`\n== ${phase}: ${n} cycles after ${WARM} warm-up`);
+  if (phase === 'stream') {
+    await bootStream();
+    population = FROZEN;
+  }
   const want = POPULATION[phase] ?? LIVE;
   if (want !== population) {
     population = want;
@@ -315,6 +361,12 @@ for (const phase of phases) {
     const a = ragdollWorld[0], b = ragdollWorld[ragdollWorld.length - 1];
     console.log(`  ragdolls active at the peak ${Math.max(...ragdollWorld.map((r) => r.active))} · bodies ${a.bodies} -> ${b.bodies} · joints ${a.joints} -> ${b.joints}`);
     if (b.joints > a.joints || b.bodies > a.bodies + 4) grew.push(`physics bodies ${a.bodies} -> ${b.bodies}, joints ${a.joints} -> ${b.joints}`);
+  }
+  if (phase === 'stream' && streamWorld.length >= 3) {
+    // (the first cycle is a warm-up: from boot the drop ring keeps less than after a lap)
+    const a = streamWorld[1], b = streamWorld[streamWorld.length - 1];
+    console.log(`  sim: tiles ${b.tiles} · colliders ${a.colliders} -> ${b.colliders} · live lanes ${a.lanes} -> ${b.lanes} · walk seam links ${a.walk} -> ${b.walk} · drawn ${b.drawn}`);
+    if (a.tiles !== b.tiles || a.colliders !== b.colliders || a.lanes !== b.lanes || a.walk !== b.walk) grew.push(`sim stream ${JSON.stringify(a)} -> ${JSON.stringify(b)}`);
   }
   results.push({ phase, cycles: n, first, last, grew });
   console.log(`  ${grew.length ? 'GROWTH: ' + grew.join(', ') : 'flat'}`);

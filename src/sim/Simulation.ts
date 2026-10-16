@@ -45,6 +45,9 @@ import { AmbientPeds } from './peds/AmbientPeds';
 import { WalkGraph } from './peds/graph';
 import { GENERIC_POPULATION, loadPopulationForTile, type PopulationData } from './peds/population';
 import { ScenarioIndex } from './peds/scenarios';
+import { TileStreamer, type StreamOptions } from './stream/TileStreamer';
+import type { TileSource } from './stream/TileSource';
+import type { Rect } from '../shared/city';
 
 export interface SimOptions {
   seed: number;
@@ -81,6 +84,11 @@ export interface SimOptions {
   trafficPopulation?: TrafficPopulation;
   /** Start time and pace of the game clock (default Wednesday 14:00, half a game minute per real second). */
   clock?: ClockOptions;
+  /**
+   * A streamed city (docs/contracts/city-tiles.md): the streamer, already preloaded round the spawn (`Simulation.createCity` does
+   * both). `tile` is then the streamer's composite tile.
+   */
+  stream?: TileStreamer;
 }
 
 /** Where the player is while the WASTED or BUSTED screen runs. */
@@ -132,6 +140,12 @@ export class Simulation {
   readonly ambient: AmbientPeds | null = null;
   /** Ambient traffic, when the tile has a lane graph and a density was asked for. */
   readonly traffic: TrafficManager | null = null;
+  /** The tile streamer of a streamed city, or null for a single tile. */
+  readonly stream: TileStreamer | null;
+  /** Cars frozen because their tile dropped (the player's own), thawed when it is back. */
+  private readonly frozen = new Set<EntityId>();
+  /** The player held in the air because the ground under them is not loaded yet (a respawn far away). */
+  private held: { pedId: EntityId; vehicleId: EntityId } | null = null;
   /** Listeners that see every event as it is emitted. */
   private readonly eventTaps: ((e: SimEvent) => void)[] = [];
   /** Bodies that are ragdolls (sim/ragdoll): knocked down, thrown or dead. */
@@ -144,7 +158,8 @@ export class Simulation {
 
   constructor(R: typeof RAPIER, opts: SimOptions) {
     this.rng = new Rng(opts.seed);
-    this.physics = new PhysicsWorld(R, opts.tile);
+    this.stream = opts.stream ?? null;
+    this.physics = opts.stream ? opts.stream.pw : new PhysicsWorld(R, opts.tile);
     this.start = opts.start ?? (opts.startAtVehicle ? 'car' : 'spawn');
     this.driverMood = opts.driverMood;
     this.hasDriver = opts.driver ?? this.start !== 'car';
@@ -161,25 +176,47 @@ export class Simulation {
     this.ragdolls = new RagdollManager(this);
     this.eventTaps.push((e) => this.onRagdollEvent(e));
     this.spawnWorld(opts.parkedCars ?? 6, opts.bystanders ?? 0, opts.armour ?? 0);
-    const walk = opts.tile.paths ? new WalkGraph(opts.tile.paths) : undefined;
+    const st = this.stream;
+    const walk = st ? st.walk : opts.tile.paths ? new WalkGraph(opts.tile.paths) : undefined;
     if (opts.ambientPeds && walk) {
       this.ambient = new AmbientPeds(this, {
         graph: walk,
-        scenarios: new ScenarioIndex(opts.tile.scenarios),
+        scenarios: new ScenarioIndex(st ? undefined : opts.tile.scenarios),
         population: opts.population ?? GENERIC_POPULATION,
-        junctions: opts.tile.junctions,
-        roads: opts.tile.roads,
+        junctions: st ? undefined : opts.tile.junctions,
+        roads: st ? undefined : opts.tile.roads,
         budget: opts.pedBudget,
+        stream: !!st,
       });
+      if (st) st.listen(this.ambient.streamListener());
     }
-    if ((opts.traffic ?? 0) > 0 && opts.tile.lanes) {
-      const graph = new LaneGraph(opts.tile.lanes);
-      if (graph.usable) {
+    if ((opts.traffic ?? 0) > 0 && (st || opts.tile.lanes)) {
+      const graph = st ? st.lanes : new LaneGraph(opts.tile.lanes!);
+      if (st || graph.usable) {
         this.traffic = new TrafficManager(this, graph, opts.trafficPopulation ?? GENERIC_TRAFFIC_POPULATION, Math.min(1, opts.traffic!), walk);
         this.eventTaps.push((e) => this.traffic?.onEvent(e));
+        if (st) st.listen(this.traffic.streamListener());
       }
     }
+    if (st) {
+      st.listen(this.police.streamListener());
+      st.listen({ tileDropping: (_k, rect) => this.dropOn(rect), tileAdded: () => this.thaw() });
+      // everyone is listening: the tiles' parsed files can go once they are in
+      st.releaseData();
+    }
     this.announce = true;
+  }
+
+  /**
+   * A sim of a streamed city: the streamer over `source`, preloaded round the city's spawn, then the sim on it. The player starts at
+   * the index's spawn; the tiles follow them from there.
+   */
+  static async createCity(opts: Omit<SimOptions, 'tile' | 'stream'> & { source: TileSource; streamOptions?: StreamOptions }): Promise<Simulation> {
+    const R = await initRapier();
+    const stream = new TileStreamer(R, opts.source, opts.streamOptions);
+    const sp = opts.source.index.spawn.player;
+    await stream.preload(sp.x, sp.z);
+    return Simulation.create({ ...opts, tile: stream.composite, stream });
   }
 
   static async create(opts: SimOptions): Promise<Simulation> {
@@ -456,7 +493,93 @@ export class Simulation {
     this.tick++;
     this.clock.step(this.dt);
     for (const s of this.systems) s.fixedUpdate(this, this.dt);
+    if (this.stream) this.streamStep();
     if (this.toDespawn.size) this.flushDespawns();
+  }
+
+  /** A streamed city's tick: the tiles round the player (their jobs within the budget), and the player held over unloaded ground. */
+  private streamStep() {
+    const st = this.stream!;
+    const ped = this.registry.get(this.playerPedId) as PedEntity;
+    const veh = ped.vehicleId ? (this.registry.get(ped.vehicleId) as VehicleEntity | undefined) : undefined;
+    const p = veh ? veh.car.pose() : { x: ped.controller.x, z: ped.controller.z };
+    st.update(this.tick, p.x, p.z);
+    for (const e of st.events.splice(0)) this.emit({ type: 'stream:tile', tick: this.tick, id: e.id, state: e.state });
+    const solid = st.solidAt(p.x, p.z);
+    if (!solid && !this.held) {
+      // hold the player (or their car) where they are until the ground under them is in
+      this.held = { pedId: ped.id, vehicleId: veh?.id ?? 0 };
+      if (veh) veh.car.body.setEnabled(false);
+      else ped.controller.setEnabled(false);
+    } else if (solid && this.held) {
+      const h = this.held;
+      this.held = null;
+      const hv = h.vehicleId ? (this.registry.get(h.vehicleId) as VehicleEntity | undefined) : undefined;
+      if (hv) {
+        hv.car.body.setEnabled(true);
+        const q = hv.car.pose();
+        hv.car.teleport(q.x, Math.max(q.y, this.groundAt(q.x, q.z) + this.restHeight(hv.car.h) + 0.05), q.z, hv.car.yaw);
+      } else {
+        const hp = this.registry.get(h.pedId) as PedEntity | undefined;
+        if (hp) {
+          hp.controller.setEnabled(true);
+          hp.controller.teleport(hp.controller.x, Math.max(hp.controller.y, this.groundAt(hp.controller.x, hp.controller.z) + 0.1), hp.controller.z);
+        }
+      }
+    }
+  }
+
+  /** Whether the player is being held over ground that is not loaded yet. */
+  get playerHeld(): boolean {
+    return this.held !== null;
+  }
+
+  /**
+   * A tile is dropping: what is left on it goes (the systems have taken their own), except the player's own cars, which are frozen
+   * until their tile is back.
+   */
+  private dropOn(r: Rect) {
+    const inside = (x: number, z: number) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+    const player = this.registry.get(this.playerPedId) as PedEntity;
+    for (const e of this.registry.values()) {
+      if (e instanceof VehicleEntity) {
+        const p = e.car.pose();
+        if (!inside(p.x, p.z) || e.id === player.vehicleId) continue;
+        if (e.id === this.vehicleId || e.playerOwned) {
+          if (!this.frozen.has(e.id)) {
+            this.frozen.add(e.id);
+            e.car.body.setEnabled(false);
+          }
+        } else this.despawn(e.id);
+      } else if (e instanceof PedEntity) {
+        if (e.id === player.id) continue;
+        const c = e.controller;
+        if (!inside(c.x, c.z)) continue;
+        if (e.vehicleId && this.frozen.has(e.vehicleId)) continue;
+        if (e.vehicleId) {
+          const v = this.registry.get(e.vehicleId) as VehicleEntity | undefined;
+          if (v && (v.id === this.vehicleId || v.playerOwned)) continue;
+        }
+        this.despawn(e.id);
+      } else if (e instanceof SpikeStripEntity) {
+        if (inside(e.x, e.z)) this.despawn(e.id);
+      }
+    }
+  }
+
+  /** Frozen cars whose ground is back wake up. */
+  private thaw() {
+    for (const id of [...this.frozen]) {
+      const v = this.registry.get(id) as VehicleEntity | undefined;
+      if (!v) {
+        this.frozen.delete(id);
+        continue;
+      }
+      const p = v.car.pose();
+      if (!this.stream!.solidAt(p.x, p.z)) continue;
+      this.frozen.delete(id);
+      v.car.body.setEnabled(true);
+    }
   }
 
   /** Puts a ped that is sitting in a car onto the ground beside it. */
@@ -530,6 +653,8 @@ export class Simulation {
     const ped = this.registry.get(this.players.get(slot)!.pedId) as PedEntity;
     if (ped.vehicleId) this.ejectPed(ped);
     const sp = this.tile.manifest.spawns.player;
+    // (a streamed city loads the spawn's tiles; the player is held there until they are in)
+    this.stream?.checkNow(sp.x, sp.z);
     const y = Math.max(sp.y, this.groundAt(sp.x, sp.z)) + 0.1;
     ped.controller.teleport(sp.x, y, sp.z);
     ped.health = MAX_HEALTH;

@@ -1,6 +1,6 @@
 /**
  * The Rapier world and its static geometry: the heightfield and the collision trimesh of a tile, the
- * street furniture (signal poles, benches, bus stops: `shared/props.ts`), and the questions about
+ * street furniture (signal poles, benches, bus stops, and the street lamps, trees' trunks, hydrants, bins and bollards of `props.json`: `shared/props.ts`), and the questions about
  * where a person can stand.
  */
 import { FootprintIndex } from '../shared/footprints';
@@ -31,26 +31,56 @@ const TEST = { radius: PED.radius - 0.05, halfHeight: 0.38, lift: 0.15 } as cons
 /** The capsule swept along a path to see whether people can walk it: a little over a person's height, so only a way they fit is open. */
 const SWEEP = { radius: PED.radius - 0.02, halfHeight: 0.5, lift: 0.12 } as const;
 
+/** The props that come from the anchors of `props.json`: their boxes are merged into compound colliders by `MERGE_CELL` m cells. */
+const MERGED = new Set<string>(['lamp', 'tree', 'hydrant', 'bin', 'bollard']);
+const MERGE_CELL = 40;
+
 export class PhysicsWorld {
   readonly world: RAPIER.World;
-  /** Lowest terrain sample. */
-  readonly minHeight: number;
-  /** The heightfield: left out of the tests that ask about walls and furniture. */
-  readonly terrain: RAPIER.Collider;
+  /** Lowest terrain sample (of the loaded tiles, in a streamed city). */
+  minHeight: number;
+  /** The heightfield: left out of the tests that ask about walls and furniture. (A streamed city has one per tile: see `notTerrain`.) */
+  readonly terrain: RAPIER.Collider | undefined;
+  /**
+   * A streamed city (`stream: true`; docs/contracts/city-tiles.md) has a heightfield per tile, so the queries that leave the ground
+   * out filter by this instead of `terrain`. Undefined for a single tile.
+   */
+  notTerrain: ((c: RAPIER.Collider) => boolean) | undefined = undefined;
+  /** In a streamed city, the ground height under a point (the tile there); `src/sim/stream/StreamPhysics.ts` sets it. */
+  heightSource: ((x: number, z: number) => number) | null = null;
   /** The footprints of the buildings (empty when the tile does not say which triangles are buildings). */
   readonly footprints: FootprintIndex;
+  /**
+   * The collision mesh's trimesh colliders: which triangle of `collisionIndices` each one's triangle 0 is, and whether it is the
+   * copy a car's hull meets (see `addCollisionMesh`).
+   */
+  readonly staticMeshes: { collider: RAPIER.Collider; firstTriangle: number; forCars: boolean }[] = [];
   /** The street furniture made solid. */
-  readonly props: readonly PropInstance[];
+  readonly props: PropInstance[];
   private readonly testShapes = new Map<number, RAPIER.Capsule>();
   /** The solid boxes of the props by 8 m grid cell, for the cheap move's clearance. */
-  private readonly propCells = new Map<number, WorldBox[]>();
+  readonly propCells = new Map<number, WorldBox[]>();
 
   constructor(
     readonly R: Rapier,
     readonly tile: TileData,
+    /**
+     * `fixInternalEdges: false` builds the ground and the trimesh without the internal-edge fix (only the ground audit's
+     * before-and-after uses it). `stream: true` builds nothing of the tile: a streamed city adds its tiles with `StreamPhysics`,
+     * and `tile` is then the composite the streamer keeps (its manifest, the union of the loaded tiles' roads and so on).
+     */
+    private readonly opts: { fixInternalEdges?: boolean; stream?: boolean; footprints?: FootprintIndex } = {},
   ) {
     this.world = new R.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = SIM_DT;
+    if (opts.stream) {
+      this.minHeight = 0;
+      this.terrain = undefined;
+      this.footprints = opts.footprints ?? new FootprintIndex(new Float32Array(0), new Uint32Array(0), 0);
+      this.props = [];
+      this.world.step();
+      return;
+    }
     let lo = Infinity;
     for (const h of tile.heights) if (h < lo) lo = h;
     this.minHeight = lo;
@@ -58,7 +88,7 @@ export class PhysicsWorld {
     this.addCollisionMesh();
     const bt = tile.manifest.collision.buildingTriangles;
     this.footprints = new FootprintIndex(tile.collisionPositions, tile.collisionIndices, bt ?? 0);
-    this.props = collectProps(tile.lanes?.junctions, tile.scenarios?.points);
+    this.props = collectProps(tile.lanes?.junctions, tile.scenarios?.points, tile.anchors);
     this.addProps();
     // Build the query structures before anything casts a ray.
     this.world.step();
@@ -67,6 +97,12 @@ export class PhysicsWorld {
   /**
    * Rapier stores a heightfield column-major with rows along Z and columns along X, centred on its
    * origin, so the tile's row-major samples are transposed and the collider is moved to the tile's centre.
+   *
+   * The ground is built twice. A car's hull meets a copy with FIX_INTERNAL_EDGES (a contact on a triangle takes its neighbours'
+   * normals into account): without it the hull sliding over the ground was caught by the edges between cells, a "ghost" contact
+   * whose push launched cars on flat roads (docs/ground-audit.md). Everything else (people, ragdolls, every query and ray, the
+   * wheel rays too) meets a plain copy: the fix also changes how a character's capsule stands on the ground, and the people's
+   * tuning was made without it. `fixInternalEdges: false` builds the plain one only, for everything (the physics before the fix).
    */
   private addHeightfield(): RAPIER.Collider {
     const { cols, rows, cellSize, minX, minZ } = this.tile.manifest.heightmap;
@@ -75,17 +111,29 @@ export class PhysicsWorld {
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cm[c * rows + r] = src[r * cols + c];
     const width = (cols - 1) * cellSize;
     const depth = (rows - 1) * cellSize;
-    const desc = this.R.ColliderDesc.heightfield(rows - 1, cols - 1, cm, { x: width, y: 1, z: depth })
-      .setTranslation(minX + width / 2, 0, minZ + depth / 2)
-      .setFriction(0.9)
-      .setCollisionGroups(GROUPS.world);
-    return this.world.createCollider(desc);
+    const fix = this.opts.fixInternalEdges !== false;
+    const make = (flags: RAPIER.HeightFieldFlags | undefined, groups: number) =>
+      this.world.createCollider(
+        this.R.ColliderDesc.heightfield(rows - 1, cols - 1, cm, { x: width, y: 1, z: depth }, flags)
+          .setTranslation(minX + width / 2, 0, minZ + depth / 2)
+          .setFriction(0.9)
+          .setCollisionGroups(groups),
+      );
+    if (fix) make(this.R.HeightFieldFlags.FIX_INTERNAL_EDGES, GROUPS.carGround);
+    return make(undefined, fix ? GROUPS.worldNoCars : GROUPS.world);
   }
 
-  /** Street furniture: one fixed box collider for each solid box of each prop, exactly the boxes the client draws. */
+  /**
+   * Street furniture: one fixed box collider for each solid box of each prop, exactly the boxes the client draws. The
+   * anchors of `props.json` (6,000 lamp poles, trunks, hydrants, bins and bollards in the tile) are merged into one
+   * compound collider per 40 m cell instead: the same boxes, but 150 broad-phase entries rather than 6,400 (the world
+   * step cost 0.6 ms with them separate against 0.25 ms without; merged, see docs/perf.md).
+   */
   private addProps() {
     const R = this.R;
+    const cells = new Map<number, { shapes: RAPIER.Shape[]; at: RAPIER.Vector[]; rot: RAPIER.Rotation[] }>();
     for (const prop of this.props) {
+      const merged = MERGED.has(prop.kind);
       for (const b of worldSolids(prop)) {
         // by the cells its bounding circle touches
         const reach = Math.hypot(b.hx, b.hz);
@@ -98,29 +146,50 @@ export class PhysicsWorld {
           }
         }
         const half = b.yaw / 2;
-        this.world.createCollider(
-          R.ColliderDesc.cuboid(b.hx, b.hy, b.hz)
-            .setTranslation(b.cx, b.cy, b.cz)
-            .setRotation({ x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) })
-            .setFriction(0.5)
-            .setCollisionGroups(GROUPS.prop),
-        );
+        const rot = { x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) };
+        if (merged) {
+          const k = Math.floor(b.cx / MERGE_CELL) * 65536 + Math.floor(b.cz / MERGE_CELL);
+          let c = cells.get(k);
+          if (!c) cells.set(k, (c = { shapes: [], at: [], rot: [] }));
+          c.shapes.push(new R.Cuboid(b.hx, b.hy, b.hz));
+          c.at.push({ x: b.cx, y: b.cy, z: b.cz });
+          c.rot.push(rot);
+          continue;
+        }
+        this.world.createCollider(R.ColliderDesc.cuboid(b.hx, b.hy, b.hz).setTranslation(b.cx, b.cy, b.cz).setRotation(rot).setFriction(0.5).setCollisionGroups(GROUPS.prop));
       }
     }
+    for (const c of cells.values()) this.world.createCollider(R.ColliderDesc.compound(c.shapes, c.at, c.rot).setFriction(0.5).setCollisionGroups(GROUPS.prop));
   }
 
+  /**
+   * The collision mesh: the buildings (the first `buildingTriangles`) as one trimesh, and the decks and piers as another, built
+   * twice like the ground (see `addHeightfield`): a car's hull meets a copy with FIX_INTERNAL_EDGES, so it is not kicked by the
+   * edges between a deck's triangles; everything else meets a plain one. The walls stay plain for cars too: the fix changes how
+   * a hull bounces off a flat wall (the crash restitution the handling is tuned to). `staticMeshes` lists them all.
+   */
   private addCollisionMesh() {
     const { collisionPositions, collisionIndices } = this.tile;
     if (collisionIndices.length === 0) return;
-    const desc = this.R.ColliderDesc.trimesh(collisionPositions, collisionIndices)
-      .setFriction(0.5)
-      .setCollisionGroups(GROUPS.world);
-    this.world.createCollider(desc);
+    // (a tile that does not say which triangles are buildings, the procedural test ground among them, is all walls)
+    const bt = Math.min(this.tile.manifest.collision.buildingTriangles ?? Infinity, collisionIndices.length / 3);
+    const fix = this.opts.fixInternalEdges !== false;
+    const make = (from: number, to: number, flags: RAPIER.TriMeshFlags | undefined, groups: number, forCars: boolean) => {
+      if (to <= from) return;
+      const desc = this.R.ColliderDesc.trimesh(collisionPositions, collisionIndices.subarray(from * 3, to * 3), flags)
+        .setFriction(0.5)
+        .setCollisionGroups(groups);
+      this.staticMeshes.push({ collider: this.world.createCollider(desc), firstTriangle: from, forCars });
+    };
+    const n = collisionIndices.length / 3;
+    make(0, bt, undefined, GROUPS.world, true);
+    make(bt, n, undefined, fix ? GROUPS.worldNoCars : GROUPS.world, !fix);
+    if (fix) make(bt, n, this.R.TriMeshFlags.FIX_INTERNAL_EDGES, GROUPS.carGround, true);
   }
 
   /** Terrain height under (x, z) from the heightmap; buildings are not considered. */
   groundHeight(x: number, z: number): number {
-    return heightAt(this.tile, x, z);
+    return this.heightSource ? this.heightSource(x, z) : heightAt(this.tile, x, z);
   }
 
   /** Distance to the nearest wall within a metre (Infinity if none), negative inside a building: what a gliding person checks. */
@@ -171,6 +240,7 @@ export class PhysicsWorld {
       groups,
       this.terrain,
       o.ignoreBody,
+      this.notTerrain,
     );
     return hit;
   }
@@ -205,6 +275,8 @@ export class PhysicsWorld {
         undefined,
         GROUPS.staticQuery,
         this.terrain,
+        undefined,
+        this.notTerrain,
       );
       if (hit) return false;
     }

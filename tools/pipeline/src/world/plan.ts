@@ -7,7 +7,9 @@ import polygonClipping from 'polygon-clipping';
 import type { V2 } from '../geo.js';
 import { ringBounds } from '../geo.js';
 import type { Building, PartIn } from './buildings.js';
-import { bandFor, classifyBuilding, floorsFor, styleFor, type BuildingKind, type Classification } from './classify.js';
+import { bandFor, classifyBuilding, floorsFor, paletteColour, styleOf, type BuildingKind, type Classification } from './classify.js';
+import { LOOK_FLAG, MATERIAL_ID, ROOF_MATERIAL_ID, STYLE_ID, parseColour, parseMaterial, plausibleWallColour, type Material } from './appearance.js';
+import type { BuildingContext } from './context.js';
 import type { PieceInput } from './buildingMesh.js';
 import { FLAG } from './buildingMesh.js';
 import { normaliseRoofShape, planDome, planPitchedRoof, type RoofPlan, type RoofShape } from './roofs.js';
@@ -141,7 +143,7 @@ export function chooseRoof(rings: V2[][], height: number, kind: BuildingKind, da
     // defaults by kind: Atlanta's downtown is flat-roofed, its houses, sheds and small churches are not
     switch (kind) {
       case 'house': shape = area <= 650 ? (hash < 0.55 ? 'gabled' : 'hipped') : null; break;
-      case 'small': shape = area >= 20 && area <= 400 ? (hash < 0.45 ? 'gabled' : hash < 0.7 ? 'skillion' : null) : null; break;
+      case 'small': shape = area >= 20 && area <= 400 && height <= 8 ? (hash < 0.45 ? 'gabled' : hash < 0.7 ? 'skillion' : null) : null; break;
       case 'religious': shape = height <= 30 && area <= 1500 ? 'gabled' : null; break;
       case 'residential': shape = height <= 12 && area <= 700 ? (hash < 0.5 ? 'gabled' : 'hipped') : null; break;
       case 'retail': case 'brick': case 'generic': shape = height <= 8 && area <= 260 && hash < 0.3 ? 'gabled' : null; break;
@@ -162,9 +164,8 @@ export function chooseRoof(rings: V2[][], height: number, kind: BuildingKind, da
   return planPitchedRoof(outer, shape, obb, { slopeDeg, maxRise });
 }
 
-export function planBuilding(bd: Building): PlannedBuilding {
-  const cls = classifyBuilding(bd);
-  const style = styleFor(bd, cls.kind);
+export function planBuilding(bd: Building, ctx?: BuildingContext): PlannedBuilding {
+  const cls = classifyBuilding(bd, ctx);
   const hash = hash01(bd.id + 'r');
   const hash16 = Math.floor(hash01(bd.id + 'h') * 65535);
   const raws: RawPiece[] = splitPieces(bd) ?? [{ polys: [bd.rings.map(closed)], baseH: bd.minHeight && bd.minHeight > 3 ? bd.minHeight : 0, topH: bd.height }];
@@ -196,10 +197,21 @@ export function planBuilding(bd: Building): PlannedBuilding {
         /* keep what was covered */
       }
     }
-    // pieces that are not the tallest of a glass tower are its concrete podium
+    // pieces that are not the tallest of a glass tower are its podium (stone or concrete, not curtain wall)
     let kind = cls.kind;
-    if (kind === 'glass' && r.topH < maxTop * 0.5) kind = 'office';
+    let material: Material = cls.material;
+    let podiumOfGlass = false;
+    if (kind === 'glass' && r.topH < maxTop * 0.5) {
+      kind = 'office';
+      material = cls.bandMaterial === 'metal' || cls.bandMaterial === 'glass' ? 'concrete' : cls.bandMaterial;
+      podiumOfGlass = true;
+    }
     const piece = r.part;
+    // a part with a facade of its own (Overture says so) is dressed as it says
+    const partMaterial = parseMaterial(piece?.facadeMaterial);
+    if (partMaterial && !podiumOfGlass && !(cls.kind === 'glass' && partMaterial !== 'glass')) material = partMaterial;
+    const partColour = plausibleWallColour(parseColour(piece?.facadeColor), material === 'glass');
+    const crown = r.topH >= maxTop - 0.5 && !r.residual ? cls.crown : 0;
     let k = 0;
     for (const poly of geom) {
       if (polyAreaOf(poly) < 6) continue;
@@ -209,9 +221,11 @@ export function planBuilding(bd: Building): PlannedBuilding {
       const roof = chooseRoof(rings, r.topH - r.baseH, kind, piece?.roofShape ?? (multi && !piece ? null : bd.roofShape), piece?.roofHeight ?? (multi ? null : bd.roofHeight), hash, multi);
       const wallTop = r.topH - (roof ? roof.rise : 0);
       const parapet = roof ? 0 : parapetFor(kind, r.topH - r.baseH);
-      const band = floating ? 0 : Math.min(bandFor(kind, r.topH), (wallTop - r.baseH) * 0.45);
-      const fl = floorsFor(kind, wallTop - r.baseH, band, piece?.numFloors ?? (multi ? null : bd.numFloors));
-      const st = styleFor({ id: bd.id, facadeColor: piece?.facadeColor ?? bd.facadeColor, facadeMaterial: bd.facadeMaterial }, kind);
+      const band = floating ? 0 : Math.min(bandFor(kind, r.topH, cls.era), (wallTop - r.baseH) * 0.45);
+      const dataFloors = piece?.numFloors ?? (multi ? null : (bd.facadeFloors ?? bd.look?.floors ?? bd.numFloors));
+      const fl = floorsFor(kind, wallTop - r.baseH - crown, band, dataFloors, cls.era, bd.look?.heightKnown && !multi ? 7 : 5.6);
+      const wallSrgb = partColour ?? (podiumOfGlass || material !== cls.material ? paletteColour(material, kind, hash01(bd.id + 'c')) : cls.colour);
+      const st = styleOf(cls, bd.id, { kind, wall: wallSrgb });
       let flags = 0;
       if (roof) flags |= FLAG.pitched;
       if (parapet > 0) flags |= FLAG.parapet;
@@ -223,9 +237,24 @@ export function planBuilding(bd: Building): PlannedBuilding {
       if (cls.kindFromData) flags |= FLAG.kindKnown;
       if (roof) pitched++;
       if (r.residual && maxTop > r.topH * 1.5) podium = true;
+      let lookFlags = 0;
+      if (cls.colourFromData && !podiumOfGlass) lookFlags |= LOOK_FLAG.colour;
+      if (cls.materialFromData && !podiumOfGlass) lookFlags |= LOOK_FLAG.material;
+      if (cls.styleFromData) lookFlags |= LOOK_FLAG.style;
+      if (fl.fromData) lookFlags |= LOOK_FLAG.floors;
+      if (bd.look?.heightKnown) lookFlags |= LOOK_FLAG.height;
+      if (cls.roofColourFromData) lookFlags |= LOOK_FLAG.roofColour;
+      if (bd.look?.curated) lookFlags |= LOOK_FLAG.curated;
+      if (cls.fromContext) lookFlags |= LOOK_FLAG.context;
+      // a pitched roof is never the flat membrane's
+      const roofMat = roof && (cls.roofMaterial === 'membrane' || cls.roofMaterial === 'white') ? 'shingle' : cls.roofMaterial;
       pieces.push({
         rings, baseH: r.baseH, topH: r.topH, roof, parapet, kind, era: cls.era, floors: fl.floors, band: Math.round(band * 10) / 10,
         hash16, flags, wall: st.wall, roofColor: st.roof, glass: kind === 'glass', seed: hash32(sub), hidden, equipment: !floating,
+        look: {
+          material: MATERIAL_ID[material], style: STYLE_ID[cls.style], bandMaterial: MATERIAL_ID[podiumOfGlass ? material : cls.bandMaterial],
+          crown: Math.round(crown), roofMaterial: ROOF_MATERIAL_ID[roofMat], flags: lookFlags,
+        },
       });
     }
   }

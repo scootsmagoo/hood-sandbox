@@ -1,0 +1,18 @@
+{
+  "_comment": "Street furniture and tree dimensions, metres: the ONE place the drawn model and the solid collider both get their size from. tools/blender/props/*.py builds each model so its body has radius `r` over the heights `measure`, src/shared/props.ts makes a box of half size `r` (up to `solidH` high) solid, and tests/anchorProps.test.ts measures the exported .glb against it. A tree's `r` is the trunk radius at 0.9 to 1.1 m on a tree of the reference crown radius `refR` (it scales with the crown). `refH` is the height the model is built at (the instance is scaled to the anchor's height).",
+  "trees": [
+    { "name": "willow oak", "class": 0, "refH": 14, "refR": 4.6, "r": 0.28, "solidH": 3, "measure": [0.9, 1.1] },
+    { "name": "sweetgum", "class": 0, "refH": 14, "refR": 3.6, "r": 0.24, "solidH": 3, "measure": [0.9, 1.1] },
+    { "name": "loblolly pine", "class": 1, "refH": 16, "refR": 3.0, "r": 0.26, "solidH": 3, "measure": [0.9, 1.1] },
+    { "name": "crape myrtle", "class": 2, "refH": 5.7, "refR": 2.3, "r": 0.17, "solidH": 2, "measure": [0.9, 1.1] },
+    { "name": "red oak", "class": 0, "refH": 13, "refR": 5.4, "r": 0.38, "solidH": 3, "measure": [0.9, 1.1] }
+  ],
+  "lamps": [
+    { "name": "cobra", "kind": 0, "refH": 9.5, "r": 0.115, "solidH": 5, "measure": [0.9, 1.1] },
+    { "name": "post", "kind": 1, "refH": 4.5, "r": 0.13, "solidH": 4.5, "measure": [0.9, 1.1] },
+    { "name": "mast", "kind": 2, "refH": 14, "r": 0.2, "solidH": 6, "measure": [0.9, 1.1] }
+  ],
+  "hydrant": { "r": 0.17, "solidH": 0.78, "measure": [0.15, 0.25] },
+  "bin": { "r": 0.3, "solidH": 0.92, "measure": [0.4, 0.6] },
+  "bollard": { "r": 0.11, "solidH": 0.95, "measure": [0.4, 0.6] }
+}

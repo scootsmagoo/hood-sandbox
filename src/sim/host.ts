@@ -7,6 +7,9 @@ import { SnapshotRing } from '../shared/ring';
 import { SNAPSHOT_BYTES, SnapshotView } from '../shared/snapshot';
 import { loadTileOrFallback } from '../shared/tile';
 import { Simulation } from './Simulation';
+import { RINGS } from '../shared/city';
+import type { TileSource } from './stream/TileSource';
+import { fixtureOptions } from '../shared/city';
 
 export interface HostSink {
   /** The sink owns the buffer (it may be transferred). */
@@ -37,10 +40,15 @@ export class SimHost {
 
   async init(init: SimInit) {
     try {
-      const tile = await loadTileOrFallback(init.tileBaseUrl, init.seed);
-      const sim = await Simulation.create({
+      // (the sources load lazily: the fixture brings the pipeline's lane generator with it)
+      let source: TileSource | null = null;
+      if (init.cityUrl) {
+        const { FixtureTileSource, HttpTileSource } = await import('./stream/TileSource');
+        source = init.cityUrl.startsWith('fixture') ? new FixtureTileSource(fixtureOptions(init.cityUrl)) : await HttpTileSource.open(init.cityUrl);
+      }
+      const tile = source ? null : await loadTileOrFallback(init.tileBaseUrl, init.seed);
+      const common = {
         seed: init.seed,
-        tile,
         vehicleType: init.vehicleType,
         start: init.start,
         startAtVehicle: init.startAtVehicle,
@@ -53,15 +61,19 @@ export class SimHost {
         ambientPeds: init.ambientPeds ?? true,
         pedBudget: this.pendingBudget ?? init.pedBudget,
         traffic: this.pendingTraffic ?? init.traffic,
-      });
+      };
+      const sim = source
+        ? await Simulation.createCity({ ...common, source, streamOptions: { rings: RINGS[init.streamTier ?? 'high'] } })
+        : await Simulation.create({ ...common, tile: tile! });
       this.sim = sim;
       if (init.snapshotBuffer) this.ring = new SnapshotRing(init.snapshotBuffer, SNAPSHOT_BYTES);
       this.sink.message({
         type: 'ready',
         info: {
-          tile: tile.manifest,
-          tileSource: tile.source,
-          fallbackReason: tile.fallbackReason,
+          tile: sim.tile.manifest,
+          city: source?.index,
+          tileSource: sim.tile.source,
+          fallbackReason: sim.tile.fallbackReason,
           playerId: sim.playerPedId,
           vehicleId: sim.vehicleId,
           vehicleType: sim.vehicleType,

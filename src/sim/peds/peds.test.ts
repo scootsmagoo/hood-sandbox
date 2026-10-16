@@ -1,3 +1,4 @@
+import { OUTFIT_COUNT } from '../../shared/entityDefs';
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parsePaths } from '../../shared/walk';
@@ -78,7 +79,7 @@ describe('the population table', () => {
     const poly = pop.zones.find((z) => z.polygon)!;
     const mid = poly.polygon!.reduce((a, p) => [a[0] + p[0] / poly.polygon!.length, a[1] + p[1] / poly.polygon!.length], [0, 0]);
     expect(zoneAt(pop, mid[0], mid[1]).id).toBe(poly.id);
-    for (const g of Object.values(pop.pedGroups)) expect(g.outfits.every((o) => o >= 1 && o <= 5)).toBe(true);
+    for (const g of Object.values(pop.pedGroups)) expect(g.outfits.every((o) => o >= 1 && o < OUTFIT_COUNT)).toBe(true);
   });
 
   it('refuses a table without exactly one default zone', () => {

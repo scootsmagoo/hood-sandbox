@@ -1,0 +1,208 @@
+{
+  "brands": [
+    {
+      "real": "Olympic (word)",
+      "parody": "Games",
+      "kind": "word",
+      "note": "US-protected word: any name containing it is parodied (Centennial Olympic Park)."
+    },
+    {
+      "real": "Mercedes-Benz Stadium",
+      "parody": "Silverline Stadium",
+      "kind": "stadium",
+      "note": "Brand or corporate mark (Mercedes-Benz Stadium). Parody for owner review."
+    },
+    {
+      "real": "State Farm Arena",
+      "parody": "Heartland Arena",
+      "kind": "arena",
+      "note": "Brand or corporate mark (State Farm Arena). Parody for owner review."
+    },
+    {
+      "real": "CNN Center",
+      "parody": "Newsline Center",
+      "kind": "tower",
+      "note": "Brand or corporate mark (former name; current name The Center). Parody for owner review."
+    },
+    {
+      "real": "Centennial Olympic Park",
+      "parody": "Centennial Games Park",
+      "kind": "park",
+      "note": "Brand or corporate mark (Centennial Olympic Park). Parody for owner review."
+    },
+    {
+      "real": "SkyView Atlanta",
+      "parody": "Skyhigh Wheel",
+      "kind": "transit",
+      "note": "Brand or corporate mark (SkyView Atlanta). Parody for owner review."
+    },
+    {
+      "real": "World of Coca-Cola",
+      "parody": "World of Fizzpop",
+      "kind": "museum",
+      "note": "Brand or corporate mark (World of Coca-Cola). Parody for owner review."
+    },
+    {
+      "real": "College Football Hall of Fame",
+      "parody": "Collegiate Gridiron Hall of Fame",
+      "kind": "museum",
+      "note": "Brand or corporate mark (College Football Hall of Fame). Parody for owner review."
+    },
+    {
+      "real": "Westin Peachtree Plaza",
+      "parody": "Peachtree Summit Plaza",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Westin Peachtree Plaza). Parody for owner review."
+    },
+    {
+      "real": "Hyatt Regency Atlanta",
+      "parody": "Atlas Regent Hotel",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Hyatt Regency Atlanta). Parody for owner review."
+    },
+    {
+      "real": "Atlanta Marriott Marquis",
+      "parody": "Atlanta Marquee Hotel",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Atlanta Marriott Marquis). Parody for owner review."
+    },
+    {
+      "real": "SunTrust Plaza",
+      "parody": "Trustline Plaza",
+      "kind": "tower",
+      "note": "Brand or corporate mark (former name; current name Truist Plaza). Parody for owner review."
+    },
+    {
+      "real": "Georgia-Pacific Tower",
+      "parody": "Timberline Pacific Tower",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Georgia-Pacific Tower). Parody for owner review."
+    },
+    {
+      "real": "Centennial Yards",
+      "parody": "Centerline Yards",
+      "kind": "neighborhood-landmark",
+      "note": "Brand or corporate mark (Centennial Yards). Parody for owner review."
+    },
+    {
+      "real": "Ponce City Market",
+      "parody": "Ponce Grand Market",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Ponce City Market). Parody for owner review."
+    },
+    {
+      "real": "Krog Street Market",
+      "parody": "Krog Street Commissary",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Krog Street Market). Parody for owner review."
+    },
+    {
+      "real": "Fox Theatre",
+      "parody": "Golden Screen Theatre",
+      "kind": "civic",
+      "note": "Brand or corporate mark (Fox Theatre). Parody for owner review."
+    },
+    {
+      "real": "The Varsity",
+      "parody": "The Crimson Drive-In",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (The Varsity). Parody for owner review."
+    },
+    {
+      "real": "Bank of America Plaza",
+      "parody": "Liberty Crest Plaza",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Bank of America Plaza). Parody for owner review."
+    },
+    {
+      "real": "Lenox Square",
+      "parody": "Linden Square",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Lenox Square). Parody for owner review."
+    },
+    {
+      "real": "Phipps Plaza",
+      "parody": "Pinecrest Plaza",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Phipps Plaza). Parody for owner review."
+    },
+    {
+      "real": "Truist Park",
+      "parody": "Diamond Ridge Ballpark",
+      "kind": "stadium",
+      "note": "Brand or corporate mark (Truist Park). Parody for owner review."
+    },
+    {
+      "real": "The Battery Atlanta",
+      "parody": "The Dugout District",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (The Battery Atlanta). Parody for owner review."
+    },
+    {
+      "real": "Big Chicken",
+      "parody": "Giant Hen",
+      "kind": "monument",
+      "note": "Brand or corporate mark (Big Chicken). Parody for owner review."
+    },
+    {
+      "real": "Six Flags Over Georgia",
+      "parody": "Thrill Kingdom Georgia",
+      "kind": "park",
+      "note": "Brand or corporate mark (Six Flags Over Georgia). Parody for owner review."
+    },
+    {
+      "real": "Mall of Georgia",
+      "parody": "Grand Georgia Mall",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Mall of Georgia). Parody for owner review."
+    },
+    {
+      "real": "Concourse at Landmark Center (King and Queen towers)",
+      "parody": "King and Queen Towers",
+      "kind": "tower",
+      "note": "Brand or corporate mark (Concourse at Landmark Center (King and Queen towers)). Parody for owner review."
+    },
+    {
+      "real": "Atlanta Amtrak station",
+      "parody": "Piedmont Rail Station",
+      "kind": "transit",
+      "note": "Brand or corporate mark (Atlanta Amtrak station). Parody for owner review."
+    },
+    {
+      "real": "Atlantic Station",
+      "parody": "Atlantis Station",
+      "kind": "shopping",
+      "note": "Brand or corporate mark (Atlantic Station). Parody for owner review."
+    },
+    {
+      "real": "Atlanta BeltLine",
+      "parody": "Atlanta Loop Line",
+      "kind": "trail",
+      "note": "Registered mark of Atlanta BeltLine, Inc. (per ABI's site and USPTO registrations). Parody for owner review."
+    },
+    {
+      "real": "Atlanta BeltLine",
+      "parody": "Atlanta Loop Line",
+      "kind": "trail",
+      "note": "Registered mark of Atlanta BeltLine, Inc. (per ABI's site and USPTO registrations). Parody for owner review."
+    },
+    {
+      "real": "Atlanta BeltLine",
+      "parody": "Atlanta Loop Line",
+      "kind": "trail",
+      "note": "Registered mark of Atlanta BeltLine, Inc. (per ABI's site and USPTO registrations). Parody for owner review."
+    },
+    {
+      "real": "MARTA",
+      "parody": "Peach Rapid Transit",
+      "kind": "transit",
+      "note": "Transit agency. README plans a parody rail brand; no landmark uses it yet (Five Points station keeps its real name)."
+    },
+    {
+      "real": "Hilton Atlanta",
+      "parody": "Crestview Atlanta Hotel",
+      "kind": "hotel",
+      "note": "hotel brand; added with the hero model"
+    }
+  ]
+}

@@ -1,0 +1,2203 @@
+{
+  "city": "atlanta",
+  "tile": "m1-five-points",
+  "origin": {
+    "lat": 33.7543,
+    "lon": -84.3898
+  },
+  "projection": "+proj=tmerc +lat_0=33.85 +lon_0=-84.3 +k=1 +x_0=0 +y_0=0 +ellps=WGS84 +units=m",
+  "landmarks": [
+    {
+      "id": "mercedes-benz-stadium",
+      "name": "Mercedes-Benz Stadium",
+      "displayName": "Silverline Stadium",
+      "trademark": true,
+      "kind": "stadium",
+      "district": "Downtown",
+      "lat": 33.755412,
+      "lon": -84.400849,
+      "x": -1023.6,
+      "z": -124.3,
+      "inM1Tile": false,
+      "osm": [
+        "way/536744534"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Pinwheel retractable roof of eight translucent petals over a white-and-grey steel bowl; sits low at the edge of the Downtown grid with a glass-walled concourse.",
+      "opened": 2017,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mercedes-Benz_Stadium",
+        "https://www.openstreetmap.org/way/536744534"
+      ]
+    },
+    {
+      "id": "state-farm-arena",
+      "name": "State Farm Arena",
+      "displayName": "Heartland Arena",
+      "trademark": true,
+      "kind": "arena",
+      "district": "Downtown",
+      "lat": 33.75737,
+      "lon": -84.396385,
+      "x": -609.8,
+      "z": -341,
+      "inM1Tile": true,
+      "osm": [
+        "way/25312494"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Squat, rounded arena block of pale stone and dark glass beside the stadium, with a wide plaza and a tall sign band on the south face.",
+      "opened": 1999,
+      "sources": [
+        "https://en.wikipedia.org/wiki/State_Farm_Arena",
+        "https://www.openstreetmap.org/way/25312494"
+      ]
+    },
+    {
+      "id": "georgia-world-congress-center",
+      "name": "Georgia World Congress Center",
+      "displayName": "Georgia World Congress Center",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.760768,
+      "lon": -84.401255,
+      "x": -1060.6,
+      "z": -718.4,
+      "inM1Tile": false,
+      "osm": [
+        "relation/7692012"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A long, low convention complex of beige precast and glass halls with covered walkways over Andrew Young International Boulevard.",
+      "opened": 1976,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_World_Congress_Center",
+        "https://www.openstreetmap.org/relation/7692012"
+      ]
+    },
+    {
+      "id": "the-center-former-cnn-center",
+      "name": "The Center",
+      "displayName": "Newsline Center",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.7597,
+      "lon": -84.3952,
+      "x": -499.8,
+      "z": -599.4,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Multi-tower complex of concrete and glass around a tall open atrium over the Techwood/Marietta streets; now called The Center, with its office towers being converted to a hotel and apartments.",
+      "opened": 1976,
+      "sources": [
+        "https://en.wikipedia.org/wiki/CNN_Center"
+      ],
+      "formerName": "CNN Center",
+      "unverified": true
+    },
+    {
+      "id": "centennial-olympic-park",
+      "name": "Centennial Olympic Park",
+      "displayName": "Centennial Games Park",
+      "trademark": true,
+      "kind": "park",
+      "district": "Downtown",
+      "lat": 33.760144,
+      "lon": -84.393453,
+      "x": -337.9,
+      "z": -648.5,
+      "inM1Tile": true,
+      "osm": [
+        "relation/9685734"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Open lawns, a long reflecting pool and fountain plaza, and tall palm and flag lines, bounded by the stadium and the CNN block.",
+      "opened": 1996,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Centennial_Olympic_Park",
+        "https://www.openstreetmap.org/relation/9685734"
+      ]
+    },
+    {
+      "id": "fountain-of-rings",
+      "name": "Fountain of Rings",
+      "displayName": "Fountain of Rings",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Downtown",
+      "lat": 33.7607,
+      "lon": -84.3927,
+      "x": -268,
+      "z": -710.1,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A large circular water feature of interlocking rings and jets in the middle of the park's central plaza, with a low stone rim.",
+      "opened": 1996,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Centennial_Olympic_Park"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "skyview-atlanta",
+      "name": "SkyView Atlanta",
+      "displayName": "Skyhigh Wheel",
+      "trademark": true,
+      "kind": "transit",
+      "district": "Downtown",
+      "lat": 33.758831,
+      "lon": -84.391852,
+      "x": -189.7,
+      "z": -502.8,
+      "inM1Tile": true,
+      "osm": [
+        "way/1292668916"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A tall white observation wheel of enclosed glass gondolas on a steel frame, standing at the edge of the park near the aquarium.",
+      "opened": 2019,
+      "sources": [
+        "https://en.wikipedia.org/wiki/SkyView_Atlanta",
+        "https://www.openstreetmap.org/way/1292668916"
+      ]
+    },
+    {
+      "id": "georgia-aquarium",
+      "name": "Georgia Aquarium",
+      "displayName": "Georgia Aquarium",
+      "trademark": false,
+      "kind": "museum",
+      "district": "Downtown",
+      "lat": 33.763267,
+      "lon": -84.395117,
+      "x": -491.7,
+      "z": -995.1,
+      "inM1Tile": true,
+      "osm": [
+        "way/28912103"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Large, blocky aquarium building of grey and green glass and stone with a wide plaza entrance off Baker Street.",
+      "opened": 2005,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_Aquarium",
+        "https://www.openstreetmap.org/way/28912103"
+      ]
+    },
+    {
+      "id": "world-of-coca-cola",
+      "name": "World of Coca-Cola",
+      "displayName": "World of Fizzpop",
+      "trademark": true,
+      "kind": "museum",
+      "district": "Downtown",
+      "lat": 33.762898,
+      "lon": -84.392552,
+      "x": -254.1,
+      "z": -953.9,
+      "inM1Tile": true,
+      "osm": [
+        "way/270358205"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Modern museum block of red-and-white panels and glass, with a tall soda-bottle-shaped sign and a plaza with pedestrian crossing.",
+      "opened": 2007,
+      "sources": [
+        "https://en.wikipedia.org/wiki/World_of_Coca-Cola",
+        "https://www.openstreetmap.org/way/270358205"
+      ]
+    },
+    {
+      "id": "national-center-civil-human-rights",
+      "name": "National Center for Civil and Human Rights",
+      "displayName": "National Center for Civil and Human Rights",
+      "trademark": false,
+      "kind": "museum",
+      "district": "Downtown",
+      "lat": 33.764049,
+      "lon": -84.39304,
+      "x": -299.3,
+      "z": -1081.6,
+      "inM1Tile": false,
+      "osm": [
+        "way/317976752"
+      ],
+      "priority": "hero",
+      "sensitive": true,
+      "look": "Low, modern museum of glass and pale stone set around a plaza, with a neutral, reflective facade and a long wall of inscribed panels along the street.",
+      "opened": 2014,
+      "sources": [
+        "https://en.wikipedia.org/wiki/National_Center_for_Civil_and_Human_Rights",
+        "https://www.openstreetmap.org/way/317976752"
+      ]
+    },
+    {
+      "id": "college-football-hall-of-fame",
+      "name": "College Football Hall of Fame",
+      "displayName": "Collegiate Gridiron Hall of Fame",
+      "trademark": true,
+      "kind": "museum",
+      "district": "Downtown",
+      "lat": 33.760084,
+      "lon": -84.395396,
+      "x": -517.9,
+      "z": -642,
+      "inM1Tile": true,
+      "osm": [
+        "way/260629516"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Tall, glassy museum block of red-brick and glass near the park, with a sculptural stadium-like frame at the entrance.",
+      "opened": 2014,
+      "sources": [
+        "https://en.wikipedia.org/wiki/College_Football_Hall_of_Fame",
+        "https://www.openstreetmap.org/way/260629516"
+      ]
+    },
+    {
+      "id": "georgia-state-capitol",
+      "name": "Georgia State Capitol",
+      "displayName": "Georgia State Capitol",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.749,
+      "lon": -84.388,
+      "x": 166.3,
+      "z": 588,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Granite-and-marble Classical capitol on a hill, with a tall gilded dome and a long flight of steps and a lawn facing Washington Street.",
+      "opened": 1889,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_State_Capitol"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "atlanta-city-hall",
+      "name": "Atlanta City Hall",
+      "displayName": "Atlanta City Hall",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.748622,
+      "lon": -84.390781,
+      "x": -91.4,
+      "z": 629.7,
+      "inM1Tile": true,
+      "osm": [
+        "way/113041909"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Stone-clad Art Deco-style civic building with a tall stepped tower and a flat plaza on Trinity Avenue.",
+      "opened": 1930,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_City_Hall",
+        "https://www.openstreetmap.org/way/113041909"
+      ]
+    },
+    {
+      "id": "westin-peachtree-plaza",
+      "name": "Westin Peachtree Plaza",
+      "displayName": "Peachtree Summit Plaza",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.75944,
+      "lon": -84.388376,
+      "x": 132.4,
+      "z": -570,
+      "inM1Tile": true,
+      "osm": [
+        "way/42904130"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Tall cylindrical hotel tower with a flat top and an exterior glass elevator tube running up one side of the concrete shell.",
+      "opened": 1976,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Westin_Peachtree_Plaza",
+        "https://www.openstreetmap.org/way/42904130"
+      ]
+    },
+    {
+      "id": "hyatt-regency-atlanta",
+      "name": "Hyatt Regency Atlanta",
+      "displayName": "Atlas Regent Hotel",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.76163,
+      "lon": -84.386636,
+      "x": 293.8,
+      "z": -812.8,
+      "inM1Tile": true,
+      "osm": [
+        "way/40808010"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Hotel with a large blue-tinted glass dome, a flat tower block and a long atrium, near Peachtree Center.",
+      "opened": 1967,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hyatt_Regency_Atlanta",
+        "https://www.openstreetmap.org/way/40808010"
+      ]
+    },
+    {
+      "id": "marriott-marquis",
+      "name": "Atlanta Marriott Marquis",
+      "displayName": "Atlanta Marquee Hotel",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.761653,
+      "lon": -84.38511,
+      "x": 435.2,
+      "z": -815.2,
+      "inM1Tile": true,
+      "osm": [
+        "way/39448231"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Tall tower of tinted glass and white-grey panels with a stepped top, rising from a wide Peachtree Center podium.",
+      "opened": 1985,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_Marriott_Marquis",
+        "https://www.openstreetmap.org/way/39448231"
+      ]
+    },
+    {
+      "id": "truist-plaza",
+      "name": "Truist Plaza",
+      "displayName": "Trustline Plaza",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.763156,
+      "lon": -84.386406,
+      "x": 315.3,
+      "z": -982,
+      "inM1Tile": true,
+      "osm": [
+        "way/1454716841"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Tall office tower of blue-green glass with a stepped crown and a rounded top, in the Peachtree Center skyline.",
+      "opened": 1992,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Truist_Plaza",
+        "https://www.openstreetmap.org/way/1454716841"
+      ],
+      "formerName": "SunTrust Plaza"
+    },
+    {
+      "id": "191-peachtree-tower",
+      "name": "191 Peachtree Tower",
+      "displayName": "191 Peachtree Tower",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.759007,
+      "lon": -84.386854,
+      "x": 273.4,
+      "z": -521.9,
+      "inM1Tile": true,
+      "osm": [
+        "way/261043963"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Slender glass office tower with a crowned top and a stepped setback at the upper floors, rising from a plaza on Peachtree Street.",
+      "opened": 1991,
+      "sources": [
+        "https://en.wikipedia.org/wiki/191_Peachtree_Tower",
+        "https://www.openstreetmap.org/way/261043963"
+      ]
+    },
+    {
+      "id": "georgia-pacific-tower",
+      "name": "Georgia-Pacific Tower",
+      "displayName": "Timberline Pacific Tower",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.757441,
+      "lon": -84.387065,
+      "x": 253.7,
+      "z": -348.1,
+      "inM1Tile": true,
+      "osm": [
+        "way/479134200"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Tall, grey-glass office tower with a flat top and a regular window grid, on the Peachtree Street spine of Downtown.",
+      "opened": 1982,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia-Pacific_Tower",
+        "https://www.openstreetmap.org/way/479134200"
+      ]
+    },
+    {
+      "id": "flatiron-building-atlanta",
+      "name": "Flatiron Building",
+      "displayName": "Flatiron Building",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Downtown",
+      "lat": 33.7546,
+      "lon": -84.3905,
+      "x": -64.8,
+      "z": -33.3,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A narrow, triangular red-brick and stone building of a few storeys sitting on the wedge at Five Points, with a pointed prow.",
+      "opened": 1897,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Flatiron_Building_(Atlanta)"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "candler-building",
+      "name": "Candler Building",
+      "displayName": "Candler Building",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.757,
+      "lon": -84.3877,
+      "x": 194.8,
+      "z": -299.3,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A tall Beaux-Arts style office building of terracotta and stone with a decorated top and a long ornamental cornice.",
+      "opened": 1906,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Candler_Building"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "five-points-station",
+      "name": "Five Points station",
+      "displayName": "Five Points station",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Downtown",
+      "lat": 33.7539,
+      "lon": -84.3917,
+      "x": -176.1,
+      "z": 44.2,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Underground transit hub with a glass-and-steel entrance pavilion and wide plaza at the Five Points intersection.",
+      "opened": 1981,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Five_Points_station"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "underground-atlanta",
+      "name": "Underground Atlanta",
+      "displayName": "Underground Atlanta",
+      "trademark": false,
+      "kind": "shopping",
+      "district": "Downtown",
+      "lat": 33.752352,
+      "lon": -84.39013,
+      "x": -30.8,
+      "z": 216.1,
+      "inM1Tile": true,
+      "osm": [
+        "way/265352603"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Entertainment district of shops and restaurants in the streets below street level, with brick arcades and a tall clock tower over the entrance.",
+      "opened": 1968,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Underground_Atlanta",
+        "https://www.openstreetmap.org/way/265352603"
+      ]
+    },
+    {
+      "id": "woodruff-park",
+      "name": "Woodruff Park",
+      "displayName": "Woodruff Park",
+      "trademark": false,
+      "kind": "park",
+      "district": "Downtown",
+      "lat": 33.755426,
+      "lon": -84.388486,
+      "x": 121.9,
+      "z": -124.8,
+      "inM1Tile": true,
+      "osm": [
+        "way/34775457"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Small urban park of mature trees, benches and paved walks, with a plaza and a fountain amid the towers of Peachtree Center.",
+      "opened": 1880,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Woodruff_Park",
+        "https://www.openstreetmap.org/way/34775457"
+      ]
+    },
+    {
+      "id": "rialto-center-for-the-arts",
+      "name": "Rialto Center for the Arts",
+      "displayName": "Rialto Center for the Arts",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.756803,
+      "lon": -84.3895,
+      "x": 28,
+      "z": -277.6,
+      "inM1Tile": true,
+      "osm": [
+        "way/252608898"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A former movie palace with a tall, decorated brick and terracotta facade and a marquee sign on Forsyth Street.",
+      "opened": 1916,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Rialto_Center_for_the_Arts",
+        "https://www.openstreetmap.org/way/252608898"
+      ]
+    },
+    {
+      "id": "sweet-auburn-curb-market",
+      "name": "Sweet Auburn Curb Market",
+      "displayName": "Sweet Auburn Curb Market",
+      "trademark": false,
+      "kind": "shopping",
+      "district": "Downtown",
+      "lat": 33.7546,
+      "lon": -84.3778,
+      "x": 1111.8,
+      "z": -32.4,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Long, low brick market hall with a metal-roofed arcade and a lively row of food stalls along Edgewood Avenue.",
+      "opened": 1924,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Sweet_Auburn_Curb_Market"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "georgia-state-university-student-center",
+      "name": "Georgia State University Student Center",
+      "displayName": "Georgia State University Student Center",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.7534,
+      "lon": -84.3845,
+      "x": 491,
+      "z": 100.2,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Modern campus building of brick and glass with a wide stair and plaza facing the downtown campus green.",
+      "opened": 2000,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_State_University"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "georgia-state-university-library",
+      "name": "Georgia State University Library",
+      "displayName": "Georgia State University Library",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.7542,
+      "lon": -84.3855,
+      "x": 398.4,
+      "z": 11.4,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Tall, plain institutional library block of tinted glass and concrete on the Downtown campus.",
+      "opened": 1992,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_State_University"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "the-gulch",
+      "name": "The Gulch",
+      "displayName": "The Gulch",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Downtown",
+      "lat": 33.749,
+      "lon": -84.3975,
+      "x": -714,
+      "z": 587.2,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A low, historically rail-cut area of concrete viaduct and new mixed-use construction between Downtown and the Westside.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Gulch_(Atlanta)"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "centennial-yards",
+      "name": "Centennial Yards",
+      "displayName": "Centerline Yards",
+      "trademark": true,
+      "kind": "neighborhood-landmark",
+      "district": "Downtown",
+      "lat": 33.755386,
+      "lon": -84.396444,
+      "x": -615.4,
+      "z": -121,
+      "inM1Tile": true,
+      "osm": [
+        "way/1458176290"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A large, mostly open rail yard being redeveloped with towers, plazas and a stadium-side district on the Gulch rail corridor.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Centennial_Yards",
+        "https://www.openstreetmap.org/way/1458176290"
+      ]
+    },
+    {
+      "id": "peachtree-center-marta",
+      "name": "Peachtree Center station",
+      "displayName": "Peachtree Center station",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Downtown",
+      "lat": 33.7597,
+      "lon": -84.3868,
+      "x": 278.5,
+      "z": -598.7,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Transit station entrance under the Peachtree Center plaza, between tall hotels and offices.",
+      "opened": 1981,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Peachtree_Center_station"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "fulton-county-courthouse",
+      "name": "Fulton County Courthouse",
+      "displayName": "Fulton County Courthouse",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.749995,
+      "lon": -84.390734,
+      "x": -86.9,
+      "z": 477.4,
+      "inM1Tile": true,
+      "osm": [
+        "node/367913010"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Massive stone Classical courthouse with columns and a wide set of steps, at the west edge of Downtown.",
+      "opened": 1914,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Fulton_County_Courthouse",
+        "https://www.openstreetmap.org/node/367913010"
+      ]
+    },
+    {
+      "id": "atlanta-central-library",
+      "name": "Central Library (Atlanta-Fulton Public Library)",
+      "displayName": "Central Library (Atlanta-Fulton Public Library)",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.757745,
+      "lon": -84.38846,
+      "x": 124.5,
+      "z": -381.9,
+      "inM1Tile": true,
+      "osm": [
+        "way/192941643"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large, glassy library of stepped, angled glass planes and a faceted stone plinth at Margaret Mitchell Square.",
+      "opened": 2004,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta-Fulton_Public_Library_Central_Library",
+        "https://www.openstreetmap.org/way/192941643"
+      ]
+    },
+    {
+      "id": "ebenezer-baptist-church",
+      "name": "Ebenezer Baptist Church",
+      "displayName": "Ebenezer Baptist Church",
+      "trademark": false,
+      "kind": "church",
+      "district": "Old Fourth Ward",
+      "lat": 33.755244,
+      "lon": -84.374202,
+      "x": 1445.2,
+      "z": -103.6,
+      "inM1Tile": false,
+      "osm": [
+        "way/173532779"
+      ],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "Modest brick church with a plain front and a tall steeple, on Auburn Avenue in the Sweet Auburn historic district.",
+      "opened": 1914,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Ebenezer_Baptist_Church",
+        "https://www.openstreetmap.org/way/173532779"
+      ]
+    },
+    {
+      "id": "mlk-national-historic-site",
+      "name": "Martin Luther King Jr. National Historic Site",
+      "displayName": "Martin Luther King Jr. National Historic Site",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Old Fourth Ward",
+      "lat": 33.756382,
+      "lon": -84.373466,
+      "x": 1513.5,
+      "z": -229.8,
+      "inM1Tile": false,
+      "osm": [
+        "way/173532785"
+      ],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A cluster of restored early-20th-century houses and a visitor center on Auburn Avenue, kept quiet and simple, with a park-like setting.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Martin_Luther_King_Jr._National_Historic_Site",
+        "https://www.openstreetmap.org/way/173532785"
+      ]
+    },
+    {
+      "id": "king-center-and-tomb",
+      "name": "Martin Luther King Jr. Center for Nonviolent Social Change",
+      "displayName": "Martin Luther King Jr. Center for Nonviolent Social Change",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Old Fourth Ward",
+      "lat": 33.755273,
+      "lon": -84.372977,
+      "x": 1558.8,
+      "z": -106.7,
+      "inM1Tile": false,
+      "osm": [
+        "way/173532786"
+      ],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A reflecting pool and a low stone tomb in a quiet plaza with a long, low museum and archive building beside it.",
+      "opened": 1981,
+      "sources": [
+        "https://en.wikipedia.org/wiki/King_Center_for_Nonviolent_Social_Change",
+        "https://www.openstreetmap.org/way/173532786"
+      ]
+    },
+    {
+      "id": "freedom-park",
+      "name": "Freedom Park",
+      "displayName": "Freedom Park",
+      "trademark": false,
+      "kind": "park",
+      "district": "Inman Park",
+      "lat": 33.761974,
+      "lon": -84.365464,
+      "x": 2255.3,
+      "z": -849.5,
+      "inM1Tile": false,
+      "osm": [
+        "relation/12045420"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Long linear park of lawns and tree rows along a former rail corridor, with the BeltLine trail running through it.",
+      "opened": 1990,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Freedom_Park_(Atlanta)",
+        "https://www.openstreetmap.org/relation/12045420"
+      ]
+    },
+    {
+      "id": "krog-street-tunnel",
+      "name": "Krog Street Tunnel",
+      "displayName": "Krog Street Tunnel",
+      "trademark": false,
+      "kind": "tunnel",
+      "district": "Inman Park",
+      "lat": 33.7553,
+      "lon": -84.3555,
+      "x": 3178,
+      "z": -108.7,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A short brick and concrete railway tunnel under Krog Street, its inside and portals covered in dense, colourful murals and graffiti.",
+      "opened": 1902,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Krog_Street_Tunnel"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "ponce-city-market",
+      "name": "Ponce City Market",
+      "displayName": "Ponce Grand Market",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Old Fourth Ward",
+      "lat": 33.77244,
+      "lon": -84.365203,
+      "x": 2280.2,
+      "z": -2010.3,
+      "inM1Tile": false,
+      "osm": [
+        "way/184803195"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Huge former mail-order warehouse of red brick and tall steel-sash windows, with a big clock tower and a rooftop Ferris wheel.",
+      "opened": 2014,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Ponce_City_Market",
+        "https://www.openstreetmap.org/way/184803195"
+      ]
+    },
+    {
+      "id": "krog-street-market",
+      "name": "Krog Street Market",
+      "displayName": "Krog Street Commissary",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Inman Park",
+      "lat": 33.756992,
+      "lon": -84.364015,
+      "x": 2389.2,
+      "z": -296.8,
+      "inM1Tile": false,
+      "osm": [
+        "relation/5413435"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Brick and steel food hall in a converted old warehouse, with a lot of graffiti and mural art on the exterior.",
+      "opened": 2014,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Krog_Street_Market",
+        "https://www.openstreetmap.org/relation/5413435"
+      ]
+    },
+    {
+      "id": "lake-claire-community-land-trust",
+      "name": "Lake Claire Community Land Trust",
+      "displayName": "Lake Claire Community Land Trust",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Candler Park",
+      "lat": 33.765183,
+      "lon": -84.327673,
+      "x": 5756.4,
+      "z": -1203.8,
+      "inM1Tile": false,
+      "osm": [
+        "node/5252918868"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A tree-lined residential neighborhood of bungalows and small cottages around a small lake, with a community centre and shared lots.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Lake_Claire,_Atlanta",
+        "https://www.openstreetmap.org/node/5252918868"
+      ]
+    },
+    {
+      "id": "edgewood-shopping-center",
+      "name": "Edgewood Shopping Center",
+      "displayName": "Edgewood Shopping Center",
+      "trademark": false,
+      "kind": "shopping",
+      "district": "Old Fourth Ward",
+      "lat": 33.7564,
+      "lon": -84.3488,
+      "x": 3798.8,
+      "z": -230.4,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Low, long strip of one-storey shopfronts with a shared parking lot along Edgewood Avenue.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Edgewood,_Atlanta"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "old-fourth-ward-park",
+      "name": "Old Fourth Ward Park",
+      "displayName": "Old Fourth Ward Park",
+      "trademark": false,
+      "kind": "park",
+      "district": "Old Fourth Ward",
+      "lat": 33.758,
+      "lon": -84.367,
+      "x": 2112.7,
+      "z": -408.8,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A large park of lawns, a long reflecting pool, a play area and a steep grassy slope on the BeltLine, next to the towers of Ponce.",
+      "opened": 2013,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Old_Fourth_Ward_Park"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "little-five-points",
+      "name": "Little Five Points",
+      "displayName": "Little Five Points",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Little Five Points",
+      "lat": 33.764977,
+      "lon": -84.349175,
+      "x": 3764.5,
+      "z": -1181.8,
+      "inM1Tile": false,
+      "osm": [
+        "node/2710191943"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A small, crowded crossroads of brick storefronts, shops and bars, with a painted mural and a steady street scene.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Little_Five_Points,_Atlanta",
+        "https://www.openstreetmap.org/node/2710191943"
+      ]
+    },
+    {
+      "id": "candler-park",
+      "name": "Candler Park",
+      "displayName": "Candler Park",
+      "trademark": false,
+      "kind": "park",
+      "district": "Candler Park",
+      "lat": 33.768393,
+      "lon": -84.337677,
+      "x": 4829.7,
+      "z": -1560.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/28912677"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A leafy neighborhood park of large oaks, open lawns and a small lake, bounded by bungalows.",
+      "opened": 1909,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Candler_Park,_Atlanta",
+        "https://www.openstreetmap.org/way/28912677"
+      ]
+    },
+    {
+      "id": "inman-park",
+      "name": "Inman Park",
+      "displayName": "Inman Park",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Inman Park",
+      "lat": 33.757606,
+      "lon": -84.362704,
+      "x": 2510.7,
+      "z": -364.8,
+      "inM1Tile": false,
+      "osm": [
+        "node/154039197"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A historic streetcar suburb of Victorian houses, big porches and tree-lined streets under mature oaks.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Inman_Park,_Atlanta",
+        "https://www.openstreetmap.org/node/154039197"
+      ]
+    },
+    {
+      "id": "piedmont-park",
+      "name": "Piedmont Park",
+      "displayName": "Piedmont Park",
+      "trademark": false,
+      "kind": "park",
+      "district": "Midtown",
+      "lat": 33.789048,
+      "lon": -84.371886,
+      "x": 1662.4,
+      "z": -3852.9,
+      "inM1Tile": false,
+      "osm": [
+        "way/208357832"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Big city park of open lawns, a lake, a long meadow and a sweeping tree canopy, with the Midtown towers on its east edge.",
+      "opened": 1887,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Piedmont_Park",
+        "https://www.openstreetmap.org/way/208357832"
+      ]
+    },
+    {
+      "id": "fox-theatre",
+      "name": "Fox Theatre",
+      "displayName": "Golden Screen Theatre",
+      "trademark": true,
+      "kind": "civic",
+      "district": "Midtown",
+      "lat": 33.772643,
+      "lon": -84.385562,
+      "x": 394.4,
+      "z": -2034.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/208355446"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Ornate Moorish-revival theatre with a tall onion-domed roof and a long marquee sign on Peachtree Street.",
+      "opened": 1929,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Fox_Theatre_(Atlanta)",
+        "https://www.openstreetmap.org/way/208355446"
+      ]
+    },
+    {
+      "id": "varsity-drive-in",
+      "name": "The Varsity",
+      "displayName": "The Crimson Drive-In",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Midtown",
+      "lat": 33.771707,
+      "lon": -84.389315,
+      "x": 46.6,
+      "z": -1930.8,
+      "inM1Tile": false,
+      "osm": [
+        "way/38977297"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A drive-in restaurant with a bright red-and-white sign tower and a large parking lot with car hops.",
+      "opened": 1928,
+      "sources": [
+        "https://en.wikipedia.org/wiki/The_Varsity",
+        "https://www.openstreetmap.org/way/38977297"
+      ]
+    },
+    {
+      "id": "bank-of-america-plaza",
+      "name": "Bank of America Plaza",
+      "displayName": "Liberty Crest Plaza",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Midtown",
+      "lat": 33.77085,
+      "lon": -84.386137,
+      "x": 340.9,
+      "z": -1835.4,
+      "inM1Tile": false,
+      "osm": [
+        "way/39449840"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Tall, grey-glass office tower with a stepped and tapered crown, the tallest tower in the state.",
+      "opened": 1992,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Bank_of_America_Plaza_(Atlanta)",
+        "https://www.openstreetmap.org/way/39449840"
+      ]
+    },
+    {
+      "id": "one-atlantic-center",
+      "name": "One Atlantic Center",
+      "displayName": "One Atlantic Center",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Midtown",
+      "lat": 33.787065,
+      "lon": -84.387368,
+      "x": 228.4,
+      "z": -3634.1,
+      "inM1Tile": false,
+      "osm": [
+        "way/39450314"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Tall, angular office tower with a stepped crown and a dark glass curtain wall.",
+      "opened": 1987,
+      "sources": [
+        "https://en.wikipedia.org/wiki/One_Atlantic_Center",
+        "https://www.openstreetmap.org/way/39450314"
+      ]
+    },
+    {
+      "id": "atlanta-symphony-hall",
+      "name": "Atlanta Symphony Hall",
+      "displayName": "Atlanta Symphony Hall",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Midtown",
+      "lat": 33.7893,
+      "lon": -84.3862,
+      "x": 336.8,
+      "z": -3881.9,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Concert hall of light stone and glass with a tall, flat-topped front, part of the Woodruff Arts Center campus.",
+      "opened": 1968,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_Symphony_Hall"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "georgia-tech-tech-tower",
+      "name": "Tech Tower",
+      "displayName": "Tech Tower",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Midtown",
+      "lat": 33.775,
+      "lon": -84.396,
+      "x": -572.3,
+      "z": -2296.5,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Small, collegiate Gothic-style tower of stone with a tall spire, on the Georgia Tech campus.",
+      "opened": 1888,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_Tech"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "atlanta-botanical-garden",
+      "name": "Atlanta Botanical Garden",
+      "displayName": "Atlanta Botanical Garden",
+      "trademark": false,
+      "kind": "park",
+      "district": "Midtown",
+      "lat": 33.791082,
+      "lon": -84.373229,
+      "x": 1538.2,
+      "z": -4078.6,
+      "inM1Tile": false,
+      "osm": [
+        "way/28909768"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Garden of landscaped beds, a tall glass conservatory and a wide lawn beside Piedmont Park.",
+      "opened": 1976,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_Botanical_Garden",
+        "https://www.openstreetmap.org/way/28909768"
+      ]
+    },
+    {
+      "id": "atlanta-history-center",
+      "name": "Atlanta History Center",
+      "displayName": "Atlanta History Center",
+      "trademark": false,
+      "kind": "museum",
+      "district": "Buckhead",
+      "lat": 33.841782,
+      "lon": -84.38601,
+      "x": 359.2,
+      "z": -9703,
+      "inM1Tile": false,
+      "osm": [
+        "way/267926997"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Museum campus of low brick buildings and a historic house set among wooded grounds and gardens.",
+      "opened": 1926,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_History_Center",
+        "https://www.openstreetmap.org/way/267926997"
+      ]
+    },
+    {
+      "id": "georgia-governors-mansion",
+      "name": "Georgia Governor's Mansion",
+      "displayName": "Georgia Governor's Mansion",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Buckhead",
+      "lat": 33.84638,
+      "lon": -84.399151,
+      "x": -856.5,
+      "z": -10214.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/267561239"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large white Classical residence behind a wall and a wooded lawn on West Paces Ferry Road.",
+      "opened": 1968,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Georgia_Governor%27s_Mansion",
+        "https://www.openstreetmap.org/way/267561239"
+      ]
+    },
+    {
+      "id": "lenox-square",
+      "name": "Lenox Square",
+      "displayName": "Linden Square",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Buckhead",
+      "lat": 33.846683,
+      "lon": -84.362856,
+      "x": 2502.6,
+      "z": -10245.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/40032321"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large enclosed mall of pale stone and glass with a multi-level car park and a wide courtyard entrance on Peachtree Road.",
+      "opened": 1959,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Lenox_Square",
+        "https://www.openstreetmap.org/way/40032321"
+      ]
+    },
+    {
+      "id": "phipps-plaza",
+      "name": "Phipps Plaza",
+      "displayName": "Pinecrest Plaza",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Buckhead",
+      "lat": 33.852675,
+      "lon": -84.362139,
+      "x": 2569.3,
+      "z": -10909.7,
+      "inM1Tile": false,
+      "osm": [
+        "way/107533617"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Upscale mall of beige stone and tinted glass, with a long multi-storey façade on Peachtree Road.",
+      "opened": 1969,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Phipps_Plaza",
+        "https://www.openstreetmap.org/way/107533617"
+      ]
+    },
+    {
+      "id": "cathedral-of-st-philip",
+      "name": "Cathedral of St. Philip",
+      "displayName": "Cathedral of St. Philip",
+      "trademark": false,
+      "kind": "church",
+      "district": "Buckhead",
+      "lat": 33.830709,
+      "lon": -84.387283,
+      "x": 240.4,
+      "z": -8475,
+      "inM1Tile": false,
+      "osm": [
+        "way/267773373"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large Gothic-revival stone church with a tall tower and a broad front lawn on Peachtree Road.",
+      "opened": 1972,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Cathedral_of_St._Philip",
+        "https://www.openstreetmap.org/way/267773373"
+      ]
+    },
+    {
+      "id": "chastain-park-amphitheatre",
+      "name": "Chastain Park Amphitheatre",
+      "displayName": "Chastain Park Amphitheatre",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Buckhead",
+      "lat": 33.8917,
+      "lon": -84.3873,
+      "x": 244.6,
+      "z": -15240.1,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Open-air concert bowl of stone seating among tall pines in a wooded city park.",
+      "opened": 1977,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Chastain_Park"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "vinings-village",
+      "name": "Vinings Village",
+      "displayName": "Vinings Village",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Vinings",
+      "lat": 33.8534,
+      "lon": -84.4617,
+      "x": -6644.3,
+      "z": -11000.2,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A small village centre of brick and frame shopfronts and cafes on a hill over the river, along Paces Ferry Road.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Vinings,_Georgia"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "cobb-galleria-centre",
+      "name": "Cobb Galleria Centre",
+      "displayName": "Cobb Galleria Centre",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Vinings",
+      "lat": 33.883941,
+      "lon": -84.466046,
+      "x": -7041,
+      "z": -14388.5,
+      "inM1Tile": false,
+      "osm": [
+        "way/67479875"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large convention and performing arts centre of glass and pale stone around a tall glazed atrium, next to the Galleria shopping district.",
+      "opened": 1994,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Cobb_Galleria_Centre",
+        "https://www.openstreetmap.org/way/67479875"
+      ]
+    },
+    {
+      "id": "truist-park",
+      "name": "Truist Park",
+      "displayName": "Diamond Ridge Ballpark",
+      "trademark": true,
+      "kind": "stadium",
+      "district": "Cobb",
+      "lat": 33.890738,
+      "lon": -84.467616,
+      "x": -7185,
+      "z": -15142.6,
+      "inM1Tile": false,
+      "osm": [
+        "way/483842488"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Baseball ballpark of brick, steel and open seating, with a long grand entry plaza and a large scoreboard at the outfield.",
+      "opened": 2017,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Truist_Park",
+        "https://www.openstreetmap.org/way/483842488"
+      ]
+    },
+    {
+      "id": "the-battery-atlanta",
+      "name": "The Battery Atlanta",
+      "displayName": "The Dugout District",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Cobb",
+      "lat": 33.88976,
+      "lon": -84.468516,
+      "x": -7268.4,
+      "z": -15034.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/34805327"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Outdoor mixed-use district of modern brick and glass buildings and open plazas around the ballpark.",
+      "opened": 2017,
+      "sources": [
+        "https://en.wikipedia.org/wiki/The_Battery_Atlanta",
+        "https://www.openstreetmap.org/way/34805327"
+      ]
+    },
+    {
+      "id": "spaghetti-junction",
+      "name": "Spaghetti Junction",
+      "displayName": "Spaghetti Junction",
+      "trademark": false,
+      "kind": "interchange",
+      "district": "Connector",
+      "lat": 33.8966,
+      "lon": -84.2989,
+      "x": 8421.7,
+      "z": -15780.2,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Multi-level highway interchange of tall concrete ramps and curving overpasses where I-85 meets I-285.",
+      "opened": 1971,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Spaghetti_Junction_(Atlanta)"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "cobb-cloverleaf",
+      "name": "Cobb Cloverleaf",
+      "displayName": "Cobb Cloverleaf",
+      "trademark": false,
+      "kind": "interchange",
+      "district": "Cobb",
+      "lat": 33.9145,
+      "lon": -84.5002,
+      "x": -10194,
+      "z": -17783.7,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Wide, looping cloverleaf interchange of concrete ramps and high bridges where I-75 crosses I-285.",
+      "opened": 1970,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Interstate_285"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "hartsfield-jackson-airport",
+      "name": "Hartsfield-Jackson Atlanta International Airport",
+      "displayName": "Hartsfield-Jackson Atlanta International Airport",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Edges",
+      "lat": 33.637401,
+      "lon": -84.429816,
+      "x": -3723.8,
+      "z": 12962.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/208889095"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Large airport of long concourses, a tall glass control tower and runways, with long rows of parked aircraft on the apron.",
+      "opened": 1925,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/208889095"
+      ]
+    },
+    {
+      "id": "stone-mountain-park",
+      "name": "Stone Mountain Park",
+      "displayName": "Stone Mountain Park",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Edges",
+      "lat": 33.806969,
+      "lon": -84.142319,
+      "x": 22920.1,
+      "z": -5849.6,
+      "inM1Tile": false,
+      "osm": [
+        "relation/1447405"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A huge granite dome rising from wooded parkland, with a long walk-up trail to the top and a lawn for a laser show.",
+      "opened": 1958,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Stone_Mountain_Park",
+        "https://www.openstreetmap.org/relation/1447405"
+      ]
+    },
+    {
+      "id": "stone-mountain-carving",
+      "name": "Stone Mountain carving",
+      "displayName": "Stone Mountain carving",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Edges",
+      "lat": 33.808,
+      "lon": -84.1461,
+      "x": 22569.9,
+      "z": -5963.3,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A large carved relief high on the granite face of the mountain, shown as a distant, neutral landmark with no detail beyond its silhouette.",
+      "opened": 1972,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Stone_Mountain_Memorial_carving"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "lake-lanier",
+      "name": "Lake Lanier",
+      "displayName": "Lake Lanier",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Edges",
+      "lat": 34.145,
+      "lon": -84.028,
+      "x": 33405.9,
+      "z": -43366.8,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A large reservoir of wooded shoreline, coves and marinas with a concrete dam at one end, handled quietly and without gags.",
+      "opened": 1956,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Lake_Lanier"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "kennesaw-mountain",
+      "name": "Kennesaw Mountain",
+      "displayName": "Kennesaw Mountain",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Cobb",
+      "lat": 33.949435,
+      "lon": -84.596986,
+      "x": -19133.3,
+      "z": -21680.5,
+      "inM1Tile": false,
+      "osm": [
+        "relation/143353"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A wooded ridge with rocky summits and walking trails, marked as a national battlefield park.",
+      "opened": 1935,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Kennesaw_Mountain",
+        "https://www.openstreetmap.org/relation/143353"
+      ]
+    },
+    {
+      "id": "big-chicken-marietta",
+      "name": "Big Chicken",
+      "displayName": "Giant Hen",
+      "trademark": true,
+      "kind": "monument",
+      "district": "Cobb",
+      "lat": 33.9547,
+      "lon": -84.5306,
+      "x": -12995.3,
+      "z": -22248.7,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Tall steel-framed roadside sign of a giant chicken on a lean post beside a busy arterial road.",
+      "opened": 1963,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Big_Chicken"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "marietta-square",
+      "name": "Marietta Square",
+      "displayName": "Marietta Square",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Cobb",
+      "lat": 33.952754,
+      "lon": -84.549616,
+      "x": -14753.5,
+      "z": -22037,
+      "inM1Tile": false,
+      "osm": [
+        "way/503668469"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A historic courthouse square of two-storey brick storefronts and a tall clock-topped courthouse in the middle.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Marietta_Square",
+        "https://www.openstreetmap.org/way/503668469"
+      ]
+    },
+    {
+      "id": "six-flags-over-georgia",
+      "name": "Six Flags Over Georgia",
+      "displayName": "Thrill Kingdom Georgia",
+      "trademark": true,
+      "kind": "park",
+      "district": "Cobb",
+      "lat": 33.767076,
+      "lon": -84.551072,
+      "x": -14938.4,
+      "z": -1441.8,
+      "inM1Tile": false,
+      "osm": [
+        "way/105155919"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Theme park of roller coasters and tall steel rides with a wide entry plaza and a large parking field.",
+      "opened": 1967,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Six_Flags_Over_Georgia",
+        "https://www.openstreetmap.org/way/105155919"
+      ]
+    },
+    {
+      "id": "mall-of-georgia",
+      "name": "Mall of Georgia",
+      "displayName": "Grand Georgia Mall",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Gwinnett",
+      "lat": 34.064556,
+      "lon": -83.985215,
+      "x": 37379.4,
+      "z": -34454.9,
+      "inM1Tile": false,
+      "osm": [
+        "way/387565255"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large enclosed mall with a long grey-and-white facade and a wide surface car park.",
+      "opened": 1999,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mall_of_Georgia",
+        "https://www.openstreetmap.org/way/387565255"
+      ]
+    },
+    {
+      "id": "decatur-square",
+      "name": "Decatur Square",
+      "displayName": "Decatur Square",
+      "trademark": false,
+      "kind": "neighborhood-landmark",
+      "district": "Decatur",
+      "lat": 33.7748,
+      "lon": -84.2963,
+      "x": 8662.7,
+      "z": -2270.2,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A small town square with a historic courthouse and brick two-storey shopfronts and cafes around it.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Decatur,_Georgia"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "pdk-airport",
+      "name": "DeKalb-Peachtree Airport",
+      "displayName": "DeKalb-Peachtree Airport",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Brookhaven",
+      "lat": 33.875927,
+      "lon": -84.302845,
+      "x": 8056.8,
+      "z": -13487.1,
+      "inM1Tile": false,
+      "osm": [
+        "way/34847193"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A small general-aviation airfield with a low terminal, hangars and a short runway among suburban trees.",
+      "opened": 1941,
+      "sources": [
+        "https://en.wikipedia.org/wiki/DeKalb-Peachtree_Airport",
+        "https://www.openstreetmap.org/way/34847193"
+      ]
+    },
+    {
+      "id": "atlanta-public-safety-training-center",
+      "name": "Atlanta Public Safety Training Center",
+      "displayName": "Atlanta Public Safety Training Center",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Edges",
+      "lat": 33.695093,
+      "lon": -84.335401,
+      "x": 5037.9,
+      "z": 6570.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/393527424"
+      ],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A training campus of low classroom buildings and a practice area in wooded land, built with a neutral, low-key design.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_Public_Safety_Training_Center",
+        "https://www.openstreetmap.org/way/393527424"
+      ]
+    },
+    {
+      "id": "oakland-cemetery",
+      "name": "Oakland Cemetery",
+      "displayName": "Oakland Cemetery",
+      "trademark": false,
+      "kind": "monument",
+      "district": "Grant Park",
+      "lat": 33.74869,
+      "lon": -84.372163,
+      "x": 1633.6,
+      "z": 623.6,
+      "inM1Tile": false,
+      "osm": [
+        "way/28912001"
+      ],
+      "priority": "notable",
+      "sensitive": true,
+      "look": "A historic Victorian cemetery of old stone monuments, tall oaks and winding paths, kept quiet and respectful.",
+      "opened": 1850,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Oakland_Cemetery",
+        "https://www.openstreetmap.org/way/28912001"
+      ]
+    },
+    {
+      "id": "zoo-atlanta",
+      "name": "Zoo Atlanta",
+      "displayName": "Zoo Atlanta",
+      "trademark": false,
+      "kind": "park",
+      "district": "Grant Park",
+      "lat": 33.7337,
+      "lon": -84.3716,
+      "x": 1684.6,
+      "z": 2286.2,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A zoo in a hilly wooded park, with animal enclosures, paths and a tall entry gate.",
+      "opened": 1889,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Zoo_Atlanta"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "grady-memorial-hospital",
+      "name": "Grady Memorial Hospital",
+      "displayName": "Grady Memorial Hospital",
+      "trademark": false,
+      "kind": "civic",
+      "district": "Downtown",
+      "lat": 33.751732,
+      "lon": -84.382005,
+      "x": 722,
+      "z": 285.4,
+      "inM1Tile": true,
+      "osm": [
+        "way/270880941"
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Large hospital complex of tall brick and glass wings with a wide emergency entrance on Jesse Hill Jr. Drive.",
+      "opened": 1892,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Grady_Memorial_Hospital",
+        "https://www.openstreetmap.org/way/270880941"
+      ]
+    },
+    {
+      "id": "king-and-queen-towers",
+      "name": "Concourse at Landmark Center (King and Queen towers)",
+      "displayName": "King and Queen Towers",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Sandy Springs",
+      "lat": 33.9268,
+      "lon": -84.3505,
+      "x": 3650.5,
+      "z": -19131.1,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Two tall office towers of glass and stone, the taller one with a crown, standing side by side on a shared plaza by the highway.",
+      "opened": 2000,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Concourse_at_Landmark_Center"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "atlanta-amtrak-station",
+      "name": "Atlanta Amtrak station",
+      "displayName": "Piedmont Rail Station",
+      "trademark": true,
+      "kind": "transit",
+      "district": "Downtown",
+      "lat": 33.7568,
+      "lon": -84.3928,
+      "x": -277.7,
+      "z": -277.5,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A low station building of brick and steel with a canopy over the platform.",
+      "opened": 1971,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_station_(Amtrak)"
+      ],
+      "unverified": true
+    },
+    {
+      "id": "atlantic-station",
+      "name": "Atlantic Station",
+      "displayName": "Atlantis Station",
+      "trademark": true,
+      "kind": "shopping",
+      "district": "Midtown",
+      "lat": 33.791241,
+      "lon": -84.398037,
+      "x": -759.3,
+      "z": -4098.2,
+      "inM1Tile": false,
+      "osm": [
+        "way/289752150"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Mixed-use district of brick and glass towers and apartments built on a former steel mill site, with a long street grid and a central plaza.",
+      "opened": 2005,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlantic_Station",
+        "https://www.openstreetmap.org/way/289752150"
+      ]
+    },
+    {
+      "id": "beltline-eastside-trail",
+      "name": "Atlanta BeltLine Eastside Trail",
+      "displayName": "Atlanta Loop Line Eastside Trail",
+      "trademark": true,
+      "kind": "trail",
+      "district": "Old Fourth Ward",
+      "anchors": [
+        {
+          "name": "Ponce City Market",
+          "lat": 33.77244,
+          "lon": -84.365203,
+          "x": 2280.2,
+          "z": -2010.3,
+          "inM1Tile": false,
+          "osm": [
+            "way/184803195"
+          ]
+        },
+        {
+          "name": "Krog Street Tunnel",
+          "lat": 33.7553,
+          "lon": -84.3555,
+          "x": 3178,
+          "z": -108.7,
+          "inM1Tile": false,
+          "osm": [],
+          "unverified": true
+        },
+        {
+          "name": "Freedom Park",
+          "lat": 33.761974,
+          "lon": -84.365464,
+          "x": 2255.3,
+          "z": -849.5,
+          "inM1Tile": false,
+          "osm": [
+            "relation/12045420"
+          ]
+        }
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A wide paved trail on an old rail corridor, with wooden footbridges, brick walls and new apartments along its length.",
+      "opened": 2012,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_BeltLine"
+      ]
+    },
+    {
+      "id": "beltline-westside-trail",
+      "name": "Atlanta BeltLine Westside Trail",
+      "displayName": "Atlanta Loop Line Westside Trail",
+      "trademark": true,
+      "kind": "trail",
+      "district": "Westside",
+      "anchors": [
+        {
+          "name": "Westside Reservoir Park",
+          "lat": 33.78,
+          "lon": -84.416,
+          "x": -2424.2,
+          "z": -2853,
+          "inM1Tile": false,
+          "osm": [],
+          "unverified": true
+        },
+        {
+          "name": "Lee + White",
+          "lat": 33.741,
+          "lon": -84.418,
+          "x": -2614.4,
+          "z": 1472.6,
+          "inM1Tile": false,
+          "osm": [],
+          "unverified": true
+        }
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A paved trail along a rail corridor through a former industrial area, with old brick buildings and newly built warehouses beside it.",
+      "opened": 2019,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_BeltLine"
+      ]
+    },
+    {
+      "id": "beltline-southside-trail",
+      "name": "Atlanta BeltLine Southside Trail",
+      "displayName": "Atlanta Loop Line Southside Trail",
+      "trademark": true,
+      "kind": "trail",
+      "district": "Grant Park",
+      "anchors": [
+        {
+          "name": "Oakland Cemetery",
+          "lat": 33.74869,
+          "lon": -84.372163,
+          "x": 1633.6,
+          "z": 623.6,
+          "inM1Tile": false,
+          "osm": [
+            "way/28912001"
+          ]
+        },
+        {
+          "name": "Ormewood Park",
+          "lat": 33.7315,
+          "lon": -84.3555,
+          "x": 3176.5,
+          "z": 2531.2,
+          "inM1Tile": false,
+          "osm": [],
+          "unverified": true
+        }
+      ],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A paved trail through a wooded rail corridor past old cottages and small industrial buildings toward Grant Park.",
+      "opened": 2016,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Atlanta_BeltLine"
+      ]
+    },
+    {
+      "id": "state-of-georgia-building",
+      "name": "State of Georgia Building",
+      "displayName": "State of Georgia Building",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.7541191,
+      "lon": -84.3905445,
+      "x": -69,
+      "z": 20,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Tall 1960s office tower on Peachtree Street with a stepped crown.",
+      "opened": 1966,
+      "sources": [
+        "https://www.openstreetmap.org/"
+      ]
+    },
+    {
+      "id": "hurt-building",
+      "name": "Hurt Building",
+      "displayName": "Hurt Building",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.7541846,
+      "lon": -84.3872311,
+      "x": 238,
+      "z": 13,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Wedge-shaped cream terra-cotta office building at Hurt Park, with a marble colonnade and a cornice.",
+      "opened": 1913,
+      "sources": [
+        "https://www.openstreetmap.org/"
+      ]
+    },
+    {
+      "id": "basilica-of-the-sacred-heart",
+      "name": "Basilica of the Sacred Heart of Jesus",
+      "displayName": "Basilica of the Sacred Heart of Jesus",
+      "trademark": false,
+      "kind": "church",
+      "district": "Downtown",
+      "lat": 33.7638235,
+      "lon": -84.3856109,
+      "x": 389,
+      "z": -1056,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Red-brick Romanesque-Gothic basilica with twin spires.",
+      "opened": 1897,
+      "sources": [
+        "https://www.openstreetmap.org/"
+      ]
+    },
+    {
+      "id": "corey-tower",
+      "name": "Corey Tower",
+      "displayName": "Corey Tower",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.7482912,
+      "lon": -84.3830916,
+      "x": 621,
+      "z": 667,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "A slim round residential tower of Georgia State University.",
+      "sources": [
+        "https://www.openstreetmap.org/"
+      ]
+    },
+    {
+      "id": "hilton-atlanta",
+      "name": "Hilton Atlanta",
+      "displayName": "Crestview Atlanta Hotel",
+      "trademark": true,
+      "kind": "tower",
+      "district": "Downtown",
+      "lat": 33.761526,
+      "lon": -84.3833958,
+      "x": 594,
+      "z": -801,
+      "inM1Tile": true,
+      "osm": [],
+      "priority": "notable",
+      "sensitive": false,
+      "look": "Wide 1971 hotel tower with a concave profile and a flat crown.",
+      "opened": 1971,
+      "sources": [
+        "https://www.openstreetmap.org/"
+      ]
+    }
+  ]
+}

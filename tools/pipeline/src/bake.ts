@@ -1,6 +1,6 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadTileConfig, type TileConfig } from './config.js';
+import { loadTileConfig, REPO_ROOT, type TileConfig } from './config.js';
 import { signedArea, type V2 } from './geo.js';
 import { collisionBytes, heightmapBytes } from './io/binary.js';
 import { encodeGlb, type GlbAttribute, type GlbPart, type MaterialSpec } from './io/glb.js';
@@ -8,17 +8,22 @@ import { MeshBuilder } from './mesh/builder.js';
 import { makeChunkGrid, splitMesh, type ChunkGrid } from './mesh/chunks.js';
 import { extrudeFootprint } from './mesh/extrude.js';
 import { fetchDem, type Dem } from './sources/dem.js';
-import { fetchOsm, fetchOsmNodes, fetchOsmPois, fetchOsmProps } from './sources/osm.js';
+import { fetchOsm, fetchOsmBuildingParts, fetchOsmNodes, fetchOsmPois, fetchOsmProps } from './sources/osm.js';
+import { fetchWikidataFacts } from './sources/wikidata.js';
 import { fetchOvertureBuildings, fetchOvertureParts, type OvertureBuilding, type OvertureBuildingPart } from './sources/overture.js';
 import { buildBuildings } from './world/buildings.js';
 import { OcclusionField } from './world/ao.js';
 import { declareRoofChannels, declareWallChannels, writePiece } from './world/buildingMesh.js';
 import { BUILDING_KINDS } from './world/classify.js';
+import { MATERIALS, ROOF_MATERIALS, STYLES } from './world/appearance.js';
+import { buildContexts } from './world/context.js';
+import { loadFacts } from './world/facts.js';
 import { planBuilding } from './world/plan.js';
 import { buildProps, type PropsRoad } from './world/props.js';
 import { RoadMask } from './world/markings.js';
 import { clipBuildingsToRoads } from './world/clip.js';
 import { collisionRings } from './world/collisionRings.js';
+import { heroDatum, hullBuildings, loadHeroSidecars, loadPack, placeHeroes, suppressReplaced, tileLandmarks } from './world/landmarks.js';
 import { parseNodeTags } from './world/nodes.js';
 import { parseOsm } from './world/osm.js';
 import { buildRoads, planRoads } from './world/roads.js';
@@ -45,6 +50,11 @@ const MAT: Record<string, MaterialSpec> = {
   glass: { name: 'bld_glass', baseColor: [1, 1, 1, 1], metallic: 0.35, roughness: 0.25 },
 };
 
+/** How far either side of a lane's or a junction curve's centreline no pole, trunk or bollard may stand, m. */
+const PROP_CLEAR = 1.6;
+/** How far either side of a lane's or a junction curve's centreline no building may stand, m (a car's half width and a little). */
+const LANE_CLEAR = 1.3;
+
 /** Ground level of detail 1: every Nth heightmap sample, lowered and skirted (see the contract). */
 export const GROUND_LOD1 = { step: 4, lower: 0.5, skirt: 3 };
 
@@ -55,11 +65,13 @@ const BUILDING_WALL_ATTRS: AttrSpec[] = [
   { channel: 'wall', name: '_WALL', type: 'f32', width: 4, snap: 32 },
   { channel: 'bld', name: '_BLD', type: 'u8', width: 4 },
   { channel: 'bid', name: '_BID', type: 'u16', width: 2 },
+  { channel: 'look', name: '_LOOK', type: 'u8', width: 4 },
 ];
 const BUILDING_ROOF_ATTRS: AttrSpec[] = [
   { channel: 'uv', name: 'TEXCOORD_0', type: 'f32', width: 2, snap: 32 },
   { channel: 'bld', name: '_BLD', type: 'u8', width: 4 },
   { channel: 'bid', name: '_BID', type: 'u16', width: 2 },
+  { channel: 'look', name: '_LOOK', type: 'u8', width: 4 },
   { channel: 'srf', name: '_SRF', type: 'u8', width: 4 },
 ];
 const ROAD_ATTRS: AttrSpec[] = [
@@ -162,7 +174,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
 
   // the roads' vertical profiles first: they cut and fill the heightmap, which everything else stands on
   const plan = planRoads(world.roads, hm);
-  log(`profiles: ${plan.stats.nodes} nodes, ${plan.stats.dipNodes} in dips, ${plan.stats.deckSpans} bridged spans (${Math.round(plan.stats.deckMetres)} m), terrain moved at ${plan.stats.carvedVertices} vertices (cut up to ${plan.stats.maxCut.toFixed(1)} m, fill up to ${plan.stats.maxFill.toFixed(1)} m; ground cut away under decks up to ${plan.stats.underDeckCut.toFixed(1)} m)`);
+  log(`profiles: ${plan.stats.nodes} nodes, ${plan.stats.dipNodes} in dips, ${plan.stats.ties} side-by-side ties, ${plan.stats.clearances} clearances under car decks (short by up to ${plan.stats.clearanceShort.toFixed(2)} m), ${plan.stats.relaxedCurves} vertical curves eased and ${plan.stats.softTies} ties loosened to keep a grade or clearance, ${plan.stats.atGradeBridges} mapped bridges at grade built on the ground, ${plan.stats.deckSpans} bridged spans (${plan.stats.embankedSpans} more with nothing under them are embankments; ${Math.round(plan.stats.deckMetres)} m designed), terrain moved at ${plan.stats.carvedVertices} vertices (cut up to ${plan.stats.maxCut.toFixed(1)} m, fill up to ${plan.stats.maxFill.toFixed(1)} m; ground cut away under decks up to ${plan.stats.underDeckCut.toFixed(1)} m); corridor smoothed at ${plan.stats.smoothedVertices} vertices (up to ${plan.stats.smoothMaxChange.toFixed(2)} m); bridges grown by ${plan.stats.deckNodesExtended} nodes to land, ${plan.stats.deckEndsUnlanded} ends still off the ground`);
 
   const land = rasterizeAreas(world.areas, hm);
   const grid = makeChunkGrid(b, cfg.chunkSize);
@@ -191,11 +203,36 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`junctions: ${roads.junctionStats.built} polygons from ${roads.junctionStats.candidates} junction nodes (${roads.junctionStats.clusters} clusters); not built: ${JSON.stringify(roads.junctionStats.rejected)}`);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
 
-  const built = buildBuildings(overture, world.buildings, cfg.projector, b, overtureParts);
+  // what the sources say of how buildings look beyond their footprints: OSM building parts, Wikidata facts, the known heights and looks
+  const osmPartsData = await fetchOsmBuildingParts(cfg);
+  const osmParts = osmPartsData ? parseOsm(osmPartsData, cfg.projector).parts ?? [] : [];
+  const wikidata = await fetchWikidataFacts(cfg, world.buildings.map((ob) => ob.tags.wikidata).filter((q): q is string => !!q && /^Q\d+$/.test(q)));
+  const facts = loadFacts(path.join(REPO_ROOT, 'data', 'cities', cfg.city.id));
+  const built = buildBuildings(overture, world.buildings, cfg.projector, b, overtureParts, { wikidata, facts, osmParts });
   const bstats = built.stats;
-  const clip = clipBuildingsToRoads(built.buildings, world.roads);
-  const buildings = clip.buildings;
-  log(`buildings on streets: ${clip.stats.clipped} cut by a road (${Math.round(clip.stats.removedAreaM2)} m2 removed, ${clip.stats.pieces} pieces, ${clip.stats.dropped} slivers dropped)`);
+  log(`building looks from the feeds (colour ${JSON.stringify(bstats.look.colour)}, roof colour ${JSON.stringify(bstats.look.roofColour)}, material ${JSON.stringify(bstats.look.material)}, style ${JSON.stringify(bstats.look.style)}, year ${JSON.stringify(bstats.look.year)}, floors ${JSON.stringify(bstats.look.floors)}; ${bstats.look.bare} of ${bstats.total} buildings have none of it); ${bstats.osmPartsAdded} OSM building parts added, ${bstats.osmHeightRefused} OSM heights refused for a piece inside a bigger outline; known heights: ${bstats.facts?.heights.applied ?? 0} fixed, ${bstats.facts?.heights.mismatched.length ?? 0} still below the known height; curated looks: ${bstats.facts?.looks.applied ?? 0}`);
+  // the lane graph comes from the roads alone; its lanes and junction curves also cut the buildings they would run into
+  const lanes = buildLanes(roads.json, roads.exported);
+  const lanePaths: { pts: V2[]; half: number }[] = [];
+  for (const e of lanes.edges) {
+    // (a lane on a deck too: a building that stands up through a deck is a wall in it)
+    const pts: V2[] = [];
+    for (let k = 0; k + 2 < e.pts.length; k += 3) pts.push([e.pts[k], e.pts[k + 2]]);
+    lanePaths.push({ pts, half: LANE_CLEAR });
+  }
+  // hero landmarks (world/landmarks.ts): the generic buildings they replace go before anything else sees them
+  const heroes = placeHeroes(loadHeroSidecars(path.join(REPO_ROOT, 'public', 'assets', 'landmarks')), cfg.projector, b);
+  const suppressed = suppressReplaced(built.buildings, heroes);
+  const clip = clipBuildingsToRoads(suppressed.buildings, world.roads, 0.3, 6, lanePaths);
+  // where cars drive (lanes and junction curves, a car's half width and a little either side): no pole, trunk or shelter stands there
+  const laneMask = new RoadMask();
+  for (const p of lanePaths) laneMask.addPolyline(p.pts, PROP_CLEAR);
+  const heroDatums = heroes.map((h) => heroDatum(h, (x, z) => surfaceHeight(hm, x, z)));
+  // a hero's hull is a building of the bake that is not drawn (its model is): collision, occlusion, footprints
+  const buildings = [...clip.buildings, ...heroes.flatMap((h, i) => hullBuildings(h, heroDatums[i]))];
+  if (heroes.length) log(`heroes: ${heroes.map((h, i) => `${h.side.id} (replaces ${suppressed.replaced.get(h.side.id)!.length} buildings, ${h.hull.length} hull prisms)`).join(', ')}`);
+  log(`buildings on streets: ${clip.stats.clipped} cut by a road or a lane (${Math.round(clip.stats.removedAreaM2)} m2 removed, ${clip.stats.pieces} pieces, ${clip.stats.dropped} slivers dropped, ${clip.stats.failed ?? 0} the clipper could not cut)`);
+  const contexts = buildContexts(buildings);
   const wall = declareWallChannels(new MeshBuilder());
   const roof = declareRoofChannels(new MeshBuilder());
   const glassWall = declareWallChannels(new MeshBuilder());
@@ -208,6 +245,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const field = new OcclusionField(b);
   const planned: { bd: (typeof buildings)[number]; datum: number; plan: ReturnType<typeof planBuilding> }[] = [];
   const kindCounts: Record<string, number> = Object.fromEntries(BUILDING_KINDS.map((k) => [k, 0]));
+  const look = { material: {} as Record<string, number>, style: {} as Record<string, number>, era: {} as Record<string, number>, roof: {} as Record<string, number>, materialData: 0, styleData: 0, colourData: 0, floorsData: 0, context: 0, crown: 0 };
   const bstat = { kindFromData: 0, eraFromData: 0, withParts: 0, pieces: 0, podiums: 0, pitchedBuildings: 0, pitchedPieces: 0, glass: 0, floating: 0 };
   for (const bd of buildings) {
     const outer = bd.rings[0];
@@ -217,10 +255,21 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     const cx = outer.reduce((a, p) => a + p[0], 0) / outer.length;
     const cz = outer.reduce((a, p) => a + p[1], 0) / outer.length;
     minY = Math.min(minY, surfaceHeight(hm, cx, cz));
-    const plan = planBuilding(bd);
+    if (bd.hero) minY = bd.hero.datum;
+    const plan = planBuilding(bd, contexts.get(bd.id));
     planned.push({ bd, datum: minY, plan });
     kindCounts[plan.cls.kind]++;
     if (plan.cls.kindFromData) bstat.kindFromData++;
+    look.material[plan.cls.material] = (look.material[plan.cls.material] ?? 0) + 1;
+    look.style[plan.cls.style] = (look.style[plan.cls.style] ?? 0) + 1;
+    look.era[plan.cls.era] = (look.era[plan.cls.era] ?? 0) + 1;
+    look.roof[plan.cls.roofMaterial] = (look.roof[plan.cls.roofMaterial] ?? 0) + 1;
+    if (plan.cls.materialFromData) look.materialData++;
+    if (plan.cls.styleFromData) look.styleData++;
+    if (plan.cls.colourFromData) look.colourData++;
+    if (plan.cls.floorsFromData) look.floorsData++;
+    if (plan.cls.fromContext) look.context++;
+    if (plan.cls.crown > 0) look.crown++;
     if (plan.cls.eraFromData) bstat.eraFromData++;
     if (plan.stats.parts > 0) bstat.withParts++;
     bstat.pieces += plan.pieces.length;
@@ -243,8 +292,10 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const equipment: Record<string, number> = {};
   let wallTris = 0;
   let roofTris = 0;
+  const heroHullTris = new Map<string, number>();
   for (const { bd, datum: minY, plan } of planned) {
-    for (const pc of plan.pieces) {
+    const tris0 = collision.triangleCount;
+    for (const pc of bd.hero ? [] : plan.pieces) {
       const st = writePiece({ datumY: minY, wall, glass: glassWall, roof, ao }, pc);
       wallTris += st.wallTris;
       roofTris += st.roofTris;
@@ -261,9 +312,11 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     const base = collision.vertexCount;
     for (let i = 0; i < scratchRoof.vertexCount; i++) collision.vertex(scratchRoof.positions[i * 3], scratchRoof.positions[i * 3 + 1], scratchRoof.positions[i * 3 + 2], 0, 1, 0);
     for (const i of scratchRoof.indices) collision.indices.push(base + i);
+    if (bd.hero) heroHullTris.set(bd.hero.id, (heroHullTris.get(bd.hero.id) ?? 0) + collision.triangleCount - tris0);
   }
   const buildingCollisionTris = collision.triangleCount;
   log(`buildings: ${kept.length} (${skipped} tiny skipped, ${holed} with courtyards), heights ${JSON.stringify(bstats.heightSources)}`);
+  log(`building looks: material ${JSON.stringify(look.material)} (${look.materialData} from data), style ${JSON.stringify(look.style)} (${look.styleData} from data), era ${JSON.stringify(look.era)}, roof ${JSON.stringify(look.roof)}; wall colour from data ${look.colourData}, floors from data ${look.floorsData}, ${look.context} decided by the neighbours, ${look.crown} with a crown`);
   log(`building kinds: ${JSON.stringify(kindCounts)}; ${bstat.kindFromData} classified from data, ${bstat.eraFromData} dated; ${bstat.withParts} stepped (${bstat.pieces} pieces, ${bstat.podiums} podiums), ${bstat.pitchedBuildings} with pitched roofs; rooftop equipment ${JSON.stringify(equipment)}; ${wallTris} wall and ${roofTris} roof triangles`);
 
   // collision: buildings then elevated deck slabs and piers
@@ -288,6 +341,20 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
 
   const pois = await fetchOsmPois(cfg);
   const scenarios = buildScenarios({ pois, projector: cfg.projector, paths: paths.file, roads: roads.json, areas: world.areas, footprints: kept, bounds: b, ground });
+  {
+    // a bus stop's shelter and a bench are solid: none where a car's path runs (the shelter reaches about 1.6 m from its point)
+    const before = scenarios.points.length;
+    scenarios.points = scenarios.points.filter((p) => !(p.type === 'busstop' && laneMask.contains(p.x, p.z, -1.6)) && !(p.type === 'bench' && laneMask.contains(p.x, p.z, -0.6)));
+    if (scenarios.points.length !== before) {
+      scenarios.stats.total = scenarios.points.length;
+      const byType: Record<string, number> = {};
+      for (const q of scenarios.points) byType[q.type] = (byType[q.type] ?? 0) + 1;
+      scenarios.stats.byType = byType as typeof scenarios.stats.byType;
+      scenarios.stats.osm = scenarios.points.filter((q) => q.src === 'osm').length;
+      scenarios.stats.synth = scenarios.points.filter((q) => q.src === 'synth').length;
+      log(`scenarios: ${before - scenarios.points.length} bus stops and benches in a car's path left out`);
+    }
+  }
   log(`scenarios: ${scenarios.stats.total} points (${scenarios.stats.osm} from OSM, ${scenarios.stats.synth} synthesised${pois ? '' : '; the POI query failed'}) ${JSON.stringify(scenarios.stats.byType)}`);
 
   // tree, street lamp and furniture anchors (props.json): OSM where mapped, synthetic placements elsewhere
@@ -305,9 +372,11 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     roads: propsRoads,
     pedestrianWays: world.roads.filter((w) => w.highway === 'pedestrian' && w.kind === 'ped' && w.sub !== 'crossing'),
     areas: world.areas,
-    footprints: kept,
+    // (a hero's cut-out is kept clear too: the fountain's plaza has no walls, so no hull)
+    footprints: [...kept, ...heroes.flatMap((h) => h.clearRings.map((r) => [r]))],
     roadMask: roads.mask,
     pathMask,
+    laneMask,
     ground,
     bounds: b,
   });
@@ -360,16 +429,24 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   sizes['collision.bin'] = write(path.join(out, 'collision.bin'), collisionBytes(collision.positions, collision.indices));
   sizes['roads.json'] = write(path.join(out, 'roads.json'), JSON.stringify({ roads: roads.json }));
   sizes['junctions.json'] = write(path.join(out, 'junctions.json'), JSON.stringify(roads.exported));
-  const lanes = buildLanes(roads.json, roads.exported);
   sizes['lanes.json'] = write(path.join(out, 'lanes.json'), JSON.stringify(lanes));
   log(`lanes: ${lanes.stats.lanes} lanes (${lanes.stats.laneKm} km), ${lanes.stats.connectors} connectors, ${lanes.stats.junctions} junctions and ${lanes.stats.implicitJunctions} places where roads meet without one; largest strongly connected part ${(lanes.stats.largestComponent * 100).toFixed(1)}% of lane length (${(lanes.stats.largestComponentStreets * 100).toFixed(1)}% of surface streets)`);
   sizes['paths.json'] = write(path.join(out, 'paths.json'), JSON.stringify(paths.file));
   sizes['scenarios.json'] = write(path.join(out, 'scenarios.json'), JSON.stringify(scenarios));
   sizes['props.json'] = write(path.join(out, 'props.json'), JSON.stringify(props));
+  const landmarkPack = loadPack(path.join(REPO_ROOT, 'data', 'cities', cfg.city.id));
+  const landmarkFile = landmarkPack.length || heroes.length
+    ? tileLandmarks(landmarkPack, heroes.map((h, i) => ({ place: h, datum: heroDatums[i], replaced: suppressed.replaced.get(h.side.id)!, hullTris: heroHullTris.get(h.side.id) ?? 0 })), cfg.projector, b)
+    : null;
+  if (landmarkFile) {
+    sizes['landmarks.json'] = write(path.join(out, 'landmarks.json'), JSON.stringify(landmarkFile));
+    log(`landmarks: ${landmarkFile.landmarks.length} in the tile, ${heroes.length} with a hero model`);
+  }
 
   const attribution = [cfg.city.sources.osm.attribution];
   if (used.overture) attribution.push(cfg.city.sources.overture.attribution);
   if (used.dem) attribution.push(cfg.city.sources.elevation.attribution);
+  if (wikidata.size || facts.heights.length) attribution.push('Building heights and dates: Wikidata (CC0) and Wikipedia (CC BY-SA)');
 
   const tile = {
     format: 'hood-tile',
@@ -396,8 +473,12 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     paths: 'paths.json',
     scenarios: 'scenarios.json',
     props: 'props.json',
-    meshFormat: 2,
+    ...(landmarkFile ? { landmarks: 'landmarks.json' } : {}),
+    meshFormat: 3,
     buildingKinds: [...BUILDING_KINDS],
+    buildingMaterials: [...MATERIALS],
+    buildingStyles: [...STYLES],
+    roofMaterials: [...ROOF_MATERIALS],
     landClasses: [...LAND_CLASSES],
     spawns,
     attribution,

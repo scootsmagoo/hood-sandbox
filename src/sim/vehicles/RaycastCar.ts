@@ -422,7 +422,7 @@ export class RaycastCar {
       this.ray.dir.x = -up.x;
       this.ray.dir.y = -up.y;
       this.ray.dir.z = -up.z;
-      const hit = this.world.castRayAndGetNormal(this.ray, reach, true, undefined, GROUPS.actorQuery, undefined, body);
+      const hit = this.world.castRayAndGetNormal(this.ray, reach, true, undefined, GROUPS.wheelQuery, undefined, body);
       w.prevLength = w.length;
       if (hit) {
         w.grounded = true;

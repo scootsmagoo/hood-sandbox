@@ -1,0 +1,378 @@
+{
+  "_comment": "Written by tools/blender/characters/build.mjs (npm run assets). Do not edit.",
+  "file": "assets/characters/characters.glb",
+  "hash": "174fb59a6356",
+  "bytes": 1749324,
+  "regions": [
+    "skin",
+    "lip",
+    "eye",
+    "sclera",
+    "hair",
+    "top",
+    "top2",
+    "bottom",
+    "shoe",
+    "sole",
+    "belt",
+    "hat",
+    "gear",
+    "trim",
+    "stubble",
+    "face"
+  ],
+  "bones": {
+    "root": {
+      "parent": null,
+      "head": [
+        0,
+        0,
+        0
+      ]
+    },
+    "pelvis": {
+      "parent": "root",
+      "head": [
+        0,
+        1,
+        0
+      ]
+    },
+    "spine": {
+      "parent": "pelvis",
+      "head": [
+        0,
+        1.09,
+        0
+      ]
+    },
+    "chest": {
+      "parent": "spine",
+      "head": [
+        0,
+        1.25,
+        0
+      ]
+    },
+    "neck": {
+      "parent": "chest",
+      "head": [
+        0,
+        1.44,
+        0
+      ]
+    },
+    "head": {
+      "parent": "neck",
+      "head": [
+        0,
+        1.52,
+        0.006
+      ]
+    },
+    "clavicle_L": {
+      "parent": "chest",
+      "head": [
+        0.02,
+        1.425,
+        0
+      ]
+    },
+    "upperarm_L": {
+      "parent": "clavicle_L",
+      "head": [
+        0.2,
+        1.45,
+        0
+      ]
+    },
+    "forearm_L": {
+      "parent": "upperarm_L",
+      "head": [
+        0.2582,
+        1.1761,
+        0.012
+      ]
+    },
+    "hand_L": {
+      "parent": "forearm_L",
+      "head": [
+        0.3112,
+        0.9267,
+        0.045
+      ]
+    },
+    "clavicle_R": {
+      "parent": "chest",
+      "head": [
+        -0.02,
+        1.425,
+        0
+      ]
+    },
+    "upperarm_R": {
+      "parent": "clavicle_R",
+      "head": [
+        -0.2,
+        1.45,
+        0
+      ]
+    },
+    "forearm_R": {
+      "parent": "upperarm_R",
+      "head": [
+        -0.2582,
+        1.1761,
+        0.012
+      ]
+    },
+    "hand_R": {
+      "parent": "forearm_R",
+      "head": [
+        -0.3112,
+        0.9267,
+        0.045
+      ]
+    },
+    "thigh_L": {
+      "parent": "pelvis",
+      "head": [
+        0.095,
+        0.91,
+        0
+      ]
+    },
+    "shin_L": {
+      "parent": "thigh_L",
+      "head": [
+        0.092,
+        0.49,
+        0.012
+      ]
+    },
+    "foot_L": {
+      "parent": "shin_L",
+      "head": [
+        0.09,
+        0.085,
+        -0.004
+      ]
+    },
+    "toe_L": {
+      "parent": "foot_L",
+      "head": [
+        0.09,
+        0.03,
+        0.14
+      ]
+    },
+    "thigh_R": {
+      "parent": "pelvis",
+      "head": [
+        -0.095,
+        0.91,
+        0
+      ]
+    },
+    "shin_R": {
+      "parent": "thigh_R",
+      "head": [
+        -0.092,
+        0.49,
+        0.012
+      ]
+    },
+    "foot_R": {
+      "parent": "shin_R",
+      "head": [
+        -0.09,
+        0.085,
+        -0.004
+      ]
+    },
+    "toe_R": {
+      "parent": "foot_R",
+      "head": [
+        -0.09,
+        0.03,
+        0.14
+      ]
+    }
+  },
+  "tris": {
+    "kudzu_lod0": 4538,
+    "kudzu_lod1": 1222,
+    "kudzu_lod2": 400,
+    "suit_m_lod0": 4122,
+    "suit_m_lod1": 1042,
+    "suit_m_lod2": 366,
+    "office_f_lod0": 4566,
+    "office_f_lod1": 1158,
+    "office_f_lod2": 430,
+    "casual_m_lod0": 4106,
+    "casual_m_lod1": 1034,
+    "casual_m_lod2": 360,
+    "casual_m_cap_lod0": 4468,
+    "casual_m_cap_lod1": 1172,
+    "casual_m_cap_lod2": 414,
+    "casual_f_lod0": 4454,
+    "casual_f_lod1": 1166,
+    "casual_f_lod2": 416,
+    "hoodie_m_lod0": 4278,
+    "hoodie_m_lod1": 1144,
+    "hoodie_m_lod2": 394,
+    "hoodie_m_beanie_lod0": 4598,
+    "hoodie_m_beanie_lod1": 1264,
+    "hoodie_m_beanie_lod2": 442,
+    "dress_f_lod0": 4478,
+    "dress_f_lod1": 1142,
+    "dress_f_lod2": 390,
+    "student_f_lod0": 4354,
+    "student_f_lod1": 1202,
+    "student_f_lod2": 392,
+    "worker_m_lod0": 4690,
+    "worker_m_lod1": 1282,
+    "worker_m_lod2": 496,
+    "tourist_m_lod0": 4592,
+    "tourist_m_lod1": 1264,
+    "tourist_m_lod2": 426,
+    "layers_m_lod0": 4766,
+    "layers_m_lod1": 1356,
+    "layers_m_lod2": 454,
+    "layers_f_lod0": 4754,
+    "layers_f_lod1": 1286,
+    "layers_f_lod2": 462,
+    "officer_m_lod0": 4792,
+    "officer_m_lod1": 1396,
+    "officer_m_lod2": 448,
+    "officer_f_lod0": 4856,
+    "officer_f_lod1": 1444,
+    "officer_f_lod2": 448
+  },
+  "clips": {
+    "walk": {
+      "duration": 1.1,
+      "loop": true
+    },
+    "jog": {
+      "duration": 0.76,
+      "loop": true
+    },
+    "sprint": {
+      "duration": 0.58,
+      "loop": true
+    },
+    "idle": {
+      "duration": 4,
+      "loop": true
+    },
+    "turn_l": {
+      "duration": 0.9,
+      "loop": true
+    },
+    "turn_r": {
+      "duration": 0.9,
+      "loop": true
+    },
+    "flee": {
+      "duration": 0.6,
+      "loop": true
+    },
+    "sit": {
+      "duration": 6,
+      "loop": true
+    },
+    "phone": {
+      "duration": 5,
+      "loop": true
+    },
+    "film": {
+      "duration": 4,
+      "loop": true
+    },
+    "cower": {
+      "duration": 1.2,
+      "loop": true
+    },
+    "chat": {
+      "duration": 5,
+      "loop": true
+    },
+    "atm": {
+      "duration": 4,
+      "loop": true
+    },
+    "browse": {
+      "duration": 6,
+      "loop": true
+    },
+    "fight": {
+      "duration": 1.2,
+      "loop": true
+    },
+    "punch": {
+      "duration": 0.7,
+      "loop": false
+    },
+    "aim_pistol": {
+      "duration": 1,
+      "loop": true
+    },
+    "aim_rifle": {
+      "duration": 1,
+      "loop": true
+    },
+    "aim_crouch": {
+      "duration": 1,
+      "loop": true
+    },
+    "cover": {
+      "duration": 2,
+      "loop": true
+    },
+    "cover_low": {
+      "duration": 2,
+      "loop": true
+    },
+    "reload": {
+      "duration": 1.2,
+      "loop": true
+    },
+    "drive": {
+      "duration": 3,
+      "loop": true
+    },
+    "enter_car": {
+      "duration": 0.7,
+      "loop": false
+    },
+    "exit_car": {
+      "duration": 0.7,
+      "loop": false
+    },
+    "dragged": {
+      "duration": 0.6,
+      "loop": true
+    },
+    "stumble": {
+      "duration": 0.7,
+      "loop": true
+    },
+    "flinch": {
+      "duration": 0.4,
+      "loop": false
+    },
+    "fall": {
+      "duration": 0.8,
+      "loop": true
+    },
+    "getup_back": {
+      "duration": 1.6,
+      "loop": false
+    },
+    "getup_front": {
+      "duration": 1.6,
+      "loop": false
+    }
+  }
+}

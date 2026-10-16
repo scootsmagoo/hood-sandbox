@@ -43,7 +43,7 @@ export interface OvertureBuildingPart {
   polygons: [number, number][][][];
 }
 
-async function latestRelease(cfg: TileConfig): Promise<string> {
+async function latestRelease(cfg: Pick<TileConfig, 'city'>): Promise<string> {
   const want = cfg.city.sources.overture.release;
   if (want !== 'latest') return want;
   const res = await fetch('https://stac.overturemaps.org/catalog.json');
@@ -74,6 +74,76 @@ async function withRetries<T>(what: string, fn: () => Promise<T>, tries = 4): Pr
   }
   throw last;
 }
+
+/** The release a city's config names (`latest` resolved through the STAC catalog). */
+export const overtureRelease = (cfg: Pick<TileConfig, 'city'>): Promise<string> => latestRelease(cfg);
+
+type Box = TileConfig['queryBox'];
+
+/** The SELECT of the v2 building extract over a lon/lat box (shared by the tile bake and the grid prefetch). */
+export function overtureBuildingSql(bucket: string, release: string, b: Box, extraColumns = ''): string {
+  return `
+          SELECT id, height, min_height, num_floors, class, subtype, is_underground, roof_shape, roof_material, roof_color, roof_height,
+                 roof_direction, facade_material, facade_color, has_parts, names.primary AS name, ST_AsGeoJSON(geometry) AS gj${extraColumns}
+          FROM read_parquet('s3://${bucket}/release/${release}/theme=buildings/type=building/*', hive_partitioning=1)
+          WHERE bbox.xmin < ${b.east} AND bbox.xmax > ${b.west} AND bbox.ymin < ${b.north} AND bbox.ymax > ${b.south}
+          ORDER BY id`;
+}
+
+/** The SELECT of the building part extract over a lon/lat box. */
+export function overturePartSql(bucket: string, release: string, b: Box, extraColumns = ''): string {
+  return `
+          SELECT id, building_id, height, min_height, num_floors, roof_shape, roof_material, roof_color, roof_height, roof_direction,
+                 facade_material, facade_color, ST_AsGeoJSON(geometry) AS gj${extraColumns}
+          FROM read_parquet('s3://${bucket}/release/${release}/theme=buildings/type=building_part/*', hive_partitioning=1)
+          WHERE bbox.xmin < ${b.east} AND bbox.xmax > ${b.west} AND bbox.ymin < ${b.north} AND bbox.ymax > ${b.south}
+          ORDER BY id`;
+}
+
+/** A row of `overtureBuildingSql` as the bake reads it. */
+export function overtureBuildingFromRow(r: Record<string, unknown>): OvertureBuilding {
+  return {
+    id: r.id as string,
+    height: num(r.height),
+    numFloors: num(r.num_floors),
+    cls: str(r.class),
+    subtype: str(r.subtype),
+    isUnderground: r.is_underground === true,
+    minHeight: num(r.min_height),
+    roofShape: str(r.roof_shape),
+    roofMaterial: str(r.roof_material),
+    roofColor: str(r.roof_color),
+    roofHeight: num(r.roof_height),
+    roofDirection: num(r.roof_direction),
+    facadeMaterial: str(r.facade_material),
+    facadeColor: str(r.facade_color),
+    hasParts: r.has_parts === true,
+    name: str(r.name),
+    polygons: polys(r.gj as string),
+  };
+}
+
+/** A row of `overturePartSql` as the bake reads it. */
+export function overturePartFromRow(r: Record<string, unknown>): OvertureBuildingPart {
+  return {
+    id: r.id as string,
+    buildingId: r.building_id as string,
+    height: num(r.height),
+    minHeight: num(r.min_height),
+    numFloors: num(r.num_floors),
+    roofShape: str(r.roof_shape),
+    roofMaterial: str(r.roof_material),
+    roofColor: str(r.roof_color),
+    roofHeight: num(r.roof_height),
+    roofDirection: num(r.roof_direction),
+    facadeMaterial: str(r.facade_material),
+    facadeColor: str(r.facade_color),
+    polygons: polys(r.gj as string),
+  };
+}
+
+/** A DuckDB connection with httpfs and spatial loaded, for Overture's S3 bucket. */
+export const openOvertureDuck = (): ReturnType<typeof openDuck> => openDuck();
 
 async function openDuck() {
   const { DuckDBInstance } = await import('@duckdb/node-api');
@@ -109,32 +179,9 @@ export async function fetchOvertureBuildings(cfg: TileConfig): Promise<{ release
         const con = await openDuck();
         const b = cfg.queryBox;
         const bucket = cfg.city.sources.overture.bucket;
-        const sql = `
-          SELECT id, height, min_height, num_floors, class, subtype, is_underground, roof_shape, roof_material, roof_color, roof_height,
-                 roof_direction, facade_material, facade_color, has_parts, names.primary AS name, ST_AsGeoJSON(geometry) AS gj
-          FROM read_parquet('s3://${bucket}/release/${release}/theme=buildings/type=building/*', hive_partitioning=1)
-          WHERE bbox.xmin < ${b.east} AND bbox.xmax > ${b.west} AND bbox.ymin < ${b.north} AND bbox.ymax > ${b.south}
-          ORDER BY id`;
+        const sql = overtureBuildingSql(bucket, release, b);
         const rows = (await con.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[];
-        const buildings: OvertureBuilding[] = rows.map((r) => ({
-          id: r.id as string,
-          height: num(r.height),
-          numFloors: num(r.num_floors),
-          cls: str(r.class),
-          subtype: str(r.subtype),
-          isUnderground: r.is_underground === true,
-          minHeight: num(r.min_height),
-          roofShape: str(r.roof_shape),
-          roofMaterial: str(r.roof_material),
-          roofColor: str(r.roof_color),
-          roofHeight: num(r.roof_height),
-          roofDirection: num(r.roof_direction),
-          facadeMaterial: str(r.facade_material),
-          facadeColor: str(r.facade_color),
-          hasParts: r.has_parts === true,
-          name: str(r.name),
-          polygons: polys(r.gj as string),
-        }));
+        const buildings: OvertureBuilding[] = rows.map(overtureBuildingFromRow);
         return JSON.stringify({ release, buildings });
       });
     });
@@ -156,28 +203,9 @@ export async function fetchOvertureParts(cfg: TileConfig): Promise<OvertureBuild
         const con = await openDuck();
         const b = cfg.queryBox;
         const bucket = cfg.city.sources.overture.bucket;
-        const sql = `
-          SELECT id, building_id, height, min_height, num_floors, roof_shape, roof_material, roof_color, roof_height, roof_direction,
-                 facade_material, facade_color, ST_AsGeoJSON(geometry) AS gj
-          FROM read_parquet('s3://${bucket}/release/${release}/theme=buildings/type=building_part/*', hive_partitioning=1)
-          WHERE bbox.xmin < ${b.east} AND bbox.xmax > ${b.west} AND bbox.ymin < ${b.north} AND bbox.ymax > ${b.south}
-          ORDER BY id`;
+        const sql = overturePartSql(bucket, release, b);
         const rows = (await con.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[];
-        const parts: OvertureBuildingPart[] = rows.map((r) => ({
-          id: r.id as string,
-          buildingId: r.building_id as string,
-          height: num(r.height),
-          minHeight: num(r.min_height),
-          numFloors: num(r.num_floors),
-          roofShape: str(r.roof_shape),
-          roofMaterial: str(r.roof_material),
-          roofColor: str(r.roof_color),
-          roofHeight: num(r.roof_height),
-          roofDirection: num(r.roof_direction),
-          facadeMaterial: str(r.facade_material),
-          facadeColor: str(r.facade_color),
-          polygons: polys(r.gj as string),
-        }));
+        const parts: OvertureBuildingPart[] = rows.map(overturePartFromRow);
         return JSON.stringify({ release, parts });
       });
     });

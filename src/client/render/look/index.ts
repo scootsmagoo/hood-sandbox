@@ -8,6 +8,7 @@
  *   post     half-float target, bloom, ACES, the time-of-day grade                 (post.ts, grade in timeOfDay.ts)
  *   haze     exponential humid-air fog                                             (fog.ts)
  *   lamps    sodium street lamps: glow heads, light pools on the road, poles       (lamps.ts)
+ *   trees    the trees and small furniture of props.json, October-tinted           (../Trees.ts, ../Furniture.ts)
  *   sky      the hazy dome with clouds, stars and moon                             (sky.ts, owned by Atmosphere)
  *
  * The palette, sun, fog range and shadow softness for each moment come from timeOfDay.ts through
@@ -20,7 +21,12 @@ import type { Game, System } from '../../Game';
 import { gradeLook, newSkyLook, nightFactor, skyLook } from '../timeOfDay';
 import { hasBakedWalls, patchFacadeMaterial, prepareWallGeometry } from './facade';
 import { patchFogChunk } from './fog';
-import { loadLamps, StreetLamps } from './lamps';
+import { Furniture } from '../Furniture';
+import { loadAnchors, loadPropAssets } from '../propAssets';
+import { Trees } from '../Trees';
+import { lampsFromProps, loadLamps, StreetLamps } from './lamps';
+import type { PropsData } from '../../../shared/tile';
+import type { PropAssets } from '../propAssets';
 import { PostFx } from './post';
 import { lookState } from './state';
 import { patchSurfaceMaterial, prepareSurfaceGeometry } from './surfaces';
@@ -28,7 +34,7 @@ import { U } from './uniforms';
 
 const SCAN_EVERY = 0.5;
 
-class Look implements System {
+export class Look implements System {
   readonly name = 'look';
   /** After the atmosphere (150), so its fog and exposure are the ones to build on. */
   readonly priority = 160;
@@ -37,6 +43,8 @@ class Look implements System {
   private readonly patchedList: THREE.Material[] = [];
   private post: PostFx | null = null;
   private readonly lamps: StreetLamps;
+  private trees: Trees | null = null;
+  private furniture: Furniture | null = null;
   private readonly look = newSkyLook();
   private lastMinutes = -1;
   private scan = 0;
@@ -53,13 +61,62 @@ class Look implements System {
     this.lamps = new StreetLamps(game.scene);
     this.applyFx(true);
     game.onTierChange(() => this.applyFx(false));
-    if (tileBase && this.fx.lamps > 0) {
-      void loadLamps(tileBase, game.ready?.tile?.props, this.abort.signal).then((set) => {
-        if (!set || this.disposed) return;
+    if (tileBase && (this.fx.lamps > 0 || this.fx.trees > 0)) void this.loadProps(tileBase);
+  }
+
+  /** The anchors, the tree and furniture models, then the lamps, trees and furniture they make. Each part stays off if its file is missing. */
+  private async loadProps(tileBase: string) {
+    const file = this.game.ready?.tile?.props;
+    const [anchors, assets] = await Promise.all([loadAnchors(tileBase, file, this.abort.signal), loadPropAssets()]);
+    if (this.disposed) return;
+    if (this.fx.lamps > 0) {
+      const set = await loadLamps(tileBase, file, this.abort.signal, file ? anchors : undefined);
+      if (this.disposed) return;
+      if (set) {
+        if (assets) this.lamps.setModels(assets);
         this.lamps.setLamps(set);
         this.lampsLoaded = true;
         this.lamps.setLevel(this.fx.lamps);
-      });
+      }
+    }
+    if (assets && anchors && !this.disposed && this.fx.trees > 0) {
+      if (anchors.trees.length) {
+        this.trees = new Trees(this.game, anchors, assets);
+        // for the shot and debug scripts (the impostor atlas, the draw counts)
+        const hooks = (window as unknown as { __hood?: Record<string, unknown> }).__hood;
+        if (hooks) hooks.trees = this.trees;
+      }
+      this.furniture = new Furniture(this.game, anchors, assets);
+      this.applyFx(false);
+    }
+  }
+
+  private cityAssets: Promise<PropAssets | null> | null = null;
+  private cityModelled = false;
+
+  /**
+   * A streamed city (docs/contracts/city-tiles.md section 6): the union of the loaded tiles' anchors, handed in again whenever the
+   * tiles change. The lamps take the new list, the trees refill their instance lists (the atlas stays), the furniture is rebuilt.
+   */
+  async setCityProps(anchors: PropsData): Promise<void> {
+    const assets = await (this.cityAssets ??= loadPropAssets());
+    if (this.disposed) return;
+    if (this.fx.lamps > 0) {
+      if (assets && !this.cityModelled) {
+        this.lamps.setModels(assets);
+        this.cityModelled = true;
+      }
+      this.lamps.setLamps(lampsFromProps(anchors.lamps));
+      this.lampsLoaded = true;
+      this.lamps.setLevel(this.fx.lamps);
+    }
+    if (assets && this.fx.trees > 0) {
+      if (!this.trees) {
+        if (anchors.trees.length) this.trees = new Trees(this.game, anchors, assets);
+      } else this.trees.setAnchors(anchors);
+      this.furniture?.dispose();
+      this.furniture = new Furniture(this.game, anchors, assets);
+      this.applyFx(false);
     }
   }
 
@@ -82,6 +139,8 @@ class Look implements System {
     }
     lookState.facade = fx.facade > 0;
     this.lamps.setLevel(this.lampsLoaded ? fx.lamps : 0);
+    this.trees?.setLevel(fx.trees);
+    this.furniture?.setLevel(fx.trees);
     if (!first && (before.facade !== fx.facade || before.surfaces !== fx.surfaces)) for (const m of this.patchedList) m.needsUpdate = true;
   }
 
@@ -112,6 +171,8 @@ class Look implements System {
     }
     const fog = g.scene.fog as THREE.Fog | null;
     this.lamps.update(dt, g.camera, THREE.MathUtils.smoothstep(night, 0.2, 0.8), g.tier.lodScale, fog ? Math.max(fog.far, 50) : 900);
+    this.trees?.update(dt);
+    this.furniture?.update(dt);
   }
 
   /** Patches the baked materials and wall geometry that have not been seen yet (a rebuilt world has new ones). */
@@ -155,10 +216,12 @@ class Look implements System {
     this.post?.dispose();
     this.post = null;
     this.lamps.dispose();
+    this.trees?.dispose();
+    this.furniture?.dispose();
   }
 }
 
 /** Adds the look to the game. Called once, from main.ts, unless the URL says `gfx=classic`. */
-export function installLook(game: Game, tileBase: string | null): void {
-  game.addSystem(new Look(game, tileBase));
+export function installLook(game: Game, tileBase: string | null): Look {
+  return game.addSystem(new Look(game, tileBase));
 }

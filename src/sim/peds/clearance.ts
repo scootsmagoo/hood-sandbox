@@ -14,10 +14,10 @@ const STEP = 0.1375;
 const N = Math.round(LANE_MAX / STEP);
 
 export class EdgeClearance {
-  private readonly lo: Float32Array;
-  private readonly hi: Float32Array;
+  private lo: Float32Array;
+  private hi: Float32Array;
   /** 0 not yet measured, 1 open, 2 the middle line itself is blocked. */
-  private readonly state: Uint8Array;
+  private state: Uint8Array;
   /** Edges measured so far (diagnostics). */
   measured = 0;
   blocked = 0;
@@ -29,6 +29,24 @@ export class EdgeClearance {
     this.lo = new Float32Array(graph.edgeCount);
     this.hi = new Float32Array(graph.edgeCount);
     this.state = new Uint8Array(graph.edgeCount);
+    // a streamed city fills ranges of edge ids as tiles come and go: what was measured there is forgotten
+    graph.onEdges.push((start, n) => this.reset(start, n));
+  }
+
+  /** Forgets the edges `start .. start + n - 1` (they are new, or their tile changed), growing the arrays to hold them. */
+  reset(start: number, n: number) {
+    const need = start + n;
+    if (need > this.state.length) {
+      const cap = Math.max(need, Math.ceil(this.state.length * 1.5));
+      const lo = new Float32Array(cap), hi = new Float32Array(cap), st = new Uint8Array(cap);
+      lo.set(this.lo);
+      hi.set(this.hi);
+      st.set(this.state);
+      this.lo = lo;
+      this.hi = hi;
+      this.state = st;
+    }
+    this.state.fill(0, start, need);
   }
 
   private measure(e: number) {

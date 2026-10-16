@@ -41,6 +41,8 @@ const PLACES = {
   peachtree: { eye: [30, 4.4, -45], look: [95, 17, -170], fov: 62 },
   centennial: { eye: [-203, -10.5, -640], look: [-320, -14, -730], fov: 70 },
   aerial: { eye: [150, 150, 210], look: [-80, 20, -160], fov: 55 },
+  // Sweet Auburn: Auburn Avenue NE, street trees and lamps
+  auburn: { eye: [535, -8.3, -140], look: [640, -14, -138.5], fov: 62 },
 };
 const TIMES = { day: '14:00', dusk: '18:50', night: '23:30' };
 for (const [pn, pv] of Object.entries(PLACES)) for (const [tn, tv] of Object.entries(TIMES)) VIEWS[`${pn}-${tn}`] = { time: tv, ...pv };

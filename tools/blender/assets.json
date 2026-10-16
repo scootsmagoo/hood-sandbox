@@ -1,10 +1,38 @@
 {
-  "_comment": "Every asset `npm run assets` builds (tools/blender/build.mjs). module: the Python module under tools/blender with build(asset); type: the handling.json entry it is built to; police: has the police kit. Output: public/assets/vehicles/<name>.glb.",
+  "_comment": "Every asset `npm run assets` builds (tools/blender/build.mjs). module: the Python module under tools/blender with build(asset); type: the handling.json entry it is built to; police: has the police kit. Output: public/assets/vehicles/<name>.glb (props: public/assets/props, landmarks: public/assets/landmarks together with <name>.json, the placement and collision sidecar).",
   "vehicles": [
     { "name": "sedan", "module": "cars.sedan", "type": "sedan" },
     { "name": "coupe", "module": "cars.coupe", "type": "coupe" },
     { "name": "pickup", "module": "cars.pickup", "type": "pickup" },
     { "name": "sedan-police", "module": "cars.police", "type": "sedan", "police": true },
     { "name": "coupe-police", "module": "cars.police", "type": "coupe", "police": true }
+  ],
+  "props": [
+    { "name": "trees", "module": "props.trees" },
+    { "name": "furniture", "module": "props.furniture" }
+  ],
+  "landmarks": [
+    { "name": "mercedes-benz-stadium", "module": "landmarks.stadium" },
+    { "name": "georgia-state-capitol", "module": "landmarks.capitol" },
+    { "name": "hyatt-regency-atlanta", "module": "landmarks.hyatt" },
+    { "name": "state-farm-arena", "module": "landmarks.arena" },
+    { "name": "georgia-aquarium", "module": "landmarks.aquarium" },
+    { "name": "world-of-coca-cola", "module": "landmarks.coke" },
+    { "name": "skyview-atlanta", "module": "landmarks.skyview" },
+    { "name": "fountain-of-rings", "module": "landmarks.fountain" },
+    { "name": "truist-plaza", "module": "landmarks.truist" },
+    { "name": "191-peachtree-tower", "module": "landmarks.peachtree191" },
+    { "name": "flatiron-building-atlanta", "module": "landmarks.flatiron" },
+    { "name": "candler-building", "module": "landmarks.candler" },
+    { "name": "georgia-pacific-tower", "module": "landmarks.georgia_pacific" },
+    { "name": "marriott-marquis", "module": "landmarks.marriott" },
+    { "name": "state-of-georgia-building", "module": "landmarks.state_of_georgia" },
+    { "name": "atlanta-city-hall", "module": "landmarks.city_hall" },
+    { "name": "hurt-building", "module": "landmarks.hurt" },
+    { "name": "atlanta-central-library", "module": "landmarks.library" },
+    { "name": "basilica-of-the-sacred-heart", "module": "landmarks.basilica" },
+    { "name": "corey-tower", "module": "landmarks.corey" },
+    { "name": "hilton-atlanta", "module": "landmarks.hilton" },
+    { "name": "westin-peachtree-plaza", "module": "landmarks.westin" }
   ]
 }

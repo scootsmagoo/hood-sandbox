@@ -1,6 +1,7 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { loadTileConfig } from './config.js';
+import { loadTileConfig, REPO_ROOT } from './config.js';
 import { readCollision, readHeightmap } from './io/binary.js';
 import { decodeGlb } from './io/glb.js';
 import { checkTileGrades } from './check-grades.js';
@@ -191,8 +192,8 @@ check(jn.junctions.filter((j) => j.control === 'signals').every((j) => j.legs.so
   check(lanes.edges.filter((e) => e.t === 1).every((c) => c.t === 1 && c.c.every((o) => lanes.edges[o].t === 1)), 'conflicts point at connectors');
 }
 
-// mesh attributes (meshFormat 2) and the anchors file
-if (tile.meshFormat === 2) {
+// mesh attributes (meshFormat 2 and 3) and the anchors file
+if (tile.meshFormat >= 2) {
   const load = async (f: string) => { const b = readFileSync(path.join(dir, f)); return decodeGlb(new Uint8Array(b.buffer, b.byteOffset, b.byteLength)); };
   const have = (doc: Awaited<ReturnType<typeof load>>, kind: string, sems: string[]) => {
     const nodes = doc.getRoot().listNodes().filter((n) => n.getMesh() && (n.getExtras() as { kind?: string }).kind === kind);
@@ -202,9 +203,14 @@ if (tile.meshFormat === 2) {
   check(have(bdoc, 'walls', ['TEXCOORD_0', '_WALL', '_BLD', '_BID']), 'wall meshes carry TEXCOORD_0, _WALL, _BLD and _BID');
   check(have(bdoc, 'glass_walls', ['TEXCOORD_0', '_WALL', '_BLD', '_BID']), 'glass wall meshes carry the wall attributes');
   check(have(bdoc, 'roofs', ['TEXCOORD_0', '_BLD', '_BID', '_SRF']), 'roof meshes carry TEXCOORD_0, _BLD, _BID and _SRF');
+  if (tile.meshFormat >= 3) {
+    check(have(bdoc, 'walls', ['_LOOK']) && have(bdoc, 'glass_walls', ['_LOOK']) && have(bdoc, 'roofs', ['_LOOK']), 'building meshes carry _LOOK (meshFormat 3)');
+    check(Array.isArray(tile.buildingMaterials) && Array.isArray(tile.buildingStyles) && Array.isArray(tile.roofMaterials), 'tile.json names the building materials, styles and roof materials');
+  }
   const kinds: string[] = tile.buildingKinds;
   const counts = new Array(kinds.length).fill(0);
-  let badUv = 0, badQuad = 0, quads = 0, okKind = true, aoLo = 1, aoHi = 0;
+  let badUv = 0, badQuad = 0, quads = 0, okKind = true, aoLo = 1, aoHi = 0, badLook = 0;
+  const materials: Record<number, number> = {};
   const surfaces = new Set<number>();
   for (const n of bdoc.getRoot().listNodes()) {
     const m = n.getMesh();
@@ -213,6 +219,7 @@ if (tile.meshFormat === 2) {
     for (const p of m.listPrimitives()) {
       const uv = p.getAttribute('TEXCOORD_0')!, bl = p.getAttribute('_BLD')!, col = p.getAttribute('COLOR_0')!, wl = p.getAttribute('_WALL');
       const srf = p.getAttribute('_SRF');
+      const lk = p.getAttribute('_LOOK');
       const tmp = [0, 0, 0, 0];
       for (let i = 0; i < uv.getCount(); i++) {
         const u = uv.getElement(i, [0, 0]);
@@ -223,6 +230,12 @@ if (tile.meshFormat === 2) {
         const c = col.getElement(i, [0, 0, 0, 0])[3];
         aoLo = Math.min(aoLo, c); aoHi = Math.max(aoHi, c);
         if (srf) surfaces.add(srf.getElement(i, [0, 0, 0, 0])[0]);
+        if (lk) {
+          const l = lk.getElement(i, [0, 0, 0, 0]);
+          if (kind === 'roofs' ? l[0] >= (tile.roofMaterials?.length ?? 99) : l[0] >= (tile.buildingMaterials?.length ?? 99)) badLook++;
+          if (l[1] >= (tile.buildingStyles?.length ?? 99) || (l[2] & 7) >= (tile.buildingMaterials?.length ?? 99)) badLook++;
+          if (kind !== 'roofs') materials[l[0]] = (materials[l[0]] ?? 0) + 1;
+        }
         // a wall vertex lies inside its quad's span: u between the start and the end, v between the bottom (less the skirt) and the top
         if (wl) {
           const w = wl.getElement(i, [0, 0, 0, 0]);
@@ -233,6 +246,10 @@ if (tile.meshFormat === 2) {
     }
   }
   check(badUv === 0 && okKind, 'building texture coordinates are finite and kind ids are in range');
+  if (tile.meshFormat >= 3) {
+    check(badLook === 0, `_LOOK ids are in range of the material, style and roof material lists (${badLook} out)`);
+    console.log('     wall vertices by material:', Object.fromEntries(Object.entries(materials).map(([k, v]) => [tile.buildingMaterials[+k], v])));
+  }
   check(quads > 10000 && badQuad === 0, `wall vertices lie inside the span their _WALL gives (${quads} vertices, ${badQuad} outside)`);
   check(aoLo < 0.5 && aoHi > 0.95, `building ambient occlusion spans ${aoLo.toFixed(2)} to ${aoHi.toFixed(2)}`);
   check([0, 1, 2, 5].every((s) => surfaces.has(s)), `roofs have flat, pitched, parapet and equipment surfaces (${[...surfaces].join(',')})`);
@@ -258,6 +275,20 @@ if (tile.props) {
   check(pr.lamps.every((l) => l.length === 7 && l.every(Number.isFinite) && Math.abs(l[0]) < 1000 && Math.abs(l[2]) < 1000 && [0, 1, 2].includes(l[5])), 'lamp anchors are finite, inside the tile and well formed');
 }
 
+if (tile.landmarks) {
+  // hero landmarks (world/landmarks.ts): the tile's landmarks.json, the models it names, and their hulls in the collision mesh
+  check(existsSync(path.join(dir, tile.landmarks)), `landmarks.json exists (${(statSync(path.join(dir, tile.landmarks)).size / 1024).toFixed(0)} KB)`);
+  const lf = JSON.parse(readFileSync(path.join(dir, tile.landmarks), 'utf8')) as { version: number; landmarks: { id: string; name: string; displayName: string; x: number; z: number; radius: number; ring?: number[][]; hero?: { model: string; hash: string; y: number; replaced: string[]; hullTris?: number; lods: { tris: number; from: number }[] } }[] };
+  const b = tile.bounds;
+  check(lf.version === 1 && lf.landmarks.length > 0 && lf.landmarks.every((l) => l.id && l.name && l.displayName && Number.isFinite(l.x + l.z) && l.radius > 0), `landmarks.json lists landmarks with names and positions (${lf.landmarks.length})`);
+  const heroes = lf.landmarks.filter((l) => l.hero);
+  console.log(`     ${heroes.length} hero landmarks: ${heroes.map((h) => `${h.id} (${h.hero!.replaced.length} replaced, ${h.hero!.hullTris ?? 0} hull triangles)`).join(', ')}`);
+  check(heroes.every((h) => existsSync(path.join(REPO_ROOT, 'public', h.hero!.model)) && existsSync(path.join(REPO_ROOT, 'public', h.hero!.model.replace(/\.glb$/, '.json')))), 'every hero names a model and a sidecar that exist');
+  check(heroes.every((h) => h.ring && h.ring.length >= 3 && h.hero!.lods.length >= 1 && Number.isFinite(h.hero!.y) && h.x > b.minX - 400 && h.x < b.maxX + 400 && h.z > b.minZ - 400 && h.z < b.maxZ + 400), 'heroes have a footprint, levels of detail and a place at or near the tile');
+  const hullTris = heroes.reduce((a, h) => a + (h.hero!.hullTris ?? 0), 0);
+  check(hullTris <= tile.collision.buildingTriangles, `the heroes' hulls (${hullTris} triangles) are among the collision's building triangles`);
+}
+
 const sp = tile.spawns;
 check(Math.abs(sp.player.x) < 150 && Math.abs(sp.player.z) < 150, `player spawn is near Five Points (${sp.player.x}, ${sp.player.z})`);
 check(Math.hypot(sp.vehicle.x, sp.vehicle.z) < 300, `vehicle spawn is near the origin (${sp.vehicle.x}, ${sp.vehicle.z}, heading ${sp.vehicle.heading})`);
@@ -266,6 +297,23 @@ check(tile.attribution.length >= 1, `attribution: ${tile.attribution.join(' | ')
 const total = ['tile.json', tile.heightmap.file, tile.meshes.ground, tile.meshes.roads, tile.meshes.buildings, tile.collision.file, tile.roads, tile.junctions, tile.lanes, tile.paths, tile.scenarios, tile.props].filter(Boolean).reduce((a, f) => a + statSync(path.join(dir, f)).size, 0);
 check(total < 15 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)} MB is under 15 MB`);
 check(total < 14 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)} MB is under the 14 MB target`);
+
+// The ground audit (scripts/ground-audit.mjs, docs/ground-audit.md): every lane driven by a physics car at 15, 25 and 35 m/s, the
+// surfaces under every lane, the lanes and roads against the buildings. HOOD_GROUND_AUDIT=quick runs every 12th edge at 25 m/s;
+// HOOD_GROUND_AUDIT=off skips it (a machine without the root's node_modules).
+{
+  const mode = process.env.HOOD_GROUND_AUDIT ?? 'full';
+  if (mode === 'off') console.log('     ground audit skipped (HOOD_GROUND_AUDIT=off)');
+  else {
+    const script = path.join(REPO_ROOT, 'scripts/ground-audit.mjs');
+    const args = [script, '--tile', dir, '--out', path.join(REPO_ROOT, '.shots/ground'), '--gate', ...(mode === 'quick' ? ['--quick'] : [])];
+    const r = spawnSync(process.execPath, args, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    const lines = out.split('\n').filter((l) => /drive |by kind|gate |GATE|wrote/.test(l));
+    for (const l of lines) console.log(`     ${l.replace(/^\[ground [0-9.]+s\] /, '')}`);
+    check(r.status === 0, `ground audit${mode === 'quick' ? ' (quick)' : ''}: no lane or main road into a building; launches, steps, jolts, contacts and give-ups within the gate (a ratchet: docs/ground-audit.md)${r.status === 0 ? '' : ` (exit ${r.status}${r.error ? `: ${r.error.message}` : ''})`}`);
+  }
+}
 
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed`);

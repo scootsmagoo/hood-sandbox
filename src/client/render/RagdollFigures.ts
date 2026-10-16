@@ -45,7 +45,7 @@ export class RagdollFigures {
   readonly group = new THREE.Group();
   /** One instanced mesh per part, and the cap. */
   private readonly parts: THREE.InstancedMesh[] = [];
-  private readonly cap: THREE.InstancedMesh;
+  private cap: THREE.InstancedMesh;
   private readonly geos: THREE.BufferGeometry[] = [];
   private readonly mats: THREE.Material[] = [];
   private readonly poses = new Map<EntityId, Pose>();
@@ -57,8 +57,11 @@ export class RagdollFigures {
   private readonly one = new THREE.Vector3(1, 1, 1);
   private readonly colour = new THREE.Color();
 
-  constructor(readonly capacity = 24) {
+  /** `draw` false keeps only the poses (the skinned figures draw themselves from `pose`). */
+  constructor(readonly capacity = 24, private readonly draw = true) {
     this.group.name = 'ragdolls';
+    this.cap = null as unknown as THREE.InstancedMesh;
+    if (!draw) return;
     const plain = new THREE.MeshStandardMaterial({ roughness: 0.8 });
     const legs = new THREE.MeshStandardMaterial({ roughness: 0.85, vertexColors: true });
     const skin = new THREE.MeshStandardMaterial({ roughness: 0.7 });
@@ -99,6 +102,7 @@ export class RagdollFigures {
   }
 
   setShadows(on: boolean) {
+    if (!this.draw) return;
     for (const m of this.parts) m.castShadow = on;
     this.cap.castShadow = on;
   }
@@ -150,6 +154,7 @@ export class RagdollFigures {
 
   /** Draws a ped's body from its pose in its colours. */
   place(id: EntityId, look: PedLook) {
+    if (!this.draw) return;
     const pose = this.poses.get(id);
     if (!pose || this.n >= this.capacity) return;
     const slot = this.n++;
@@ -174,6 +179,7 @@ export class RagdollFigures {
 
   /** Call once after placing everyone this frame. */
   end() {
+    if (!this.draw) return;
     for (const mesh of [...this.parts, this.cap]) {
       mesh.count = this.n;
       mesh.visible = this.n > 0;
@@ -189,12 +195,18 @@ export class RagdollFigures {
     this.poses.delete(id);
   }
 
+  /** The part positions (11 x 3) and rotations (11 x 4) kept for a ped, if any. */
+  pose(id: EntityId): { pos: Float32Array; rot: Float32Array } | undefined {
+    return this.poses.get(id);
+  }
+
   /** Whether a pose is kept for a ped. */
   has(id: EntityId): boolean {
     return this.poses.has(id);
   }
 
   dispose() {
+    if (!this.draw) return;
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
     for (const mesh of [...this.parts, this.cap]) mesh.dispose();

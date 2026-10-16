@@ -32,6 +32,8 @@ export interface PropsInput {
   roadMask: RoadMask;
   /** the walk network's edges, as a mask with zero half width */
   pathMask: RoadMask;
+  /** where cars drive: the lanes and junction curves of `lanes.json`, each a car's half width and a little either side (optional) */
+  laneMask?: RoadMask;
   ground: (x: number, z: number) => number;
   bounds: Rect;
 }
@@ -50,6 +52,8 @@ export interface PropsFile {
     bins: number;
     bollards: number;
     osm: boolean;
+    /** placements dropped because they stood where cars drive */
+    inLanes?: number;
   };
 }
 
@@ -335,6 +339,19 @@ export function buildProps(inp: PropsInput): PropsFile {
         addTree(jx, jz, cls, s.h, s.r, 3);
       }
     }
+  }
+
+  // Nothing solid where a car drives: a corner lamp or a tree on the inside of a turn stood in the path of the cars turning there,
+  // and a bollard the map puts in a carriageway would stop the traffic. (A placement is a point; its trunk or pole is a few
+  // decimetres across, which the lane mask's margin covers.)
+  if (inp.laneMask) {
+    const clear = (list: number[][]) => {
+      const keep = list.filter((p) => !inp.laneMask!.contains(p[0], p[2]));
+      stats.inLanes = (stats.inLanes ?? 0) + list.length - keep.length;
+      list.length = 0;
+      list.push(...keep);
+    };
+    for (const l of [trees, lamps, hydrants, bins, bollards]) clear(l);
   }
 
   const byPos = (a: number[], b: number[]) => a[0] - b[0] || a[2] - b[2];

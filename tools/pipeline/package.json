@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "bake": "tsx src/bake.ts",
+    "bake:m2": "tsx src/city/bakeGrid.ts",
+    "prefetch:m2": "tsx src/city/prefetch.ts",
     "preview": "tsx src/preview.ts",
     "grades": "tsx src/check-grades.ts",
     "verify": "tsx src/verify.ts && tsx src/preview.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:buildings": "tsx src/audit-buildings.ts"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.6-r.1",

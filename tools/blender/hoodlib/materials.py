@@ -26,6 +26,15 @@ NAMES = [s[0] for s in SLOTS]
 INDEX = {n: i for i, n in enumerate(NAMES)}
 
 
+def use(slots):
+    """Swaps the slot list (for a family of assets that is not a car: the characters). `slots` is a
+    list of (name, base colour RGBA, metallic, roughness); call it before any mesh is built."""
+    global SLOTS, NAMES, INDEX
+    SLOTS = list(slots)
+    NAMES = [s[0] for s in SLOTS]
+    INDEX = {n: i for i, n in enumerate(NAMES)}
+
+
 def ensure():
     """Creates the materials once per scene; returns them in slot order."""
     mats = []

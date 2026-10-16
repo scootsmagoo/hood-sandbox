@@ -13,7 +13,9 @@ import { installLook } from './client/render/look';
 import { clockFromParams } from './client/render/timeOfDay';
 import { EntityViews } from './client/render/EntityViews';
 import { loadCarAssets } from './client/render/carAssets';
+import { loadCharacterAssets } from './client/render/chars/characterAssets';
 import { loadCollisionDebug } from './client/render/CollisionDebug';
+import { loadLandmarks } from './client/render/Landmarks';
 import { loadScenarioProps } from './client/render/ScenarioProps';
 import { loadSignalHeads } from './client/render/SignalHeads';
 import { createTransport } from './client/transport/createTransport';
@@ -29,7 +31,7 @@ import { createWorldView, type WorldView } from './world/WorldView';
 declare global {
   interface Window {
     /** Test and debugging hooks. */
-    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ; world?: WorldView; reloadWorld?: () => Promise<void>; doors: (typeId: string) => DoorGeometry };
+    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ; world?: WorldView; reloadWorld?: () => Promise<void>; doors: (typeId: string) => DoorGeometry; stream?: import('./world/stream/WorldStream').WorldStream };
   }
 }
 
@@ -52,23 +54,30 @@ async function main() {
 
     // The sim (in a worker) fetches the tile itself, so give it an absolute URL.
     const tileParam = params.get('tile');
-    const tileBase = tileParam === 'none' ? null : new URL(tileParam ?? DEFAULT_TILE, document.baseURI).href;
+    // ?tiles=fixture: the streamed test city; ?tiles=tiles/atlanta/m2/: a baked city's index (docs/contracts/city-tiles.md)
+    const tilesParam = params.get('tiles');
+    const cityUrl = tilesParam ? (tilesParam.startsWith('fixture') ? tilesParam : new URL(tilesParam.endsWith('.json') || tilesParam.endsWith('/') ? tilesParam : `${tilesParam}/`, document.baseURI).href) : null;
+    const tileBase = cityUrl || tileParam === 'none' ? null : new URL(tileParam ?? DEFAULT_TILE, document.baseURI).href;
     const seed = Number(params.get('seed') ?? 1) || 1;
 
     // The car models (public/assets/vehicles, built by `npm run assets`) load while the sim starts; a car whose model fails stays a box.
     const carAssets = loadCarAssets();
+    // The people (public/assets/characters): skinned figures, or the box ones when they are missing or ?peds=box.
+    const charAssets = loadCharacterAssets();
     const transport = await createTransport(params);
     game.transport = transport;
     boot.textContent = 'Loading the map…';
     game.ready = await transport.start({
       seed,
       tileBaseUrl: tileBase,
+      cityUrl,
+      streamTier: game.tier.name,
       vehicleType: params.get('car') ?? undefined,
       // ?start=car: beside an empty car; ?start=jack: beside the driver's door; default: on the sidewalk.
       start: ['car', 'jack'].includes(params.get('start') ?? '') ? (params.get('start') as 'car' | 'jack') : undefined,
       driverMood: ['flee', 'fight'].includes(params.get('driver') ?? '') ? (params.get('driver') as 'flee' | 'fight') : undefined,
       parkedCars: params.has('parked') ? Math.max(0, Math.min(20, Number(params.get('parked')) || 0)) : undefined,
-      bystanders: params.has('peds') ? Math.max(0, Math.min(12, Number(params.get('peds')) || 0)) : undefined,
+      bystanders: params.has('peds') && params.get('peds') !== 'box' ? Math.max(0, Math.min(12, Number(params.get('peds')) || 0)) : undefined,
       armour: params.has('armour') ? Math.max(0, Math.min(100, Number(params.get('armour')) || 0)) : undefined,
       // ?weapons=all: every gun; ?weapons=none: unarmed. Default: a pistol and some rounds.
       weapons: ['all', 'none'].includes(params.get('weapons') ?? '') ? (params.get('weapons') as 'all' | 'none') : undefined,
@@ -81,27 +90,32 @@ async function main() {
       autoRun: true,
     });
 
-    let world = await createWorldView(game.ready, tileBase, seed);
-    game.scene.add(world.root);
-    game.addSystem({ name: 'world', priority: 200, lateUpdate: () => world.update(game.camera, game.tier.lodScale) });
-    hooks.world = world;
-    // The leak harness (scripts/leaks.mjs) drops the drawn world and builds it again from the files.
-    hooks.reloadWorld = async () => {
-      world.dispose();
-      world = await createWorldView(game.ready, tileBase, seed);
+    const city = game.ready.city ?? null;
+    if (!city) {
+      let world = await createWorldView(game.ready, tileBase, seed);
       game.scene.add(world.root);
+      game.addSystem({ name: 'world', priority: 200, lateUpdate: () => world.update(game.camera, game.tier.lodScale) });
       hooks.world = world;
-    };
+      // The leak harness (scripts/leaks.mjs) drops the drawn world and builds it again from the files.
+      hooks.reloadWorld = async () => {
+        world.dispose();
+        world = await createWorldView(game.ready, tileBase, seed);
+        game.scene.add(world.root);
+        hooks.world = world;
+      };
+    }
 
     // The governor steps the tier down when the frame rate drops; fewer people on the street then too.
     game.onTierChange((t) => {
       if (!params.has('pedbudget')) transport.config?.({ pedBudget: t.pedBudget });
       if (!params.has('traffic')) transport.config?.({ traffic: t.trafficDensity });
     });
-    const props = await loadScenarioProps(game.scene, tileBase);
-    if (props) game.addSystem(props);
-    const heads = await loadSignalHeads(game, tileBase, game.ready.tile.lanes);
-    if (heads) game.addSystem(heads);
+    if (!city) {
+      const props = await loadScenarioProps(game.scene, tileBase);
+      if (props) game.addSystem(props);
+      const heads = await loadSignalHeads(game, tileBase, game.ready.tile.lanes);
+      if (heads) game.addSystem(heads);
+    }
     game.addSystem(new NetSystem(game));
     // ?debug=collision draws the wireframes of everything the sim collides with.
     if (params.get('debug') === 'collision') {
@@ -110,17 +124,37 @@ async function main() {
     }
     game.addSystem(new AimSystem(game));
     await carAssets;
+    await charAssets;
     game.addSystem(new EntityViews(game));
     game.addSystem(new GunFx(game));
     game.addSystem(new CameraRig(game));
     game.addSystem(new Atmosphere(game));
     // The GTA IV look (src/client/render/look/): the default. ?gfx=classic is the old flat renderer; &gfxoff=post,facade,surface,haze,lamps,bloom switches parts off for A/B.
-    if (lookMode(params) === 'gta4') installLook(game, tileBase);
+    const look = lookMode(params) === 'gta4' ? installLook(game, tileBase) : null;
+    // The hero landmark models (public/assets/landmarks) stand where the bake took the generic buildings out; after the look, so the facades get its shaders.
+    if (params.get('landmarks') !== 'off') {
+      const landmarks = await loadLandmarks(game, tileBase);
+      if (landmarks) game.addSystem(landmarks.system);
+    }
     game.addSystem(new Hud(game));
     game.addSystem(new GunHud(game));
     game.addSystem(new LawHud(game));
-    game.addSystem(new Minimap(game, tileBase));
-    game.addSystem(new StreetName(game, tileBase));
+    const minimap = game.addSystem(new Minimap(game, tileBase));
+    const streetName = game.addSystem(new StreetName(game, tileBase));
+    if (city) {
+      // the streamed city's tiles, drawn round the camera (loaded lazily: the default single-tile build does not carry it)
+      const { WorldStream } = await import('./world/stream/WorldStream');
+      const base = cityUrl!.startsWith('fixture') ? cityUrl! : new URL('.', cityUrl!.endsWith('.json') ? cityUrl! : `${cityUrl}index.json`).href;
+      let stream = game.addSystem(new WorldStream(game, city, base, { look, minimap, streetName }));
+      hooks.stream = stream;
+      hooks.reloadWorld = async () => {
+        stream.dispose();
+        stream = new WorldStream(game, city, base, { look, minimap, streetName });
+        hooks.stream = stream;
+        // (the old one is still in the system list, disposed: it does nothing)
+        game.addSystem(stream);
+      };
+    }
     game.addSystem(new AudioSystem(game));
     game.gamepad = new GamepadSource();
     game.input.addSource(game.gamepad);

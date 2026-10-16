@@ -1,0 +1,203 @@
+{
+  "_comment": "Written by tools/blender/build.mjs (npm run assets). Do not edit.",
+  "landmarks": {
+    "191-peachtree-tower": {
+      "file": "assets/landmarks/191-peachtree-tower.glb",
+      "hash": "72079e39d6cd",
+      "bytes": 25072,
+      "tris": [
+        385,
+        357
+      ]
+    },
+    "atlanta-central-library": {
+      "file": "assets/landmarks/atlanta-central-library.glb",
+      "hash": "a3686210c8bf",
+      "bytes": 17900,
+      "tris": [
+        290,
+        236
+      ]
+    },
+    "atlanta-city-hall": {
+      "file": "assets/landmarks/atlanta-city-hall.glb",
+      "hash": "63725d746a2e",
+      "bytes": 27900,
+      "tris": [
+        710,
+        422
+      ]
+    },
+    "basilica-of-the-sacred-heart": {
+      "file": "assets/landmarks/basilica-of-the-sacred-heart.glb",
+      "hash": "75d9674c8a33",
+      "bytes": 19324,
+      "tris": [
+        288,
+        260
+      ]
+    },
+    "candler-building": {
+      "file": "assets/landmarks/candler-building.glb",
+      "hash": "0698a099beaf",
+      "bytes": 21024,
+      "tris": [
+        258,
+        198
+      ]
+    },
+    "corey-tower": {
+      "file": "assets/landmarks/corey-tower.glb",
+      "hash": "2a527161651c",
+      "bytes": 13324,
+      "tris": [
+        219,
+        67
+      ]
+    },
+    "flatiron-building-atlanta": {
+      "file": "assets/landmarks/flatiron-building-atlanta.glb",
+      "hash": "d4d188328d0f",
+      "bytes": 19124,
+      "tris": [
+        346,
+        226
+      ]
+    },
+    "fountain-of-rings": {
+      "file": "assets/landmarks/fountain-of-rings.glb",
+      "hash": "9b2ab61c3aca",
+      "bytes": 35060,
+      "tris": [
+        1733,
+        183
+      ]
+    },
+    "georgia-aquarium": {
+      "file": "assets/landmarks/georgia-aquarium.glb",
+      "hash": "4c32a5b6653a",
+      "bytes": 35012,
+      "tris": [
+        891,
+        369
+      ]
+    },
+    "georgia-pacific-tower": {
+      "file": "assets/landmarks/georgia-pacific-tower.glb",
+      "hash": "2f0366c78cd2",
+      "bytes": 21372,
+      "tris": [
+        429,
+        209
+      ]
+    },
+    "georgia-state-capitol": {
+      "file": "assets/landmarks/georgia-state-capitol.glb",
+      "hash": "9aa9523c6898",
+      "bytes": 148040,
+      "tris": [
+        6324,
+        2188
+      ]
+    },
+    "hilton-atlanta": {
+      "file": "assets/landmarks/hilton-atlanta.glb",
+      "hash": "17f59f89ad06",
+      "bytes": 18312,
+      "tris": [
+        262,
+        224
+      ]
+    },
+    "hurt-building": {
+      "file": "assets/landmarks/hurt-building.glb",
+      "hash": "63e7fec936f3",
+      "bytes": 50552,
+      "tris": [
+        2551,
+        661
+      ]
+    },
+    "hyatt-regency-atlanta": {
+      "file": "assets/landmarks/hyatt-regency-atlanta.glb",
+      "hash": "6ce0f5e6f039",
+      "bytes": 41804,
+      "tris": [
+        1496,
+        442
+      ]
+    },
+    "marriott-marquis": {
+      "file": "assets/landmarks/marriott-marquis.glb",
+      "hash": "b0b1694d7adc",
+      "bytes": 31700,
+      "tris": [
+        728,
+        540
+      ]
+    },
+    "mercedes-benz-stadium": {
+      "file": "assets/landmarks/mercedes-benz-stadium.glb",
+      "hash": "2e0e138af773",
+      "bytes": 119152,
+      "tris": [
+        5822,
+        724
+      ]
+    },
+    "skyview-atlanta": {
+      "file": "assets/landmarks/skyview-atlanta.glb",
+      "hash": "afc42d27a4fa",
+      "bytes": 87132,
+      "tris": [
+        3674,
+        914
+      ]
+    },
+    "state-farm-arena": {
+      "file": "assets/landmarks/state-farm-arena.glb",
+      "hash": "6649827479fa",
+      "bytes": 26908,
+      "tris": [
+        439,
+        301
+      ]
+    },
+    "state-of-georgia-building": {
+      "file": "assets/landmarks/state-of-georgia-building.glb",
+      "hash": "1eaf00e6bf3d",
+      "bytes": 22176,
+      "tris": [
+        234,
+        222
+      ]
+    },
+    "truist-plaza": {
+      "file": "assets/landmarks/truist-plaza.glb",
+      "hash": "acdcd29ad688",
+      "bytes": 70652,
+      "tris": [
+        1278,
+        692
+      ]
+    },
+    "westin-peachtree-plaza": {
+      "file": "assets/landmarks/westin-peachtree-plaza.glb",
+      "hash": "254049eedaab",
+      "bytes": 42384,
+      "tris": [
+        876,
+        348
+      ]
+    },
+    "world-of-coca-cola": {
+      "file": "assets/landmarks/world-of-coca-cola.glb",
+      "hash": "05752dcf854c",
+      "bytes": 32788,
+      "tris": [
+        612,
+        542
+      ]
+    }
+  }
+}

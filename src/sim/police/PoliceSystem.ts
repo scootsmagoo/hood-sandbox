@@ -28,6 +28,7 @@ import { probeFrom } from '../npc/probe';
 import type { Simulation } from '../Simulation';
 import type { SimSystem } from '../systems';
 import { LaneGraph } from '../traffic/LaneGraph';
+import type { StreamListener } from '../stream/TileStreamer';
 import { POLICE } from './constants';
 import { agenciesWanting, mayPursueVehicle, ordersAt, type DispatchOrder } from './dispatch';
 import { driveUnit } from './driving';
@@ -108,10 +109,12 @@ export class PoliceManager {
   readonly stats = { spawned: 0, pitAttempts: 0, pitHits: 0, rams: 0, roadblocks: 0 };
 
   constructor(readonly sim: Simulation) {
-    this.graph = new RoadGraph(sim.tile.roads ?? []);
+    // (a streamed city adds its tiles' roads as they come: `streamListener`)
+    this.graph = new RoadGraph(sim.stream ? [] : (sim.tile.roads ?? []));
     this.rng = sim.rng.fork('police');
     this.nav = new PoliceNav(this.graph, () => {
       if (sim.traffic) return sim.traffic.graph;
+      if (sim.stream) return sim.stream.lanes;
       if (!sim.tile.lanes) return null;
       const g = new LaneGraph(sim.tile.lanes);
       return g.usable ? g : null;
@@ -563,6 +566,24 @@ export class PoliceManager {
   }
 
   /** Removes everything police at once (a respawn after being wasted or busted). */
+  /** How the police follow a streamed city's tiles: the road graph gains and loses their streets; units on a dropping tile go. */
+  streamListener(): StreamListener {
+    return {
+      tileAdded: (key, _r, tile) => this.graph.addRoads(key, tile.roads ?? []),
+      tileDropping: (_key, rect) => {
+        for (let i = this.units.length - 1; i >= 0; i--) {
+          const u = this.units[i];
+          const v = this.sim.registry.get(u.vehicleId) as VehicleEntity | undefined;
+          const p = v?.car.body.translation();
+          if (!p || p.x < rect.minX || p.x > rect.maxX || p.z < rect.minZ || p.z > rect.maxZ) continue;
+          this.despawnUnit(u);
+          this.units.splice(i, 1);
+        }
+      },
+      tileRemoved: (key) => this.graph.removeTile(key),
+    };
+  }
+
   clearAll() {
     for (const u of this.units) this.despawnUnit(u);
     this.units.length = 0;

@@ -16,6 +16,7 @@
     "check:controls:webkit": "node scripts/controls-check.mjs --browser webkit",
     "shot": "node scripts/shot.mjs",
     "shots:demo": "node scripts/demo-shots.mjs",
+    "shots:chars": "node scripts/char-shots.mjs",
     "perf-budget": "node scripts/perf-budget.mjs --repeat 2",
     "perf-budget:phone": "node scripts/perf-budget.mjs --profile phone-low --repeat 2",
     "soak": "node scripts/soak.mjs",
@@ -24,7 +25,12 @@
     "deploy:dry": "npm run build && npm run deploy:check && wrangler deploy --dry-run",
     "deploy": "npm run build && npm run deploy:check && wrangler deploy",
     "audit:collision": "vitest run --config vitest.audit.config.ts",
-    "assets": "node tools/blender/build.mjs && vitest run tests/carAssets.test.ts"
+    "assets": "node tools/blender/build.mjs && node tools/blender/characters/build.mjs && vitest run tests/carAssets.test.ts tests/anchorProps.test.ts tests/characterAssets.test.ts tests/landmarkAssets.test.ts",
+    "audit:ground": "node scripts/ground-audit.mjs",
+    "bake:m2": "cd tools/pipeline && npm run bake:m2 --",
+    "prefetch:m2": "cd tools/pipeline && npm run prefetch:m2 --",
+    "shots:stream": "node scripts/stream-shots.mjs",
+    "perf:stream": "node scripts/stream-perf.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-simd-compat": "^0.21.0",

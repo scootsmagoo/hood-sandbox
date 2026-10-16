@@ -17,6 +17,7 @@ import type { CarDamageState, DamageShape } from './carDamage';
 import { CAR_HEAD } from './carMaterials';
 import { assetFor } from './carLod';
 import { CarModel, type DetachedPart } from './carModel';
+import { CHAR_OUTFITS, lookOf } from './chars/outfits';
 
 // Boxes of the same size share one geometry, so building and dropping models does not leak.
 const boxGeos = new Map<string, THREE.BoxGeometry>();
@@ -307,15 +308,8 @@ export interface PedLook {
   cap: number | null;
 }
 
-/** Outfits by `PedDef.outfit`. 0 is the protagonist. */
-export const OUTFITS: readonly PedLook[] = [
-  { jacket: 0x5b6b3a, jeans: 0x2f4059, skin: 0x6b4430, cap: 0x8a2f1e },
-  { jacket: 0xb8b3a6, jeans: 0x1e2433, skin: 0x8a5d3e, cap: null },
-  { jacket: 0x7a2f3a, jeans: 0x3b3b40, skin: 0xc08a62, cap: 0x222222 },
-  { jacket: 0x2d5e7a, jeans: 0x4a4036, skin: 0x4d3022, cap: null },
-  { jacket: 0xd0a43a, jeans: 0x232a33, skin: 0xa8734f, cap: 0x2d5e7a },
-  { jacket: 0x4a4a52, jeans: 0x5a6a80, skin: 0xd5a784, cap: null },
-];
+/** Outfits by `PedDef.outfit` as the box figures' looks (0 is the protagonist). The real ones are in chars/outfits.ts. */
+export const OUTFITS: readonly PedLook[] = CHAR_OUTFITS.map((_, i) => lookOf(i));
 
 // ---- Guns: one merged mesh per kind, barrel along +Z, origin at the grip.
 const gunGeos = new Map<WeaponKind, THREE.BufferGeometry>();
@@ -336,6 +330,13 @@ function gunGeometry(kind: WeaponKind): THREE.BufferGeometry {
   for (const b of geos) b.dispose();
   gunGeos.set(kind, g);
   return g;
+}
+
+/** A gun's mesh (shared geometry and material), barrel along +Z, origin at the grip. */
+export function gunMesh(kind: WeaponKind): THREE.Mesh {
+  const m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.45, metalness: 0.6 })));
+  m.castShadow = true;
+  return m;
 }
 
 const pedMaterials = new Map<number, THREE.MeshStandardMaterial>();

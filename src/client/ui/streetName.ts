@@ -11,10 +11,12 @@ import { yawOfQuat } from '../../shared/math';
 import { parseRoads } from '../../shared/tile';
 import { cityOfTile } from '../../shared/law';
 import type { Game, System } from '../Game';
+import { landmarkAt, parseLandmarks, type LandmarkEntry } from '../../shared/landmarks';
 import { facingVector } from './minimapMath';
 import { radarSize } from './minimap';
 import {
   Debounced,
+  Settled,
   TRAVEL_MIN_MPS,
   abbreviateStreet,
   buildStreetIndex,
@@ -48,6 +50,9 @@ export class StreetName implements System {
   private readonly areaEl: HTMLElement;
   private index: StreetIndex | null = null;
   private zones: ZoneShape[] = [];
+  /** The tile's landmarks (landmarks.json: the city pack's, with the heroes' footprints); the area line shows the one you are at. */
+  private landmarks: LandmarkEntry[] = [];
+  private readonly landmark = new Settled<string>();
   private readonly street = new Debounced<string>();
   private readonly zone = new Debounced<string>();
   /** The text on screen, so the DOM is only touched on a change. */
@@ -93,17 +98,35 @@ export class StreetName implements System {
   private async load(tileBase: string | null) {
     if (!tileBase) return;
     const tile = this.game.ready.tile;
-    const [roads, zones] = await Promise.all([
+    const [roads, zones, landmarks] = await Promise.all([
       fetch(new URL(tile.roads ?? 'roads.json', tileBase).href)
         .then((res) => (res.ok ? res.json() : null))
         .then((json) => (json ? parseRoads(json) : []))
         .catch(() => []),
       loadZones(tile.id).catch(() => []),
+      tile.landmarks
+        ? fetch(new URL(tile.landmarks, tileBase).href)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((json) => parseLandmarks(json)?.landmarks ?? [])
+            .catch(() => [])
+        : Promise.resolve([] as LandmarkEntry[]),
     ]);
     if (this.disposed) return;
     this.index = buildStreetIndex(roads);
     this.zones = zones;
+    this.landmarks = landmarks;
   }
+
+  /** A streamed city: the street index of the loaded tiles' roads (rebuilt when they change), and the city pack's zones. */
+  setRoads(roads: Parameters<typeof buildStreetIndex>[0], cityId?: string) {
+    this.index = buildStreetIndex(roads);
+    if (cityId && !this.zonesLoaded) {
+      this.zonesLoaded = true;
+      void loadZones(cityId).then((z) => (this.zones = z)).catch(() => {});
+    }
+  }
+
+  private zonesLoaded = false;
 
   update(_dt: number) {
     const v = this.game.view;
@@ -125,18 +148,22 @@ export class StreetName implements System {
 
     const zi = zoneIndexAt(this.zones, st.x, st.z);
     this.zone.offer(zi >= 0 ? this.zones[zi].name : null, now);
+    // at a landmark (inside its footprint or within its radius): its name takes the area line, "Peachtree St NW" over "Peachtree Summit Plaza"
+    this.landmark.offer(this.landmarks.length ? (landmarkAt(this.landmarks, st.x, st.z)?.displayName ?? null) : null, now);
 
     this.render();
   }
 
   /** Puts the shown names on the label. A street change fades the label in. */
   private render() {
-    const street = this.street.value;
+    const landmark = this.landmark.value;
+    // away from every named road the landmark itself is the label
+    const street = this.street.value ?? landmark ?? undefined;
     if (street === undefined) {
       if (this.el.style.display !== 'none') this.el.style.display = 'none';
       return;
     }
-    const area = this.zone.value ?? '';
+    const area = (this.street.value !== undefined ? landmark : null) ?? this.zone.value ?? '';
     if (this.el.style.display === 'none') this.el.style.display = '';
     if (street !== this.shownStreet) {
       this.shownStreet = street;

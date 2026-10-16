@@ -334,6 +334,10 @@ export class Hud implements System {
     let nearest = Infinity;
     for (const car of v.entities.values()) {
       if (car.kind !== 2) continue;
+      // (a car's door is within about 6 m of its centre; skip the rotation and the allocation for the rest)
+      const dx = ped.x - car.x;
+      const dz = ped.z - car.z;
+      if (dx * dx + dz * dz > 64) continue;
       const def = v.defs.get(car.id);
       const h = HANDLING[(def as { typeId?: string } | undefined)?.typeId ?? ''] ?? HANDLING.sedan;
       const l = rotateVecInv(car.q, ped.x - car.x, ped.y - car.y, ped.z - car.z);

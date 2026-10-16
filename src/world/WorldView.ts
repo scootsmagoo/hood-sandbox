@@ -7,6 +7,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { generateProceduralTile, propsToMesh, type PropSpec } from '../shared/proceduralTile';
 import type { SimReady } from '../shared/protocol';
+import type { TileManifest } from '../shared/tile';
+import { freezeStatic } from '../client/render/freeze';
+import { mergeable, mergeMeshes } from './mergeChunks';
 
 export interface WorldView {
   root: THREE.Group;
@@ -23,6 +26,12 @@ const LOD_HYSTERESIS = 0.06;
 
 /** Road markings (lane lines, crosswalks, stop bars) are thin: beyond this distance (divided by the tier's lodScale) a chunk's markings are not drawn. */
 export const MARKINGS_DISTANCE = 320;
+
+/**
+ * Roads and buildings are merged at load, `MERGE_BLOCK` x `MERGE_BLOCK` chunks to a mesh per material (`mergeChunks.ts`):
+ * about 60% fewer draws for 40% more triangles. `?mergeblock=1` keeps the tile's own chunks (A/B tests).
+ */
+export const MERGE_BLOCK = 2;
 
 /** The markings mesh of one chunk. */
 interface MarkingsChunk {
@@ -74,19 +83,23 @@ function styleMaterial(mat: THREE.Material) {
   m.needsUpdate = true;
 }
 
-async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunks: GroundChunk[], markings: MarkingsChunk[]): Promise<string[]> {
-  const grid = ready.tile.chunks;
+async function loadBaked(base: string, manifest: TileManifest, root: THREE.Group, chunks: GroundChunk[], markings: MarkingsChunk[], mergeBlock: number): Promise<string[]> {
+  const grid = manifest.chunks;
   const byKey = new Map<number, GroundChunk>();
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   const errors: string[] = [];
-  const files = ready.tile.meshes;
+  /** Chunk meshes that can be merged into bigger blocks: the roads and buildings (not the ground, which has levels of detail, nor the markings, which hide by distance). */
+  const blocks = new Map<string, THREE.Mesh[]>();
+  const files = manifest.meshes;
   const entries = (Object.entries(files) as [string, string | undefined][]).filter(([, f]) => !!f);
   await Promise.all(
     entries.map(async ([kind, file]) => {
       try {
         const gltf = await loader.loadAsync(new URL(file!, base).href);
         gltf.scene.name = kind;
+        gltf.scene.updateMatrix();
+        gltf.scene.matrixAutoUpdate = false;
         gltf.scene.traverse((o) => {
           if (!(o instanceof THREE.Mesh)) return;
           const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -103,6 +116,12 @@ async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunk
             const minZ = grid.minZ + u.chunk[1] * grid.size;
             markings.push({ mesh: o, minX, minZ, maxX: minX + grid.size, maxZ: minZ + grid.size });
             o.castShadow = false;
+          }
+          if (mergeBlock > 1 && grid && u.chunk && kind !== 'ground' && u.kind !== 'markings') {
+            const key = `${kind}|${(Array.isArray(o.material) ? o.material[0] : o.material).name}|${Math.floor(u.chunk[0] / mergeBlock)},${Math.floor(u.chunk[1] / mergeBlock)}`;
+            const list = blocks.get(key);
+            if (list) list.push(o);
+            else blocks.set(key, [o]);
           }
           if (kind === 'ground' && grid && u.chunk) {
             const key = u.chunk[1] * grid.cols + u.chunk[0];
@@ -127,7 +146,30 @@ async function loadBaked(base: string, ready: SimReady, root: THREE.Group, chunk
       }
     }),
   );
+  if (blocks.size > 0) mergeBlocks(root, blocks);
   return errors;
+}
+
+/** Replaces each list of chunk meshes by one mesh (see `mergeChunks.ts`). A list that cannot be merged stays as it was. */
+function mergeBlocks(root: THREE.Group, blocks: Map<string, THREE.Mesh[]>) {
+  root.updateMatrixWorld(true);
+  for (const [key, list] of blocks) {
+    if (!mergeable(list)) continue;
+    const first = list[0];
+    const parent = first.parent;
+    if (!parent || list.some((m) => m.parent !== parent || Array.isArray(m.material))) continue;
+    const merged = new THREE.Mesh(mergeMeshes(list), first.material);
+    merged.name = key;
+    merged.userData = { kind: first.userData.kind, merged: list.length };
+    merged.castShadow = first.castShadow;
+    merged.receiveShadow = first.receiveShadow;
+    merged.matrixAutoUpdate = false;
+    parent.add(merged);
+    for (const m of list) {
+      m.removeFromParent();
+      m.geometry.dispose();
+    }
+  }
 }
 
 /** The sim's fallback tile, drawn: a grid-textured ground and boxes. */
@@ -188,16 +230,31 @@ function buildProcedural(seed: number, root: THREE.Group) {
 }
 
 export async function createWorldView(ready: SimReady, tileBase: string | null, seed: number): Promise<WorldView> {
+  return createView(ready.tileSource === 'baked' && tileBase ? { manifest: ready.tile, base: tileBase } : null, seed, 'world');
+}
+
+/**
+ * One tile of a streamed city (docs/contracts/city-tiles.md), drawn from its baked files: the same view as a single tile's, with a
+ * root named after the tile (the city's `world` group holds the tiles).
+ */
+export function createTileView(manifest: TileManifest, base: string, name: string): Promise<WorldView> {
+  return createView({ manifest, base }, 0, name);
+}
+
+async function createView(baked: { manifest: TileManifest; base: string } | null, seed: number, name: string): Promise<WorldView> {
   const root = new THREE.Group();
-  root.name = 'world';
+  root.name = name;
+  root.matrixAutoUpdate = false; // (identity; nothing in the tile moves)
   const chunks: GroundChunk[] = [];
   const markings: MarkingsChunk[] = [];
-  if (ready.tileSource === 'baked' && tileBase) {
-    const errors = await loadBaked(tileBase, ready, root, chunks, markings);
+  if (baked) {
+    const asked = typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('mergeblock')) : NaN;
+    const errors = await loadBaked(baked.base, baked.manifest, root, chunks, markings, Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : MERGE_BLOCK);
     for (const e of errors) console.warn('[world]', e);
   } else {
     buildProcedural(seed, root);
   }
+  freezeStatic(root);
   return {
     root,
     update(camera, lodScale) {

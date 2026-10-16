@@ -208,6 +208,9 @@ export class PostFx {
     });
     this.quad = new THREE.Mesh(geo, this.prefilterMat);
     this.quad.frustumCulled = false;
+    // nothing here moves: no matrix to compose and no world matrix to recompute in each of the chain's render calls
+    this.quad.matrixAutoUpdate = false;
+    this.quadScene.matrixAutoUpdate = false;
     this.quadScene.add(this.quad);
   }
 

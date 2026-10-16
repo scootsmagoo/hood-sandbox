@@ -1,9 +1,13 @@
 import type { Projector, V2 } from '../geo.js';
 import { pointInRing, ringBounds, ringCentroid, signedArea } from '../geo.js';
 import type { OvertureBuilding, OvertureBuildingPart } from '../sources/overture.js';
-import type { OsmBuilding } from './osm.js';
+import type { OsmBuilding, OsmPart } from './osm.js';
+import type { WikidataFacts } from '../sources/wikidata.js';
+import { appearanceFromTags, parseColour, parseMaterial, parseRoofMaterial, parseStyle, plausibleRoofColour, plausibleWallColour, setLook, type DataLook } from './appearance.js';
+import polygonClipping from 'polygon-clipping';
+import { applyFacts, towerSquare, type FactsFile, type FactsResult } from './facts.js';
 
-export type HeightSource = 'overture' | 'osm-height' | 'floors' | 'default';
+export type HeightSource = 'overture' | 'osm-height' | 'floors' | 'default' | 'known';
 
 /** A building part (Overture `building_part`) in game coordinates. */
 export interface PartIn {
@@ -38,6 +42,12 @@ export interface BuildingInfo {
   facadeColor?: string | null;
   hasParts?: boolean;
   parts?: PartIn[];
+  /** what the feeds say the building looks like, merged (colour, material, style, year, floors; see appearance.ts) */
+  look?: DataLook;
+  /** the floors the facade shows when they are not `numFloors` (a part that starts at an upper level shows fewer) */
+  facadeFloors?: number | null;
+  /** a hero landmark's collision prism (world/landmarks.ts): in the collision mesh and the footprints, never drawn (its model is); `datum` is the model's ground height */
+  hero?: { id: string; datum: number };
 }
 
 export interface Building extends BuildingInfo {
@@ -84,13 +94,12 @@ export function resolveHeight(b: HeightInputs): { height: number; source: Height
 }
 
 function osmHeight(tags: Record<string, string>): number | null {
-  const h = parseFloat((tags.height ?? '').replace(',', '.'));
-  if (Number.isFinite(h) && h > 0) return h;
-  return null;
+  const h = appearanceFromTags(tags).height;
+  return h != null && h > 0 ? h : null;
 }
 function osmLevels(tags: Record<string, string>): number | null {
-  const l = parseFloat(tags['building:levels'] ?? '');
-  return Number.isFinite(l) && l > 0 ? l : null;
+  const l = appearanceFromTags(tags).levels;
+  return l != null && l > 0 ? l : null;
 }
 
 function openRing(coords: [number, number][], proj: Projector): V2[] {
@@ -116,16 +125,104 @@ class Grid {
   }
 }
 
+export interface LookStats {
+  /** buildings that got the field from each feed (a count per source) */
+  colour: Record<string, number>;
+  roofColour: Record<string, number>;
+  material: Record<string, number>;
+  style: Record<string, number>;
+  year: Record<string, number>;
+  floors: Record<string, number>;
+  /** buildings with none of it from a feed (everything inferred) */
+  bare: number;
+}
+
 export interface BuildingStats {
   overture: number;
   osmOnly: number;
   total: number;
   heightSources: Record<HeightSource, number>;
+  look: LookStats;
+  /** OSM `building:part` ways added as parts of a building that had none from Overture */
+  osmPartsAdded: number;
+  /** Overture polygons that sit inside a much bigger OSM building and so did not take its height or levels */
+  osmHeightRefused: number;
+  /** car parks whose height was far too tall for a car park and was taken from their floors */
+  heightsCapped: number;
+  /** known towers that stand on a bigger, lower footprint, split from it */
+  towersSplit: number;
+  facts?: FactsResult;
+}
+
+/** What else the merge uses besides the two footprint feeds (all optional: an offline bake without them still works). */
+export interface BuildingExtras {
+  /** Wikidata facts by item id (from the `wikidata` tag of the OSM building) */
+  wikidata?: Map<string, WikidataFacts>;
+  /** known heights and curated looks, matched by position */
+  facts?: FactsFile;
+  /** `building:part` ways that are not buildings */
+  osmParts?: OsmPart[];
+}
+
+const ringArea = (r: V2[]): number => Math.abs(signedArea(r));
+const countBy = (rec: Record<string, number>, k: string | undefined) => {
+  if (k) rec[k] = (rec[k] ?? 0) + 1;
+};
+
+/** What the OSM tags and Wikidata say of a building's look, for a footprint that sits in (or is) the OSM building `tags`. `trusted`: the footprint is that building (not a piece inside a bigger outline). */
+export function lookFromFeeds(
+  tags: Record<string, string> | undefined,
+  overture: { facadeColor?: string | null; facadeMaterial?: string | null; roofColor?: string | null; roofMaterial?: string | null; numFloors?: number | null } | null,
+  wikidata: WikidataFacts | undefined,
+  trusted: boolean,
+): DataLook {
+  const look: DataLook = {};
+  const oa = tags ? appearanceFromTags(tags) : null;
+  // the strongest feed first: an explicit OSM tag, then Overture, then Wikidata
+  const mat = oa?.material ?? parseMaterial(overture?.facadeMaterial);
+  const glass = mat === 'glass';
+  if (oa) {
+    setLook(look, 'colour', plausibleWallColour(oa.colour, glass), 'osm');
+    setLook(look, 'roofColour', plausibleRoofColour(oa.roofColour), 'osm');
+    setLook(look, 'material', oa.material, 'osm');
+    setLook(look, 'style', oa.style, 'osm');
+    setLook(look, 'year', oa.year, 'osm');
+    if (oa.roofMaterial) look.roofMaterial = oa.roofMaterial;
+  }
+  if (overture) {
+    setLook(look, 'colour', plausibleWallColour(parseColour(overture.facadeColor), glass), 'overture');
+    setLook(look, 'roofColour', plausibleRoofColour(parseColour(overture.roofColor)), 'overture');
+    setLook(look, 'material', parseMaterial(overture.facadeMaterial), 'overture');
+    if (!look.roofMaterial) look.roofMaterial = parseRoofMaterial(overture.roofMaterial) ?? undefined;
+    if (overture.numFloors && overture.numFloors > 0) setLook(look, 'floors', overture.numFloors, 'overture');
+  }
+  if (oa?.levels && oa.levels > 0 && trusted) setLook(look, 'floors', oa.levels, 'osm');
+  if (wikidata) {
+    setLook(look, 'year', wikidata.year, 'wikidata');
+    for (const s of wikidata.styles) {
+      const st = parseStyle(s);
+      if (st) {
+        setLook(look, 'style', st, 'wikidata');
+        break;
+      }
+    }
+    for (const m of wikidata.materials) {
+      const mm = parseMaterial(m);
+      if (mm) {
+        setLook(look, 'material', mm, 'wikidata');
+        break;
+      }
+    }
+    if (trusted) setLook(look, 'floors', wikidata.floors, 'wikidata');
+  }
+  return look;
 }
 
 /**
  * Overture is the primary source (it already merges OSM, Microsoft and Esri).
- * Heights it lacks are filled from the OSM building that contains the footprint centre.
+ * Heights it lacks are filled from the OSM building that contains the footprint centre (the smallest one that does, and only
+ * when the footprint is that building rather than a piece inside a much bigger outline). The looks the feeds state (colours,
+ * materials, styles, years, floors) are merged per building into `look`; known heights and curated looks come last.
  * If Overture is empty, OSM footprints are used on their own.
  */
 export function buildBuildings(
@@ -134,6 +231,7 @@ export function buildBuildings(
   proj: Projector,
   bounds: { minX: number; minZ: number; maxX: number; maxZ: number },
   parts: OvertureBuildingPart[] = [],
+  extras: BuildingExtras = {},
 ): { buildings: Building[]; stats: BuildingStats } {
   const partsOf = new Map<string, PartIn[]>();
   for (const p of parts) {
@@ -146,22 +244,75 @@ export function buildBuildings(
   const osmBounds = osm.map((b) => ringBounds(b.rings[0]));
   const grid = new Grid(50);
   osm.forEach((b, i) => grid.add(i, osmBounds[i]));
+  // the smallest OSM building that contains the point: a podium inside a tower's outline gets its own way, not the tower's
   const osmAt = (p: V2): OsmBuilding | null => {
+    let best: OsmBuilding | null = null;
+    let bestArea = Infinity;
     for (const i of grid.at(p[0], p[1])) {
       const r = osmBounds[i];
-      if (p[0] >= r.minX && p[0] <= r.maxX && p[1] >= r.minZ && p[1] <= r.maxZ && pointInRing(p[0], p[1], osm[i].rings[0])) return osm[i];
+      if (p[0] >= r.minX && p[0] <= r.maxX && p[1] >= r.minZ && p[1] <= r.maxZ && pointInRing(p[0], p[1], osm[i].rings[0])) {
+        const a = ringArea(osm[i].rings[0]);
+        if (a < bestArea) {
+          bestArea = a;
+          best = osm[i];
+        }
+      }
     }
-    return null;
+    return best;
   };
 
   const out: Building[] = [];
-  const stats: BuildingStats = { overture: 0, osmOnly: 0, total: 0, heightSources: { overture: 0, 'osm-height': 0, floors: 0, default: 0 } };
+  const stats: BuildingStats = {
+    overture: 0, osmOnly: 0, total: 0, heightSources: { overture: 0, 'osm-height': 0, floors: 0, default: 0, known: 0 },
+    look: { colour: {}, roofColour: {}, material: {}, style: {}, year: {}, floors: {}, bare: 0 }, osmPartsAdded: 0, osmHeightRefused: 0, heightsCapped: 0, towersSplit: 0,
+  };
   const inside = (rings: V2[][]) => {
     const c = ringCentroid(rings[0]);
     return c[0] >= bounds.minX && c[0] <= bounds.maxX && c[1] >= bounds.minZ && c[1] <= bounds.maxZ;
   };
 
+  // OSM `building:part` ways stand in for parts a building lacks: setbacks, podiums and crowns of towers Overture has as one prism
+  if (overture && extras.osmParts?.length) {
+    const ob = overture.map((b) => b.polygons.map((poly) => ringBounds(openRing(poly[0], proj))));
+    const og = new Grid(60);
+    overture.forEach((b, i) => b.polygons.forEach((_, pi) => og.add(i * 64 + pi, ob[i][pi])));
+    const added = new Map<string, PartIn[]>();
+    for (const p of extras.osmParts) {
+      const c = ringCentroid(p.rings[0]);
+      let host: { i: number; area: number } | null = null;
+      for (const key of og.at(c[0], c[1])) {
+        const i = Math.floor(key / 64), pi = key % 64;
+        const poly = overture[i].polygons[pi];
+        const ring = openRing(poly[0], proj);
+        if (!pointInRing(c[0], c[1], ring)) continue;
+        const a = ringArea(ring);
+        if (!host || a < host.area) host = { i, area: a };
+      }
+      if (!host) continue;
+      const b = overture[host.i];
+      if (partsOf.has(b.id)) continue; // Overture's own parts win (they are mostly these same ways)
+      const pa = appearanceFromTags(p.tags);
+      const levels = pa.levels;
+      const height = pa.height ?? (levels ? levels * FLOOR_M + 1 : null);
+      if (height == null || height < 3) continue;
+      const minH = pa.minHeight ?? (pa.minLevel ? pa.minLevel * FLOOR_M : null);
+      const list = added.get(b.id) ?? [];
+      list.push({
+        id: p.id, polygons: [p.rings], height, minHeight: minH, numFloors: levels, roofShape: pa.roofShape, roofHeight: pa.roofLevels ? pa.roofLevels * 2.6 : null,
+        roofDirection: null, facadeMaterial: p.tags['building:material'] ?? null, facadeColor: p.tags['building:colour'] ?? null,
+      });
+      added.set(b.id, list);
+      stats.osmPartsAdded++;
+    }
+    for (const [id, list] of added) partsOf.set(id, list);
+  }
+
   const push = (id: string, rings: V2[][], h: number | null, floors: number | null, use: string | null, fromOsm = false, info: BuildingInfo = {}) => {
+    // a car park is never a tower: a height over 45 m on one is a mis-measured mast or neighbour (a 198 m deck of 8 floors): trust its floors
+    if (h != null && h > 45 && (/parking|garage/.test(use ?? '') || info.tags?.parking === 'multi-storey' || /\b(deck|garage|parking)\b/i.test(info.name ?? ''))) {
+      h = floors && floors >= 2 ? floors * 3.2 + 1 : 30;
+      stats.heightsCapped++;
+    }
     const r = resolveHeight({ id, height: h, numFloors: floors, use });
     const source: HeightSource = r.source === 'overture' && fromOsm ? 'osm-height' : r.source;
     out.push({ id, rings, height: r.height, heightSource: source, use: use ?? 'yes', ...info, numFloors: floors });
@@ -179,28 +330,42 @@ export function buildBuildings(
         let use = b.cls ?? b.subtype;
         const match = osmAt(ringCentroid(rings[0]));
         let fromOsm = false;
+        let trusted = false;
+        let minHeight = b.minHeight ?? null;
+        let facadeFloors: number | null = null;
+        let roofHeight = b.roofHeight ?? null;
         if (match) {
-          if (h == null) {
-            const oh = osmHeight(match.tags);
-            if (oh != null) { h = oh; fromOsm = true; }
-          }
-          if (floors == null) floors = osmLevels(match.tags);
+          // the footprint is the OSM building (not a piece inside a much bigger outline): its height and levels are this footprint's
+          const ra = ringArea(rings[0]);
+          const rb = ringArea(match.rings[0]);
+          trusted = Math.min(ra / rb, rb / ra) >= 0.4;
+          const ma = appearanceFromTags(match.tags);
+          if (trusted) {
+            if (h == null && ma.height != null) { h = ma.height; fromOsm = true; }
+            if (floors == null && ma.levels != null && ma.levels > 0) floors = ma.levels;
+            if (minHeight == null && ma.minLevel) minHeight = ma.minLevel * FLOOR_M;
+            if (ma.minLevel && ma.levels && ma.levels > ma.minLevel) facadeFloors = ma.levels - ma.minLevel;
+            if (roofHeight == null && ma.roofLevels) roofHeight = ma.roofLevels * 2.6;
+          } else if (h == null && (ma.height != null || ma.levels != null)) stats.osmHeightRefused++;
           if (!use || use === 'yes') use = match.tags.building && match.tags.building !== 'yes' ? match.tags.building : use;
         }
         const id = `overture:${b.id}${b.polygons.length > 1 ? '/' + pi : ''}`;
+        const look = lookFromFeeds(match?.tags, b, match?.tags.wikidata ? extras.wikidata?.get(match.tags.wikidata) : undefined, trusted);
         push(id, rings, h, floors, use, fromOsm, {
           srcId: b.id,
           name: b.name ?? match?.tags.name ?? null,
           tags: match?.tags,
-          minHeight: b.minHeight ?? null,
+          minHeight,
           roofShape: b.roofShape ?? (match?.tags['roof:shape'] || null),
-          roofHeight: b.roofHeight ?? null,
+          roofHeight,
           roofDirection: b.roofDirection ?? null,
           roofColor: b.roofColor ?? null,
           facadeMaterial: b.facadeMaterial ?? (match?.tags['building:material'] || null),
           facadeColor: b.facadeColor ?? (match?.tags['building:colour'] || null),
-          hasParts: !!b.hasParts,
+          hasParts: !!b.hasParts || (partsOf.get(b.id)?.length ?? 0) > 0,
           parts: partsOf.get(b.id),
+          look,
+          facadeFloors,
         });
         stats.overture++;
       });
@@ -208,15 +373,65 @@ export function buildBuildings(
   } else {
     for (const b of osm) {
       if (!inside(b.rings)) continue;
-      push(b.id, b.rings, osmHeight(b.tags), osmLevels(b.tags), b.tags.building === 'yes' ? null : b.tags.building, true, {
+      const a = appearanceFromTags(b.tags);
+      push(b.id, b.rings, a.height, a.levels, b.tags.building === 'yes' ? null : b.tags.building, true, {
         name: b.tags.name ?? null,
         tags: b.tags,
         roofShape: b.tags['roof:shape'] || null,
         facadeMaterial: b.tags['building:material'] || null,
         facadeColor: b.tags['building:colour'] || null,
+        minHeight: a.minLevel ? a.minLevel * FLOOR_M : a.minHeight,
+        look: lookFromFeeds(b.tags, null, b.tags.wikidata ? extras.wikidata?.get(b.tags.wikidata) : undefined, true),
       });
       stats.osmOnly++;
     }
+  }
+
+  // known heights and curated looks, last, with the strongest say
+  if (extras.facts) {
+    stats.facts = applyFacts(out, extras.facts, proj, (t, height) => {
+      const bd = t as Building;
+      stats.heightSources[bd.heightSource]--;
+      bd.height = height;
+      bd.heightSource = 'known';
+      stats.heightSources.known++;
+    });
+  }
+
+  // a known tower on a much bigger, lower footprint (a hotel's podium): the footprint is split into the tower and the rest
+  for (const tw of stats.facts?.heights.towers ?? []) {
+    const bd = tw.target as Building;
+    const sq = towerSquare(bd.rings[0], tw.at, tw.fact.floors);
+    if (!sq) {
+      stats.facts!.heights.mismatched.push({ label: tw.fact.label ?? '', known: tw.fact.height, baked: bd.height, id: bd.id });
+      continue;
+    }
+    const cl = (r: V2[]) => [...r, r[0]].map((p) => [p[0], p[1]] as [number, number]);
+    let rest: polygonClipping.MultiPolygon;
+    try {
+      rest = polygonClipping.difference(bd.rings.map(cl) as polygonClipping.Polygon, [cl(sq)] as polygonClipping.Polygon);
+    } catch {
+      continue;
+    }
+    const open = (r: [number, number][]): V2[] => r.slice(0, -1).map((p) => [p[0], p[1]] as V2);
+    const idx = out.indexOf(bd);
+    if (idx < 0 || !rest.length) continue;
+    const tower: Building = { ...bd, id: `${bd.id}/tower`, rings: [sq], height: tw.fact.height, heightSource: 'known', numFloors: tw.fact.floors, parts: undefined, hasParts: false, minHeight: null, facadeFloors: null, roofHeight: null, roofShape: null, look: { ...(bd.look ?? {}), heightKnown: true, floors: tw.fact.floors ?? undefined, floorsSrc: 'facts', year: tw.fact.year ?? bd.look?.year, yearSrc: tw.fact.year ? 'facts' : bd.look?.yearSrc } };
+    const pieces = rest.map((poly, n) => ({ ...bd, id: rest.length > 1 ? `${bd.id}/p${n}` : bd.id, rings: poly.map(open) }));
+    out.splice(idx, 1, tower, ...pieces);
+    stats.heightSources.known++;
+    stats.towersSplit++;
+  }
+
+  for (const bd of out) {
+    const l = bd.look ?? {};
+    countBy(stats.look.colour, l.colourSrc);
+    countBy(stats.look.roofColour, l.roofColourSrc);
+    countBy(stats.look.material, l.materialSrc);
+    countBy(stats.look.style, l.styleSrc);
+    countBy(stats.look.year, l.yearSrc);
+    countBy(stats.look.floors, l.floorsSrc);
+    if (!l.colourSrc && !l.materialSrc && !l.styleSrc && !l.yearSrc && !l.floorsSrc) stats.look.bare++;
   }
   stats.total = out.length;
   return { buildings: out, stats };

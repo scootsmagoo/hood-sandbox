@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { parseLanes } from '../../shared/lanes';
 import { collectProps, worldSolids } from '../../shared/props';
 import type { SimEvent } from '../../shared/protocol';
-import type { TileManifest } from '../../shared/tile';
+import { parseProps, type TileManifest } from '../../shared/tile';
 import { PED, PED_FEET_OFFSET } from '../../sim/character/locomotion';
 import { parseScenarios } from '../../shared/walk';
 import type { Game, System } from '../Game';
@@ -125,7 +125,7 @@ export async function loadCollisionDebug(game: Game, tileBase: string | null, ma
   if (!tileBase) return null;
   try {
     const get = (name: string) => fetch(new URL(name, tileBase).href);
-    const [colRes, lanesRes, scenRes] = await Promise.all([get(manifest.collision.file), manifest.lanes ? get(manifest.lanes) : null, manifest.scenarios ? get(manifest.scenarios) : null]);
+    const [colRes, lanesRes, scenRes, propsRes] = await Promise.all([get(manifest.collision.file), manifest.lanes ? get(manifest.lanes) : null, manifest.scenarios ? get(manifest.scenarios) : null, manifest.props ? get(manifest.props) : null]);
     if (!colRes.ok) return null;
     const bytes = await colRes.arrayBuffer();
     const { vertexCount, indexCount } = manifest.collision;
@@ -133,7 +133,8 @@ export async function loadCollisionDebug(game: Game, tileBase: string | null, ma
     const indices = new Uint32Array(bytes, vertexCount * 12, indexCount);
     const lanes = lanesRes?.ok ? parseLanes(await lanesRes.json()) : null;
     const scen = scenRes?.ok ? parseScenarios(await scenRes.json()) : null;
-    const props = collectProps(lanes?.junctions, scen?.points);
+    const anchors = propsRes?.ok ? parseProps(await propsRes.json()) : null;
+    const props = collectProps(lanes?.junctions, scen?.points, anchors ?? undefined);
     const boxes = boxEdges(props.flatMap(worldSolids));
     return new CollisionDebug(game, { positions, indices, buildingTriangles: manifest.collision.buildingTriangles ?? indexCount / 3 }, boxes);
   } catch (e) {

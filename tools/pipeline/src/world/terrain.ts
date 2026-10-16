@@ -308,7 +308,13 @@ export const DEFAULT_CARVE: CarveOptions = { pin: 3, blend: 9 };
  * roads reach a vertex their heights are averaged, each weighted by how close the vertex is to the road's
  * centreline relative to the road's own width (so a side street next to a boulevard keeps its own
  * profile on its own lanes). Returns the largest cut and fill in metres.
+ *
+ * (Weighting by the distance from each road's paved edge instead, and junction planes fitted to the legs, were tried with the
+ * ground audit and the grade check, and did worse on both: see docs/ground-audit.md.)
  */
+/** Of a carriageway's half width, the part (from its centreline) inside which the carving weighs a road as at its centre. */
+const INNER = 0.75;
+
 export function carveTerrain(hm: Heightmap, segs: CarveSegment[], user: Partial<CarveOptions> = {}): { cut: number; fill: number; vertices: number } {
   const o = { ...DEFAULT_CARVE, ...user };
   const orig = Float32Array.from(hm.data);
@@ -332,7 +338,9 @@ export function carveTerrain(hm: Heightmap, segs: CarveSegment[], user: Partial<
         const score = d - pinR;
         if (score >= o.blend) continue;
         const i = r * hm.cols + c;
-        const rel = d / pinR + 0.15;
+        // (the distance counts from three quarters of the way to the kerb: a vertex well inside one carriageway follows it, not a
+        // narrower road whose centreline is nearer, as a wide motorway's outer lane did a ramp beside it, 1.5 m off)
+        const rel = Math.max(0, d - INNER * s.halfWidth) / (pinR - INNER * s.halfWidth) + 0.15;
         const w = 1 / (rel * rel * rel);
         sumW[i] += w;
         sumWH[i] += w * (s.ha + (s.hb - s.ha) * t);
@@ -354,6 +362,86 @@ export function carveTerrain(hm: Heightmap, segs: CarveSegment[], user: Partial<
   return { cut, fill, vertices };
 }
 
+export interface SmoothOptions {
+  /** Vertices within halfWidth + this of a road are smoothed. */
+  reach: number;
+  /** Rounds of the smoothing; each moves a vertex `rate` of the way to the mean of its eight neighbours. */
+  rounds: number;
+  rate: number;
+  /** The most a vertex may move, m. */
+  maxChange: number;
+}
+
+const NB8: [(c: number) => number, number][] = [
+  [() => -1, 1], [() => 1, 1], [(c) => -c, 1], [(c) => c, 1],
+  [(c) => -c - 1, 0.5], [(c) => -c + 1, 0.5], [(c) => c - 1, 0.5], [(c) => c + 1, 0.5],
+];
+
+// (a larger cap, 0.25 to 0.4 m, took fewer launches out but made the ground beside some roads steeper than the grade check allows)
+export const DEFAULT_SMOOTH: SmoothOptions = { reach: 3, rounds: 16, rate: 0.5, maxChange: 0.1 };
+
+/**
+ * Smooths the ground under and beside the roads (a few rounds of a Laplacian over the vertices within `reach` of a road's paved
+ * edge): where two roads cross at different grades, or a road meets the ground's own slope, the carved surface has creases
+ * across the 4 m cells that throw a car at speed (a crest of 2% over one cell launches it from 35 m/s). Vertices for which
+ * `frozen(x, z)` holds keep their height (the ends of decks, which must meet the ground exactly). Returns the largest change, m.
+ */
+export function smoothCorridor(hm: Heightmap, segs: CarveSegment[], frozen: (x: number, z: number) => boolean, user: Partial<SmoothOptions> = {}): { vertices: number; maxChange: number } {
+  const o = { ...DEFAULT_SMOOTH, ...user };
+  const n = hm.data.length;
+  const mask = new Uint8Array(n);
+  for (const s of segs) {
+    const reach = s.halfWidth + o.reach;
+    const minX = Math.min(s.a[0], s.b[0]) - reach, maxX = Math.max(s.a[0], s.b[0]) + reach;
+    const minZ = Math.min(s.a[1], s.b[1]) - reach, maxZ = Math.max(s.a[1], s.b[1]) + reach;
+    const c0 = Math.max(1, Math.ceil((minX - hm.minX) / hm.cellSize)), c1 = Math.min(hm.cols - 2, Math.floor((maxX - hm.minX) / hm.cellSize));
+    const r0 = Math.max(1, Math.ceil((minZ - hm.minZ) / hm.cellSize)), r1 = Math.min(hm.rows - 2, Math.floor((maxZ - hm.minZ) / hm.cellSize));
+    const dx = s.b[0] - s.a[0], dz = s.b[1] - s.a[1];
+    const l2 = dx * dx + dz * dz;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const x = hm.minX + c * hm.cellSize, z = hm.minZ + r * hm.cellSize;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.a[0]) * dx + (z - s.a[1]) * dz) / l2));
+        if (Math.hypot(x - (s.a[0] + t * dx), z - (s.a[1] + t * dz)) <= reach) mask[r * hm.cols + c] = 1;
+      }
+    }
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!mask[i]) continue;
+    const c = i % hm.cols, r = Math.floor(i / hm.cols);
+    if (frozen(hm.minX + c * hm.cellSize, hm.minZ + r * hm.cellSize)) continue;
+    idx.push(i);
+  }
+  const orig = Float32Array.from(hm.data);
+  const next = new Float32Array(idx.length);
+  const C = hm.cols;
+  for (let round = 0; round < o.rounds; round++) {
+    const h = hm.data;
+    idx.forEach((i, k) => {
+      // the mean of the eight neighbours (the diagonals at half weight) that are in the corridor too: the terrain beside the road
+      // (a cut's bank, a fill's slope) does not pull the road's edge towards it
+      let sw = 0, sh = 0;
+      for (const [o2, w] of NB8) {
+        const j = i + o2(C);
+        if (!mask[j]) continue;
+        sw += w;
+        sh += w * h[j];
+      }
+      next[k] = sw > 0 ? h[i] + (sh / sw - h[i]) * o.rate : h[i];
+    });
+    idx.forEach((i, k) => (h[i] = next[k]));
+  }
+  // a crease is smoothed, a bank between two roads at different heights is not: the change is capped
+  let maxChange = 0;
+  for (const i of idx) {
+    const d = Math.max(-o.maxChange, Math.min(o.maxChange, hm.data[i] - orig[i]));
+    hm.data[i] = orig[i] + d;
+    maxChange = Math.max(maxChange, Math.abs(d));
+  }
+  return { vertices: idx.length, maxChange };
+}
+
 export interface UnderDeckSegment {
   a: V2;
   b: V2;
@@ -361,15 +449,19 @@ export interface UnderDeckSegment {
   ya: number;
   yb: number;
   halfWidth: number;
+  /** a or b is the end of the deck (where it lands): the ground within `abutment` m of it along the deck is left alone */
+  endA?: boolean;
+  endB?: boolean;
 }
 
 /**
  * Lowers the ground where it would stand higher than a deck's surface (the bank at a bridge end, a hill a
  * deck is threaded under): such ground within the deck's width and `margin` ends up `depth` below the
  * surface (under the slab), blending out to the original over `blend` metres. Ground at or below the
- * deck, and ground that meets the deck at its ends, is left alone. Returns the deepest cut.
+ * deck, ground that meets the deck at its ends, and ground `keep` says is another road's carriageway (a junction beside where a
+ * deck starts: dug down, its pavement was a trough) is left alone. Returns the deepest cut.
  */
-export function lowerTerrainUnder(hm: Heightmap, segs: UnderDeckSegment[], depth = 1.3, margin = 2.5, blend = 6, tolerance = 0.15): { cut: number; vertices: number } {
+export function lowerTerrainUnder(hm: Heightmap, segs: UnderDeckSegment[], depth = 1.3, margin = 2.5, blend = 6, tolerance = 0.15, keep?: (x: number, z: number) => boolean, abutment = 4.5): { cut: number; vertices: number } {
   const orig = Float32Array.from(hm.data);
   const bestLimit = new Float32Array(hm.data.length).fill(Infinity);
   for (const s of segs) {
@@ -386,6 +478,10 @@ export function lowerTerrainUnder(hm: Heightmap, segs: UnderDeckSegment[], depth
         const x = hm.minX + c * hm.cellSize, z = hm.minZ + r * hm.cellSize;
         const tr = l2 === 0 ? 0 : ((x - s.a[0]) * dx + (z - s.a[1]) * dz) / l2;
         if (tr < 0 || tr > 1) continue; // beside or past an end of the deck is the ground road's business
+        // so is the ground the end of the deck sits on: dug out there, the heightmap's cells at the end dipped down into the pit
+        // (the deck lands on the ground it reads at its end, which then pulled it into the pit too)
+        const len = Math.sqrt(l2);
+        if ((s.endA && tr * len < abutment) || (s.endB && (1 - tr) * len < abutment)) continue;
         const t = tr;
         const d = Math.hypot(x - (s.a[0] + t * dx), z - (s.a[1] + t * dz));
         const score = d - pinR;
@@ -393,6 +489,7 @@ export function lowerTerrainUnder(hm: Heightmap, segs: UnderDeckSegment[], depth
         const i = r * hm.cols + c;
         const top = s.ya + (s.yb - s.ya) * t;
         if (orig[i] <= top + tolerance) continue;
+        if (keep?.(x, z)) continue;
         const u = score <= 0 ? 1 : 1 - score / blend;
         const w = u * u * (3 - 2 * u);
         const limit = orig[i] + (top - depth - orig[i]) * w;

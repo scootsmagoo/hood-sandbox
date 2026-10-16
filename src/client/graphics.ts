@@ -16,6 +16,7 @@ export type TierName = 'low' | 'medium' | 'high';
  *   bloom     bloom levels when post is 2 (1 = quarter size, 2 = quarter and sixteenth)
  *   haze      exponential humid-air fog instead of three's linear fog
  *   lamps     sodium street lamps: glow heads, light pools on the road, poles (1 = fewer and nearer)
+ *   trees     the trees of props.json and the small furniture (1 = no alpha leaf cards, fewer and nearer trees; 2 = full)
  */
 export interface TierFx {
   facade: 0 | 1 | 2;
@@ -24,6 +25,7 @@ export interface TierFx {
   bloom: 0 | 1 | 2;
   haze: boolean;
   lamps: 0 | 1 | 2;
+  trees: 0 | 1 | 2;
 }
 
 export interface Tier {
@@ -45,9 +47,9 @@ export interface Tier {
 }
 
 export const TIERS: Record<TierName, Tier> = {
-  low: { name: 'low', pixelRatio: 1, shadowMap: 0, shadowRadius: 0, lodScale: 0.55, far: 700, pedBudget: 24, trafficDensity: 0.5, fx: { facade: 1, surfaces: 1, post: 1, bloom: 0, haze: true, lamps: 1 } },
-  medium: { name: 'medium', pixelRatio: 1.5, shadowMap: 1024, shadowRadius: 50, lodScale: 0.75, far: 1400, pedBudget: 40, trafficDensity: 0.75, fx: { facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2 } },
-  high: { name: 'high', pixelRatio: 2, shadowMap: 2048, shadowRadius: 80, lodScale: 1, far: 2600, pedBudget: 60, trafficDensity: 1, fx: { facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2 } },
+  low: { name: 'low', pixelRatio: 1, shadowMap: 0, shadowRadius: 0, lodScale: 0.55, far: 700, pedBudget: 24, trafficDensity: 0.5, fx: { facade: 1, surfaces: 1, post: 1, bloom: 0, haze: true, lamps: 1, trees: 1 } },
+  medium: { name: 'medium', pixelRatio: 1.5, shadowMap: 1024, shadowRadius: 50, lodScale: 0.75, far: 1400, pedBudget: 40, trafficDensity: 0.75, fx: { facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2, trees: 2 } },
+  high: { name: 'high', pixelRatio: 2, shadowMap: 2048, shadowRadius: 80, lodScale: 1, far: 2600, pedBudget: 60, trafficDensity: 1, fx: { facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2, trees: 2 } },
 };
 
 /** The look: `?gfx=classic` (or `basic`) is the old flat renderer, anything else the GTA IV look of src/client/render/look/. */
@@ -58,7 +60,7 @@ export function lookMode(params: URLSearchParams): LookMode {
 }
 
 /** The names `?gfxoff=` takes (for A/B tests), each switching one `fx` field off. `surface` is accepted for `surfaces`. */
-const OFF_KEYS: Record<string, keyof TierFx> = { facade: 'facade', surface: 'surfaces', surfaces: 'surfaces', post: 'post', bloom: 'bloom', haze: 'haze', lamps: 'lamps' };
+const OFF_KEYS: Record<string, keyof TierFx> = { facade: 'facade', surface: 'surfaces', surfaces: 'surfaces', post: 'post', bloom: 'bloom', haze: 'haze', lamps: 'lamps', trees: 'trees' };
 
 /** A tier's fx with the parts named in `?gfxoff=a,b,c` turned off. */
 export function resolveFx(tier: Tier, params: URLSearchParams): TierFx {

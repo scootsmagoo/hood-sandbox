@@ -10,7 +10,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { parseLanes, type LaneJunctionData } from '../../shared/lanes';
 import { SIM_DT } from '../../shared/protocol';
 import { SIGNAL_ARM, SIGNAL_BOXES, SIGNAL_POLE_H, signalHeads } from '../../shared/props';
-import { legState, type SignalState } from '../../shared/signals';
+import { groupOfLeg, phaseOf, type SignalState } from '../../shared/signals';
 import type { Game, System } from '../Game';
 
 const POLE_H = SIGNAL_POLE_H;
@@ -63,8 +63,8 @@ interface Head {
   lit: number;
 }
 
-/** Heads are drawn in chunks of this many metres, so the ones behind the camera are culled. */
-const CHUNK = 400;
+/** Heads are drawn in chunks of this many metres, so the ones behind the camera are culled. (A head is a few hundred triangles, a draw is not free: 800 m is a handful of draws for the whole tile.) */
+const CHUNK = 800;
 
 export class SignalHeads implements System {
   readonly name = 'signalHeads';
@@ -76,12 +76,17 @@ export class SignalHeads implements System {
   private readonly heads: Head[] = [];
   private readonly junctions: LaneJunctionData[] = [];
   private lastTick = -1;
+  /** The heads of each junction, and the stretch of sim time [from, until) in which its lamps do not change (one signal stage). */
+  private headsOf: number[][] = [];
+  private from = new Float64Array(0);
+  private until = new Float64Array(0);
 
   constructor(
     private readonly game: Game,
     junctions: LaneJunctionData[],
   ) {
     this.group.name = 'signal-heads';
+    this.group.matrixAutoUpdate = false;
     const list: { j: number; leg: number; x: number; y: number; z: number; yaw: number }[] = [];
     const index = new Map<LaneJunctionData, number>();
     for (const h of signalHeads(junctions)) {
@@ -126,37 +131,58 @@ export class SignalHeads implements System {
       });
       // frustum culling works per chunk: the bounds are those of its heads, with the pole's height
       for (const mesh of [poles, lamps]) {
+        mesh.matrixAutoUpdate = false; // (identity: the instances carry the poses)
         mesh.instanceMatrix.needsUpdate = true;
         mesh.computeBoundingSphere();
         this.group.add(mesh);
       }
     }
+    this.headsOf = this.junctions.map(() => []);
+    this.heads.forEach((h, i) => this.headsOf[h.junction].push(i));
+    this.from = new Float64Array(this.junctions.length).fill(Infinity);
+    this.until = new Float64Array(this.junctions.length).fill(-Infinity);
     game.scene.add(this.group);
   }
 
+  private readonly dirty = new Set<number>();
+
+  /**
+   * Lamp colours follow the sim's clock, a stage at a time (a junction's lamps change a few times a minute): a
+   * junction is looked at again only when the clock leaves the stage it was last seen in. (Asking every head,
+   * every tick, allocated a phase table for each and took more than the whole of the lamps' draw.)
+   */
   update() {
     const tick = this.game.view.tick;
     if (tick === this.lastTick) return;
     this.lastTick = tick;
     const t = tick * SIM_DT;
-    const dirty = new Set<number>();
-    for (let i = 0; i < this.heads.length; i++) {
-      const h = this.heads[i];
-      const st = legState(this.junctions[h.junction] as never, h.leg, t);
-      const lit = st === 'red' ? 0 : st === 'amber' ? 1 : 2;
-      if (lit === h.lit) continue;
-      h.lit = lit;
-      dirty.add(h.chunk);
-      const arr = this.lamps[h.chunk].instanceColor!.array as Float32Array;
-      for (let k = 0; k < 3; k++) {
-        const rgb = k === lit ? COLORS[st].map((c) => c * LIT) : DIM_RGB[k];
-        const o = (h.idx * 3 + k) * 3;
-        arr[o] = rgb[0];
-        arr[o + 1] = rgb[1];
-        arr[o + 2] = rgb[2];
+    const dirty = this.dirty;
+    for (let ji = 0; ji < this.junctions.length; ji++) {
+      if (t >= this.from[ji] && t < this.until[ji]) continue;
+      const j = this.junctions[ji] as never;
+      const ph = phaseOf(j, t);
+      this.from[ji] = t - ph.stageT;
+      this.until[ji] = t + ph.stageLeft;
+      for (const hi of this.headsOf[ji]) {
+        const h = this.heads[hi];
+        const st = ph.groups[groupOfLeg(j, h.leg)];
+        const lit = st === 'red' ? 0 : st === 'amber' ? 1 : 2;
+        if (lit === h.lit) continue;
+        h.lit = lit;
+        dirty.add(h.chunk);
+        const arr = this.lamps[h.chunk].instanceColor!.array as Float32Array;
+        for (let k = 0; k < 3; k++) {
+          const rgb = k === lit ? COLORS[st] : DIM_RGB[k];
+          const f = k === lit ? LIT : 1;
+          const o = (h.idx * 3 + k) * 3;
+          arr[o] = rgb[0] * f;
+          arr[o + 1] = rgb[1] * f;
+          arr[o + 2] = rgb[2] * f;
+        }
       }
     }
     for (const c of dirty) this.lamps[c].instanceColor!.needsUpdate = true;
+    dirty.clear();
   }
 
   dispose() {

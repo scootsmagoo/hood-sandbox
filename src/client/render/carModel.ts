@@ -15,6 +15,7 @@ import type { HandlingData } from '../../shared/handling';
 import { WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
 import type { CarAsset, CarMat, CarPartName } from './carAssets';
 import { BUMPER_OFF, BUMPER_SAG, type CarDamageState, type DamageShape, type Dent } from './carDamage';
+import { ownDepth } from './depthMaterials';
 import { BURNT, CAR_HEAD, newCarUniforms, newGlass, newLamp, newPaint, patchCar, sharedCarMaterials, type CarUniforms } from './carMaterials';
 import { glowTex, type ModelLivery, type VehicleModel } from './models';
 
@@ -131,6 +132,8 @@ export class CarModel implements VehicleModel {
     livery?: ModelLivery,
   ) {
     this.root.name = `car-${asset.name}`;
+    // (the levels not drawn are out of the scene graph: the leak harness counts them through this)
+    this.root.userData.lodGroups = this.lods;
     this.wb = h.wheels;
     this.paint = newPaint(livery ? livery.body : color, this.u);
     this.paintBase = this.paint.color.clone();
@@ -279,6 +282,7 @@ export class CarModel implements VehicleModel {
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         im.castShadow = m === 'tyre' && level < 2;
         im.frustumCulled = false;
+        ownDepth(im);
         group.add(im);
         view.wheels.push(im);
       }
@@ -286,11 +290,21 @@ export class CarModel implements VehicleModel {
     return view;
   }
 
-  /** Shows one level of detail (0 nearest). */
+  /**
+   * Shows one level of detail (0 nearest). The other levels are taken out of the car's scene graph, not just hidden:
+   * a hidden node still costs a world-matrix update every frame (the car moves, so its whole subtree is recomputed),
+   * and a car is some 50 nodes, two thirds of them in levels nobody can see.
+   */
   setLod(level: number) {
     if (level === this.lod) return;
     this.lod = level;
-    for (let i = 0; i < this.lods.length; i++) this.lods[i].group.visible = i === level;
+    for (let i = 0; i < this.lods.length; i++) {
+      const g = this.lods[i].group;
+      g.visible = i === level;
+      if (i === level) {
+        if (g.parent !== this.root) this.root.add(g);
+      } else if (g.parent) this.root.remove(g);
+    }
   }
 
   apply(wheels: Float32Array, braking: boolean, reversing: boolean, door = 0) {

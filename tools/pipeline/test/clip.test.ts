@@ -24,6 +24,16 @@ describe('buildings over streets', () => {
     expect(new Set(r.buildings.map((x) => x.id)).size).toBe(2);
   });
 
+  it('cuts a building corner out of the path of a turn (a lane path, a car\'s half width either side)', () => {
+    // a corner building whose corner sticks into the curve a right turn sweeps through
+    const b = building('c', [[2, 2], [30, 2], [30, 30], [2, 30]]);
+    const turn: V2[] = [[-5, 0], [0, 1], [3, 4], [4, 9], [4, 20]];
+    const r = clipBuildingsToRoads([b], [], 0.3, 6, [{ pts: turn, half: 1.3 }]);
+    expect(r.stats.clipped).toBe(1);
+    // no corner of what is left lies within 1.2 m of the turn's points
+    for (const x of r.buildings) for (const p of x.rings[0]) for (const q of turn) expect(Math.hypot(p[0] - q[0], p[1] - q[1])).toBeGreaterThan(1.2);
+  });
+
   it('leaves buildings beside the street, and buildings over service roads, alone', () => {
     const beside = building('a', [[-10, 6], [10, 6], [10, 20], [-10, 20]]);
     const garage = building('g', [[-10, -10], [10, -10], [10, 10], [-10, 10]]);

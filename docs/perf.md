@@ -246,6 +246,8 @@ Budgets (`scripts/perf-budget.json`, written 2026-10-14 from two runs each on th
 
 Frame-time budgets stay at 25 ms (16.7 ms measured on every profile). Geometry budgets are now 660, 649, 631 and 548 (were 705, 700, 692 and 601): the raw count follows the route (see "Road markings" below).
 
+`node scripts/cpu-profile.mjs` (see "Main-thread CPU, profiled and trimmed" below) says where a frame's main-thread time goes: per system, per three.js phase, per function, with `--query` to compare variants.
+
 ### `npm run soak` (5 minutes; `--minutes 30` for a long one)
 
 The bot loops (in, drive 45 s, park, out, walk out and back, look round) while a sample is taken every 15 s after a forced GC. Fails on a crash, a page error, **frame cost drifting up** (the best window's main-thread cost per draw call in the last third of the run against the best window of the first third, after the warm-up: at most 1.3x plus 1.5 us; best windows, because other programs on the machine only ever add to a window), **heap growth** (the median heap of the last third against the first third: 30 MB, or 6 MB/min), **GPU objects growing** (more than 8: the geometries the renderer holds that the scene no longer draws, and textures; the raw geometry count is reported but not judged, see "Road markings" below), or a bot that barely moved (see below). Limits are in the `soak` section of `scripts/perf-budget.json`.
@@ -270,11 +272,11 @@ The existing controls check, with a Chromium (default) or Playwright WebKit (`--
 
 What the GTA IV look spends per tier (`Tier.fx`, see "The GTA IV look" below):
 
-| | facade | surfaces | post | bloom | haze | lamps |
-|---|---|---|---|---|---|---|
-| High | 2 full | 2 full | 2 grade + bloom | 2 levels (1/4, 1/16) | on | 2 (80 poles, 56 pools, 1000 glows) |
-| Medium | 2 full | 2 full | 2 grade + bloom | 2 levels | on | 2 |
-| Low | 1 (no stains, streaks, slab lines, blinds) | 1 (no patches, cracks, stains, finest octaves) | 1 (one grade pass, no bloom) | 0 | on | 1 (36 poles, 28 pools, 500 glows) |
+| | facade | surfaces | post | bloom | haze | lamps | trees |
+|---|---|---|---|---|---|---|---|
+| High | 2 full | 2 full | 2 grade + bloom | 2 levels (1/4, 1/16) | on | 2 (80 poles, 56 pools, 1000 glows) | 2 (20 near with alpha leaf cards, 80 mid, 1,500 impostors) |
+| Medium | 2 full | 2 full | 2 grade + bloom | 2 levels | on | 2 | 2 (as High, ranges x 0.75) |
+| Low | 1 (no stains, streaks, slab lines, blinds) | 1 (no patches, cracks, stains, finest octaves) | 1 (one grade pass, no bloom) | 0 | on | 1 (36 poles, 28 pools, 500 glows) | 1 (no leaf cards: 36 mid, 600 impostors, no shadows) |
 
 Touch devices start on Medium and the governor steps down after 3 s above 24 ms; `?graphics=low` forces Low (the phone profile does). Multisampling is off on touch devices and whenever `?graphics=low`. The coarse ground distance is `400 m x lodScale` (1, 0.75, 0.55), so new level-of-detail code should divide the distance it measures by `lodScale` as the header of `graphics.ts` says. On the phone profile Low draws 160 to 170 calls and 72k to 82k triangles; High draws up to 484 and 200k.
 
@@ -358,6 +360,35 @@ So the round costs about 0.2 ms of main-thread time on average on the throttled 
 
 `LawHud` and `GunHud` now read the viewport size from `game.viewW` / `game.viewH` (set on resize), not `canvas.clientWidth` in a frame: a layout read after the HUD's writes forces a synchronous reflow. The dialling markers do nothing in a frame with nobody dialling.
 
+## People (2026-10-16)
+
+Every pedestrian is now a skinned Blender body (`tools/blender/characters`, see its README): sixteen bodies, three levels of detail each (3,600 to 4,900, 1,000 to 1,450 and 360 to 500 triangles), one 22-bone skeleton that matches the sim's ragdoll, 31 clips, one 1.75 MB .glb (1.18 MB gzipped) loaded at boot beside the cars. `?peds=box` (or a failed load) keeps the old block figures; the numbers below compare the two on the same tree.
+
+- **Who is drawn how** (`src/client/render/chars/PedViews.ts`). The player, officers and every ragdoll are `PedActor`s: a SkinnedMesh on its own skeleton, an AnimationMixer, the level of detail picked by distance (12 and 36 m at lodScale 1). The nearest few ordinary people are actors too (14 on High, 9 on Medium, 5 on Low, within 17 m x lodScale, those already near counting as 25% closer); a camera moving faster than 9 m/s (driving) promotes nobody new. Everyone else is the `SkinnedCrowd`: one InstancedMesh per body and level (LOD1 to 30 m, LOD2 beyond), a person written into one of them each frame, so a person changing level or body needs no bookkeeping.
+- **Why the crowd is cheap.** Its animation is baked: every clip it plays (`CROWD_CLIPS`, 19 of them) is sampled at 20 fps through a real skeleton at load into one half-float texture of bone matrices (66 x 970 texels, 0.5 MB, a few ms to bake). The vertex shader reads two frames of up to two clips and blends them (so a crossfade from a walk to a stand is a number, not a mixer), and the palette (15 regions) is a texture row a person. There is no mixer, no bone, no skeleton for 150 people: the CPU writes 16 floats of matrix and 8 of animation a person per frame, one `planInto` into a reused buffer (no allocation). Shadows use a depth material with the same skinning. Actors are reused (a pool of ten, parked out of the scene with their bone texture given back), at most two are made a frame, and every mesh is drawn once off screen in the first three frames, with one actor, so no program is compiled and no geometry first uploaded when the first person walks up (that was a 100 ms stall at the phone's 4x throttle, and a "geometry grew" in the leak harness).
+- **Animation level of detail.** Actors past 12 m are posed every second frame, past 36 m every fourth (a figure aiming, or in a one-shot, always). The clips themselves share one locomotion phase advanced at speed over the stride of the clips in play, so the feet keep to the ground and a blend of walk into jog does not make them fight.
+
+Measured with `npm run perf-budget` on a quiet machine (load under 3), 60 people (High), 24 (Low), best of 2 (desktop) and 3 (phone), `?peds=box` then the default, same tree:
+
+| Profile, phase | CPU mean ms, box -> skinned | Draws | Triangles (every pass) |
+|---|---|---|---|
+| desktop-high, idle | 1.83 -> 2.43 | 214 -> 228 | 352k -> 413k |
+| desktop-high, walk | 1.87 -> 2.29 | 248 -> 246 | 409k -> 516k |
+| desktop-high, drive | 1.91 -> 2.08 | 263 -> 259 | 425k -> 528k |
+| desktop-high, look | 1.77 -> 2.08 | 249 -> 244 | 385k -> 441k |
+| desktop-high, gunfire | 1.68 -> 2.01 | 170 -> 183 | 251k -> 328k |
+| phone-low (4x CPU), idle | 4.59 -> 3.96 | 113 -> 111 | 178k -> 191k |
+| phone-low, walk | 4.51 -> 4.39 | 121 -> 122 | 193k -> 207k |
+| phone-low, drive | 5.01 -> 4.94 | 131 -> 132 | 212k -> 230k |
+| phone-low, look | 4.29 -> 4.53 | 138 -> 123 | 192k -> 202k |
+| phone-low, gunfire | 5.09 -> 5.47 | 103 -> 99 | 117k -> 131k |
+
+(Taken just before the actor and crowd ranges were trimmed from 14 / 42 / 38 m to 12 / 36 / 30 m, which lowers the triangle rows a little.) GPU p50 is unchanged on both (0.4 to 0.5 ms desktop, 0.1 to 0.3 phone). Per run: boot +60 ms (desktop) and +170 ms (phone proxy), JS heap +8.7 MB (54 -> 63) and +7.6 MB, renderer geometries +57 (the crowd's per-body copies and the warmed assets) and +70, textures +11 and +3. The triangle increase is the cost of real bodies (a person is 4.5k near, 1.2k mid, 0.4k far where the box figure was about 200), and shadows draw them twice; the 3M budget is not near. The phone's GPU was not measured (the proxy is the CPU slowed 4x on a desktop GPU), and Safari was not tried: skinning is vertex-texture fetches (WebGL2 core), but a real iPhone 15 Pro run is the first thing to do.
+
+`npm run leaks` passes with the ragdoll, crowd, vehicle, reload, tiers, drive, gunfire and wrecks phases flat. A frozen street (the harness's `pedBudget: 0` phases) now also pins who is an actor (`PedViews.pinned`, set by `scripts/leaks.mjs`), so a person walking across the near range is not counted as growth. Mixers and skinned meshes are disposed with their actor; pooled actors are out of the scene.
+
+**Rough** (what to look at next): faces are stylised (the mesh has a brow, nose, cheekbones, jaw, chin and ears; eyes, brows, lips and the hairline are drawn by the shader, so there is no blink or talk); hands are mittens with a thumb; hair is a skull-hugging cap plus a flat sheet or a ponytail (no strands); shoes are simple; a skirt or a dress clips in the sit and cower poses (skin weights, no cloth); LOD2 is 360 to 500 triangles, not 300; aim pitch is a torso tilt, not a hand IK to the sight line; `enter_car` and `exit_car` are 0.7 s blends at the seat, not door-aware; the get-up clips (`getup_back`, `getup_front`) exist but the game uses the sim's own ragdoll-to-standing blend through the bones; the lamp pools of the look brighten legs at night.
+
 ## Blender cars (2026-10-15)
 
 The box stand-ins are replaced by the scripted Blender cars of `tools/blender/` (sedan, coupe, pickup, and police cruisers on the sedan and coupe), loaded from `public/assets/vehicles/*.glb` (five files, 176 to 209 KB each, 0.95 MB in all, meshopt-compressed). Triangles per car at LOD0 / LOD1 / LOD2 (the wheel counted four times): sedan 8274 / 1908 / 460, coupe 8094 / 1832 / 472, pickup 8212 / 2198 / 526, sedan-police 8668 / 2044 / 508, coupe-police 8494 / 1968 / 520.
@@ -374,3 +405,168 @@ The box stand-ins are replaced by the scripted Blender cars of `tools/blender/` 
 `npm run perf-budget` against `?cars=box`, the same day and tree: desktop-high draws fell by 50 to 175 a phase (walk 571 -> 420, look 610 -> 434), triangles rose by up to 60k (walk 298k -> 357k, drive 305k -> 359k); phone-low draws fell slightly (look 350 -> 208), triangles rose by up to 29k (drive 128k -> 157k). All the draw and triangle budgets hold. Main-thread CPU is about +0.1 ms a frame on desktop and +0.5 ms on the phone profile (its 4x slowdown), mostly in three's draw submission for the new materials; the CPU tripwires on this shared box were over for both the stand-in and the new cars. The geometry budgets went up (708 -> 880 desktop-high, 592 -> 780 phone-low): every car asset's geometry is uploaded once at boot (`EntityViews.prewarm` draws each asset at each level into a 1-pixel target, so nothing uploads or compiles mid-game), about 1 MB of GPU buffers.
 
 **Damage** (`carDamage.ts`, `carModel.ts`) costs nothing until a car is hit: the first dent clones that car's near geometry (about 0.3 MB) and moves the vertices in the dent's sphere on the CPU (a millisecond or so per hit); the copies are freed with the model. Fallen bumpers are a pool of at most 10 pieces. `npm run leaks` passes all phases, and a new `wrecks` phase (`--phases wrecks --query transport=loopback`, 20 cycles: three cars wrecked through the client's event path, one blown up, then removed) is flat: geometries 626 -> 626, objects 1314 -> 1314.
+
+## Trees, street furniture and their colliders (2026-10-16)
+
+`src/client/render/Trees.ts`, `Furniture.ts`, `look/sodium.ts`, the lamp models in `look/lamps.ts`, and the colliders in `sim/World.ts` (`addProps`). Numbers from the dev box (load average 6 to 25, so timings are noisy; counts are exact).
+
+**Assets** (`npm run assets`, deterministic: run twice, byte-identical): `trees.glb` 196 KB (5 species, near 710 to 1,220 triangles, mid 350 to 480), `furniture.glb` 39 KB (6 models, 180 to 340 triangles each). The impostor atlas is baked at load: 1024 x 640 RGBA16F (about 5 MB of GPU memory with mips), 40 small renders, one time.
+
+**Draws and triangles on the fixed cameras** (`node scripts/gfx-cost.mjs --views park-day,auburn-day,auburn-night --variants trees,default`: the variant `trees` is `?gfxoff=trees`, so the difference is the trees and the small furniture only; the lamp models are in both). Centennial Park is the densest 100 m of the tile, Auburn Avenue a typical tree-lined street. Triangles include the shadow pass. GPU is `renderer.render` plus `gl.finish()` on a Radeon 8060S, a floor for any phone.
+
+| Tier | View | Draws | Triangles | GPU ms |
+|---|---|---|---|---|
+| High | park, day | 69 -> 88 (+19) | 74k -> 142k (+68k) | 0.29 -> 0.37 |
+| High | Auburn, day / night | 72 -> 89 (+17) / 76 -> 93 (+17) | 105k -> 129k (+24k) / 107k -> 131k (+24k) | 0.27 -> 0.37 / 0.31 -> 0.42 |
+| Medium | park, day | 69 -> 86 (+17) | 71k -> 102k (+31k) | 0.27 -> 0.37 |
+| Medium | Auburn, day / night | 71 -> 88 (+17) / 73 -> 90 (+17) | 102k -> 122k (+20k) / 104k -> 123k (+19k) | 0.29 -> 0.37 / 0.28 -> 0.35 |
+| Low | park, day | 47 -> 53 (+6) | 45k -> 52k (+7k) | 0.16 -> 0.19 |
+| Low | Auburn, day / night | 49 -> 55 (+6) / 52 -> 58 (+6) | 69k -> 75k (+6k) / 70k -> 76k (+6k) | 0.28 (noise) -> 0.22 / 0.17 -> 0.20 |
+| Low, phone viewport | park / Auburn, day | 37 -> 43 (+6) / 39 -> 45 (+6) | 33k -> 40k (+7k) / 55k -> 60k (+5k) | 0.15 -> 0.17 / 0.18 -> 0.20 |
+
+**The Downtown route of `npm run perf-budget`** (walk, drive, look; best of 2 or 3, same code with and without `gfxoff=trees`): there are few trees along it, so the difference is inside the noise: desktop-high +1 to +26 draws and -3k to +39k triangles, desktop-medium -6 to +32 draws and -33k to +9k, desktop-low +1 to +4 draws and +1k to +6k, phone-low +3 to +4 draws and about +1k (the Low tier draws 36 mid trees at most and no cards). GPU p50 moved 0 to +0.15 ms on desktop-high and medium and not at all on Low; CPU mean did not move beyond the run-to-run noise (1.4 to 2.5 ms desktop, 5 to 6 ms phone-low at 4x). Heap +1.5 to +8 MB (the geometry clones, the instance buffers, the atlas bookkeeping), geometries +6 to +14, textures +1 (the atlas), programs +2, boot about +50 ms (the bake; the runs scatter from +30 to +400 ms on a busy box). Re-baseline the budget file after this lands: the High and Medium triangle ceilings and the geometry ceilings are the ones that move.
+
+**CPU per frame:** `Trees.update` rebuilds the instance lists when the camera has moved 4 m (at most every 0.35 s): a 64 m cell lookup, a sort of the trees in range (a few hundred to about 1,500) and a matrix per near or mid tree; well under 0.2 ms when it runs, nothing in between. The sway is a vertex-shader sine.
+
+**Colliders.** The 4,185 trunks, 2,087 lamp poles and 119 hydrants, bins and bollards are 6,391 boxes. As separate fixed colliders `world.step()` went from 0.22 ms to 0.66 ms in Node (+0.44 ms a step, the whole sim step 1.53 to 1.89 ms; with the broad phase working on 7,600 entries instead of 1,300). Merged into one compound collider per 40 m cell (about 150 of them, the same boxes), it is 0.335 ms (+0.11) and the whole sim step 1.54 ms, within noise of no props. So `PhysicsWorld.addProps` merges the anchors and leaves the 380 signal poles, benches and bus stops as they were. The `propCells` map for the wall-clearance query still lists every box, so people walk round them. Collision audit (`AUDIT_MINUTES=3`, seeds 7, 11 and 23): 0 ambient pedestrians stuck or inside a footprint, `stepMsMean` 1.2 to 1.3; the scripted player bot, which does not steer round furniture, was pinned against a lamp twice in seed 11 (and in none of the other runs; without the anchors no run pins it) and the sim's own no-progress snap freed it.
+
+**Sodium on cars, people and trees:** a fragment loop over at most 8 lamps (4 on Low) behind a uniform branch (`uSodOn`, 0 by day), added to the car materials by one `addSodium(shader)` call; selecting the lamps is a pass over the 2,087 lamp heads every 0.1 s when the camera has moved 1 m, only at night.
+
+## Main-thread CPU, profiled and trimmed (2026-10-16)
+
+The GTA IV look and the Blender cars (01b42b1) put the phone profile over its CPU tripwires (cpuMean 3.7 to 4.2 ms against 3.3 to 3.6, p95 7.5 to 8.8 ms, desktop-high `walk.cpuP95` 3.7 against 3.5, desktop-medium `drive.cpuP95` 3.4 against 3.0). The suspects were the car materials and the look's per-frame work. **Measured, neither is the main cost.**
+
+**How to look** (`node scripts/cpu-profile.mjs --profile phone-low --phases idle,walk,drive [--query "gfx=classic&cars=box"] [--incl 40] [--callers update] [--alloc]`): the perf harness's bot, with every system's `update` and `lateUpdate` and `renderer.render` wrapped in `performance.now()` (ms a frame by system), plus a V8 sampling profile (CDP `Profiler`) folded into three.js phases by function name (`projectObject` is the scene traversal, culling and list building; `renderObjects` the draws; `setProgram` the program and uniform setup; `getProgram` the program lookup), self time by source and the top functions; `--alloc` adds a sampled allocation profile. Spikes: it prints the systems in the frames at or over p95. Deterministic things worth counting beside time, because this box is shared and timings swing 2 to 3x: GL calls a frame (wrap `WebGL2RenderingContext.prototype`), draws, `getProgram` calls, matrices recomputed.
+
+**What the profile said** (phone-low, 4x CPU, ms a frame, quiet box, the tree of 01b42b1; the profiler adds a little):
+
+| | walk, before | walk, after | drive, before | drive, after |
+|---|---|---|---|---|
+| whole frame (`Game.tick`) | 3.95 | 3.07 | 5.44 | 3.04 |
+| `renderer.render` | 3.07 | 2.11 | 3.94 | 1.94 |
+| - `projectObject` (traverse, cull, list) | 0.75 | 0.62 | 0.94 | 0.54 |
+| - `renderObjects` (the draws) | 1.75 | 1.22 | 2.22 | 1.17 |
+| - of it `setProgram` (uniforms) | 1.06 | 0.60 | 1.28 | 0.63 |
+| - of it `getProgram` (program lookups) | 0.31 | 0.00 | 0.36 | 0.00 |
+| - `updateMatrixWorld` | 0.43 | 0.08 | 0.58 | 0.07 |
+| `entityViews` | 0.22 | 0.25 | 0.29 | 0.23 |
+| `minimap` | 0.17 | 0.19 | 0.53 | 0.36 |
+| `net` | 0.12 | 0.18 | 0.18 | 0.15 |
+| `signalHeads` | 0.07 | 0.01 | 0.10 | 0.01 |
+| `hud`, `street-name`, `look`, `atmosphere`, `gunHud`, `world`, `cameraRig` together | 0.20 | 0.25 | 0.25 | 0.24 |
+| GC | 0.02 | 0.02 | 0.02 | 0.02 |
+
+(The "after" runs were on a busier box than the "before"; `entityViews`, `net` and the small systems did not change and moved +-0.05 with the load. The real, repeatable changes are the rendering rows and `signalHeads`. Steady state allocates under 1 KB a frame: GC is not the p95 problem.) At 1x (no throttle) the same idle frame is 1.0 ms, three quarters of it in `renderer.render`.
+
+**The look and the cars, separated** (`?gfx=classic`, `?cars=box`, `ab` of 3 interleaved rounds, phone-low idle, 4x, min of 3, load high): default 3.8 ms, classic look 3.5, stand-in cars 3.3, both 3.1. So the look is about 0.3 ms and the cars about 0.5 ms of a 3.8 ms frame; **3.1 ms is the floor both share**: three.js's cost per draw (the world's, the street's and the cars') and per scene object. The cost was never one system. It was draws: a world draw is about 10 us at 4x, but a car draw is 25 to 28 us, because nearly every car draw changes material (a car has its own paint, lamp and, once a window breaks, glass) and the transparent windows were two passes with a program lookup each.
+
+**What was trimmed, and what it saved** (idle at spawn, phone-low, 1x, interleaved rounds of 600 frames, min of the rounds: 1.54 -> 0.98 ms, so -36%, with every item below in; deterministic counts where timing cannot see one item alone):
+
+| Trim | Where | Saving |
+|---|---|---|
+| **Car windows drawn once.** three.js draws a transparent double-sided material twice, flipping `side` and setting `needsUpdate` around each draw, so every window re-resolved its program (parameters, cache-key string) every frame and the two passes alternated programs. `forceSinglePass`. The same frames rendered both ways differ by 0 of 255 on every pixel (the dark tint is the same on both layers). | `carMaterials.newGlass` | 12 `getProgram` calls and 6 draws a frame, 40 GL calls (7%); `getProgram` 0.3 ms at 4x -> 0 |
+| **The tile's chunks merged 2 x 2 at load** (roads and buildings per material; ground levels and markings stay as they are). The chunks are 256 m and a mesh costs the same to cull, sort and draw at 50 or 5,000 triangles; the GPU has 10x to spare. Positions are baked to float32 in the tile's frame, everything else is copied (the look's shaders see the same attributes). `?mergeblock=1` turns it off. Screenshots of 6 fixed views at High and Low, before and after: at most 0.07% of pixels differ, all sub-pixel edges. | `world/mergeChunks.ts`, `WorldView` | world draws 58 -> 35 at spawn; whole frame -15 to -20%; **triangles +40 to +55%** (the cost, see the budgets) |
+| **The scene no longer recomputes every world matrix every frame.** `Scene.matrixAutoUpdate` was true, which marks its world matrix changed every frame, and three then recomputed all ~770 descendants; now the scene, the entity, tile, traffic and signal groups are `matrixAutoUpdate = false`, and the tile and the asset cache (`car-asset-cache`, 223 hidden nodes) are `freezeStatic` (their `updateMatrixWorld` is skipped). Every object's matrix checked against a from-scratch composition: 0 differ, idle, walking and driving. | `Game`, `freeze.ts`, `EntityViews`, `WorldView`, `carAssets` | matrices recomputed 766 -> 84 a frame, visits 770 -> 180; `updateMatrixWorld` 0.43 -> 0.08 ms at 4x |
+| **Hidden car levels of detail are taken out of the scene graph**, not hidden: a car is ~50 nodes and two thirds were levels nobody sees, each recomputed every frame. | `carModel.setLod` | with the above |
+| **Parked cars away from the camera are drawn as instances** (beyond 26 m, back to a full model within 20 m, both divided by the tier's lodScale; creating a model costs 0.1 ms, so the swap is free). The same asset at the same level; only the shading of the trim differs. 24 fixed-camera pairs at 10 to 45 m, both tiers: inside the noise of the sky's drift (0.0 to 0.7% of pixels). `?parkedinst=0` keeps full models. | `EntityViews` | -6 draws a frame walking, 551 -> 493 GL calls at spawn (-10%): the 6 parked cars are no longer 18 draws and 12 materials of their own |
+| **Shadow pass: instanced casters get their own depth material.** three.js draws every caster with one shared `MeshDepthMaterial`; instanced or not, with an instance colour or not, is part of a program's key, so each switch between plain and instanced casters looked the program up again: 9 a frame in a street. | `depthMaterials.ts` (a scan twice a second also covers other systems' instanced casters) | 9 -> 0 lookups a frame on High and Medium (about 0.08 ms of 2) |
+| **Traffic's body parts share one matrix buffer** (paint, detail, glass and lamps sit where the car sits): one `setMatrixAt` and one upload, not four. | `TrafficInstances` | 3 uploads and 3 writes a car-set a frame |
+| **Signal heads look at a junction when its stage ends**, not at every head every tick (319 `legState` calls a tick, each allocating a phase table, 60 times a second); the heads' chunks are 800 m, not 400 (fewer draws). `phaseOf` no longer allocates. | `SignalHeads`, `shared/signals.ts` | 0.08-0.10 -> 0.01 ms at 4x, and the allocation |
+| **Radar does not redraw while nothing moves** (standing still, no heat, camera still: a refresh four times a second); the prompt scan skips cars farther than 8 m (it allocated a vector for every car every frame). | `minimap`, `Hud` | 0.15 -> 0 ms at 4x standing; nothing visible changes |
+| The post chain's quad and scene no longer compose a matrix in each of its (1 to 7) render calls. | `post.ts` | below the noise |
+
+GL calls a frame at spawn on Low, 877 -> 493 (the 01b42b1 tree against the same tree with these trims); draws at idle on the phone profile 156 -> 111 on the whole tree of today, people and trees included.
+
+**Tried and dropped:** sorting opaque draws by program (46 -> 43 `useProgram`: three's material-id order already groups them); `matrixWorldAutoUpdate = false` (r186 still walks the subtree: `freezeStatic` replaces `updateMatrixWorld` instead); sharing every full car's paint and lamp material (probe: -14% on a street with 7 full cars, a real saving, but it means instanced full models with per-instance dirt, lamp and window state in `carMaterials.ts`, which the sodium hook is touching: not done); the look's per-frame uniforms (a dozen number writes, 0.01 ms: the lamps' list rebuild by day, the facade and the fog did not show in any profile, and the look's `update` is 0.03 ms at 4x).
+
+**The leak harness** now counts a car's detached levels of detail as part of the car (`userData.lodGroups`), so the scene-object count does not follow which level the player's car is at. `npm run leaks` passes; its `vehicle` phase still steps by one extra full-model car at a time that varies from run to run (an old behaviour, also with `?parkedinst=0`), and flags it only when the step lands in the second half: rerun if so.
+
+**After, on the whole tree** (the people and the trees are in, `npm run perf-budget` best of 2, twice; load 1 to 5 at the start of the runs, 22 once): CPU mean desktop-high 1.6 ms (budget 2.6 to 3.0), desktop-medium 1.4 to 1.6, desktop-low 1.1 to 1.3, **phone-low 2.7 to 3.2 (was 4.0 to 5.5 with the same people: "People" above)**; p95 desktop-high 2.8 to 2.9 (3.5), desktop-medium 2.4 to 2.8 (3.0), phone-low 5.6 to 7.2 (6.4 to 8.2). GPU p50 0.3 (phone), 0.5 to 0.7 (high): unchanged by 40% more world triangles.
+
+**The last gate runs, and why the phone's means are not green.** `npm run perf-budget` passed (desktop, third try; the first two had load 20 to 27 near their ends and read 3 to 6x). `npm run perf-budget:phone` read idle 3.5 (budget 3.7) and **walk 4.4 to 4.6, drive 5.1, look 4.5 to 5.9, gunfire 5.3 to 5.4 against 3.3 to 3.9** in three runs at load 2 to 4, after the hero landmarks and the far tile landed in the tree (+11 to +14 draws on the route: walk 122 -> 136, drive 131 -> 142); the same code, before them, read 2.7 to 3.2 in two best-of-2 runs. With and without `?landmarks=off`, at idle, 1x, interleaved: 0.89 against 0.85 ms, so the landmarks are not heavy by themselves; the phone's walking and driving phases (people near, 4x throttle) are what moved, on a box where other jobs were also using the GPU. I did not raise the CPU budgets: they should be re-run on a quiet machine, and `node scripts/cpu-profile.mjs --profile phone-low --phases walk` says where the time goes (it printed `renderer.render` 4.2 ms of 5.7, `projectObject` 1.45, `renderObjects` 2.4 at load 2.8: the draws, as before).
+
+**Budgets** (`scripts/perf-budget.json`; edited by hand from the two runs above, not `--write-budget`, which would double the noisy p95s): the CPU timings are unchanged, they pass with room. Draws came down to the worst run x1.3 (desktop-high 740 -> 340 at most, phone-low 430 -> 180 at most: the old ceilings had stopped catching anything). **Raised, and why:** triangles (the 2 x 2 merge draws more triangles to draw fewer meshes, +40 to +55%, and the people and trees add their own: desktop-high 380k -> 700k worst phase, desktop-medium 330k -> 560k, desktop-low 220k -> 370k, phone-low 170k -> 300k; the trees' +68k at Centennial Park is inside it); textures (people's bone texture and palette rows, the trees' atlas, the post chain: desktop-high 14 -> 29, medium 14 -> 24, low 8 -> 16, phone 8 -> 13); JS heap (60 -> 75 to 76 MB: the people and trees); boot time (the people's bake and the trees' atlas). Geometries came down (880 -> 793 desktop-high, 780 -> 741 phone-low): fewer, bigger meshes.
+
+**What is left, and what it would take:**
+- Car draws are about half of what is drawn on a street (the player's car is 17 draws at LOD0, the instanced sets are five parts per type and level). An instanced full model (shared paint, lamp and glass with per-instance dirt, lamps and broken windows) is worth about 10% of the frame on a street with several full-model cars; merging the closed door, bonnet and bumpers into the body for the player's car would be 6 draws. Both change `carMaterials.ts` and `carModel.ts` structurally.
+- Merging the traffic sets of the three car types (one geometry per level with a per-instance type) would bound traffic to 15 draws; it needs a matching depth material for the shadow pass.
+- `net` (0.1 to 0.2 ms at 4x: snapshot decode, `blendEntity`, the command `postMessage` every 14 ms) and `entityViews` (the crowd and ped poses: the people's lane) are now the biggest systems.
+- Blocks of 3 x 3 chunks would cut 10 more draws for another +50% triangles: wait for a real phone's GPU numbers.
+- The numbers here are a throttled desktop; the phone profile is a tripwire, see "Only on the real devices".
+
+## Streaming (2026-10-16)
+
+A streamed city (docs/contracts/city-tiles.md; `?tiles=fixture:3` or `?tiles=tiles/atlanta/m2/`) loads and drops 1024 m tiles round
+the player in the sim worker and round the camera on the client. Measured with `STREAM_COST=1 NODE_OPTIONS=--expose-gc npx vitest
+run tests/stream/cost.test.ts` (the sim, in Node) and `node scripts/stream-perf.mjs` (the browser, desktop-high and phone-low).
+
+**The sim's cost of a tile** (the first two baked M2 tiles, `-2_-2` and `-1_-2`, west of Midtown; the M1 tile as one 2 km tile for
+scale; the job budget at its default of 1,500 units a tick, a unit being about a microsecond on this box):
+
+| | 1 km M2 tile | M1 (2 km) as one tile |
+|---|---|---|
+| Integration in all | 36 ms, over 26 ticks | 139 ms, over 116 ticks |
+| Worst tick (p95) | 5.2 ms (3.4) | 16.7 ms (5.6): the Connector's deck structure, one piece that cannot be cut without cutting its internal edges |
+| Heap held (parsed files let go, as in the game) | 5.5 MB | 25 MB |
+| Rapier WASM memory | 2.7 MB | 18 MB (the decks twice: plain, and fixed for the hulls) |
+| Typed arrays | 1.5 MB | 6 MB |
+
+What a tick spends: building slices (1,024 triangles with their footprints: about 4 ms each), deck structures (whole, two copies),
+prop cells (24 a job), the lane graph (one job, about 2.5 us a lane), the walk network, the car-ground window (1024 m: 3 ms at 4 m,
+about 10 ms at 2 m), the seams and the main component (resumable). The first version of the budget counted a unit as a third of what
+it costs and let a tick run 20 to 66 ms; the slices and the costs were cut until no tick of a 1 km tile passes about 5 ms. Dropping a
+tile is one job of about 1 ms (removing colliders is cheap). A sim step with the streamer idle costs nothing more (the ring check is
+four times a second).
+
+**At 3 x 3** (desktop High's near ring of 900 m at the middle of a tile) a real 1 km tile is about 10 MB in the sim, so 9 tiles are
+about 90 MB in the worker; on the phone (600 m: 6 tiles at most) about 60 MB. With the heightmap at 2 m add 1.6 MB a tile (the contract,
+section 4).
+
+**The client, on real tiles** (`node scripts/stream-perf.mjs --profile phone-low,desktop-high --tiles tiles/atlanta/m2/,m1`: the six
+baked downtown M2 tiles streamed, against the single M1 tile in the same run, the same spawn-and-drive route, 1280 x 720, load average
+under 4; phone-low is the iPhone 15 Pro viewport at 4x CPU):
+
+| Profile | City | Tiles drawn / far | City GPU buffers | Heap | Idle CPU mean (p95) | Drive CPU mean (p95) | Draws idle / drive | Sim step worst | Tile work, ms a frame (worst / mean) |
+|---|---|---|---|---|---|---|---|---|---|
+| desktop-high | M2 streamed | 4 / 2 | 27 MB | 67 MB | 1.84 (3.0) | 1.63 (2.7) | 273 / 237 | 5.3 ms | 2.5 / 0.7 |
+| desktop-high | M1 single tile | 1 / 0 | 25 MB | 66 MB | 1.95 (2.5) | 2.31 (3.8) | 231 / 287 | 31 ms | - |
+| phone-low | M2 streamed | 3 / 2 | 21 MB | 60 MB | 3.29 (7.7) | 3.39 (6.7) | 114 / 129 | 3.0 ms | 8.7 / 2.4 |
+| phone-low | M1 single tile | 1 / 0 | 25 MB | 65 MB | 2.88 (4.4) | 4.92 (8.3) | 111 / 155 | 31 ms | - |
+
+No slow frame in any phase. Streaming costs about what the single tile does: the near ring holds three or four 1 km tiles (3 to 4 km2
+against the M1 tile's 4), so the scene is the same size; the work of bringing a tile in is at most 2.5 ms in a desktop frame (8.7 ms
+at 4x CPU) and 0.7 ms on average while it happens. (The M1 drive's 31 ms sim step is the M1 tile's own, not streaming's.) A first run
+during a load average of 15 to 21 (other agents' bakes) read 9 to 13 ms of CPU for the same frames: these numbers need a quiet box.
+
+**The client, on the fixture** (`fixture:3`, 384 m tiles, so more and smaller tiles than M2):
+
+| Profile | Tiles drawn / far | City GPU buffers | Heap | Idle CPU mean (p95) | Drive CPU mean (p95) | Draws, triangles | Sim step worst | Tile add, ms a frame (worst / mean) |
+|---|---|---|---|---|---|---|---|---|
+| desktop-high | 27 / 22 | 16.8 MB | 57 MB | 3.1 ms (4.1) | 2.0 ms (3.0) | 208, 516k | 7.1 ms | 3.5 / 0.3 |
+| phone-low (4x CPU) | 14 / 35 | 10.9 MB | 50 MB | 2.8 ms (4.1) | 5.6 ms (8.3) | 104, 194k | 8.3 ms | 6.4 / 1.0 |
+
+No slow frame (over 33 ms) in any phase. A tile's meshes are added one a frame, and the city-wide sets (trees, lamps and furniture
+through the look, benches and stops, signal heads, the minimap's per-tile atlases at 0.5 px a metre, the street names) are rebuilt one
+a frame after a change. The far ring is drawn merged, one mesh per 4 x 4 block of tiles.
+
+**Leaks**: `npm run leaks` has a `stream` phase (the fixture city, the sim on the main thread, the player sent 1.6 km away and back
+each cycle): heap 99.8 -> 100.6 MB over 6 cycles, geometries, textures, programs and scene objects exactly flat, and the sim's
+colliders (1,570), live lanes (1,990) and walk seam links (152) the same after every cycle.
+
+## Hero landmarks (2026-10-16)
+
+Twenty-two hand-built models (`tools/blender/landmarks/`, contract: "Hero landmarks"), 21 of them in the Downtown tile (the Basilica's waits for the tile to the north). What they cost, from `npm run perf-budget --repeat 2` on this (shared, loaded) box, with `?landmarks=off` (the same tile: the generic buildings still gone, the hulls still solid, only the models not drawn) against the default:
+
+| What | Number |
+|---|---|
+| Files | 22 .glb, 0.64 MB together (20 to 150 KB each, meshopt); fetched after the world is up, in parallel; the first frame never waits for them |
+| Triangles | 0.2 to 6.3k at LOD0 (the stadium 5.8k, the Capitol 6.3k, the wheel 3.7k; 27k for all 21 if every one were near), 0.07 to 2.2k at LOD1 (14k all together) |
+| Materials / draws | LOD0 5 to 10 meshes a hero, LOD1 3 to 5 (the far level merges metal, glass, dark and roof into the stone material); `castShadow` on all but the glowing parts, so only the heroes inside the shadow frustum are drawn twice |
+| Draws on the routes | desktop-high idle +15, walk +50, look +15 (drive and gunfire read lower, with other changes in the tree: the routes differ run to run); phone-low idle +3, walk +22, drive +23, look +22, gunfire +6 |
+| Triangles on the routes | inside the route noise (-90k to +11k): the models are 1 to 5% of a frame's triangles; the generic buildings they replace were never culled any better |
+| Geometries / textures | +50 to +90 geometries, +1 to +2 textures (the shader programs of `lm_gold`, `lm_glass` and the like have none; the count is the post chain's after a program change) |
+| Boot, heap | boot +0.07 to +0.13 s (the models load after it), JS heap +4 MB |
+| CPU, GPU | desktop-high cpuMean 1.6 to 2.4 against 1.8 to 2.4 without (noise), phone-low cpuMean 4.1 to 5.5 against 3.6 to 4.6 at idle and walk; GPU p50 0.4 to 0.6 ms on desktop, 0.1 to 0.4 on the phone profile (the two runs of the same comparison, earlier, read it the other way round: the box was the variable) |
+
+Each model's facade is the look's window shader on the same attributes as the baked walls, so it costs what a wall costs; the extra shaders (`lm_glow`, `lm_flood`, `lm_lit`, `lm_gold`, `lm_glass`) are a few lines of emissive each and `addSodium` on the stone, metal, gold and flood materials. A level is chosen once a frame by distance (a distance, a divide and a compare a hero, no allocation); nothing moves, so the group is `freezeStatic`. **Budgets were not changed.** If draws matter on the phone, the cheap lever is `Landmarks.select`: hide LOD1 beyond the tier's `far` and merge the facade and roof meshes of a hero.
+

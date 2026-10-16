@@ -139,3 +139,106 @@ police, damaged traffic) with levels of detail by distance (`carLod.ts`) and the
 `carMaterials.ts` holds the paint (grime), chrome, glass (sky reflection, broken panels) and lamp
 shaders. `?cars=box` draws the old stand-in box cars instead, for comparison; a failed load does
 the same for the cars it affects.
+
+
+## Trees and street furniture (`props/`)
+
+`npm run assets` also builds `public/assets/props/trees.glb` and `furniture.glb` (listed under `"props"`
+in `assets.json`; manifest `src/client/render/propAssets.manifest.json`). Plain-Python geometry
+(`props/geo.py`: tubes, lathes, boxes, noisy blobs and leaf cards, no bmesh) with smooth custom
+normals, a linear albedo in `COLOR_0` and a code in its alpha (a leaf card is 0.55 to 1, anything solid
+0 to 0.45, both carrying a wind weight; see `geo.py`). All sizes come from `src/shared/data/propDims.json`,
+the file the sim's colliders read, and `props/verify.ts` (run by `tests/anchorProps.test.ts`, so by
+`npm run assets`) measures the exported models against it.
+
+| File | Contents |
+|---|---|
+| `props/trees.py` | Five species (willow oak, sweetgum, loblolly pine, crape myrtle, red oak), each as `tree_<name>_lod0` (near: trunk, limbs, opaque core blobs and alpha-tested leaf cards, 700 to 1,200 triangles) and `_lod1` (mid: trunk, a few limbs, 7 or 8 low-poly clumps, 350 to 480). The far level is not built here: the game bakes impostors from `lod0` at load. |
+| `props/furniture.py` | `lamp_cobra`, `lamp_post`, `lamp_mast` (each with a `<name>_anchor` at the lamp head: the game puts the glow, the pool and the sodium light there), `hydrant`, `bin`, `bollard`. 180 to 340 triangles each. |
+
+Leaf shapes are not textures: the shader computes the leaves of a card (`leafMask` in
+`src/client/render/Trees.ts`), so there is no image to licence or to stream. Adding a species: add it to
+`propDims.json` (`trees`, in the order of `TREE_NAMES`), to `STYLE`, `NAMES` and `structure()` in
+`trees.py`, and to `LEAF` in `Trees.ts`, and give `treeSpecies()` in `src/shared/props.ts` a rule for it.
+
+## People (`characters/`)
+
+`npm run assets` also builds `public/assets/characters/characters.glb` (`characters/build.mjs`, after the
+cars and props; manifest `src/client/render/characterAssets.manifest.json`). Everything is written in
+Python from numbers: no scan, no sculpt, no mocap, no texture, no third-party model (see
+`LICENSES.md`). One armature, sixteen bodies, three levels of detail each, thirty-one clips.
+
+```
+node tools/blender/characters/build.mjs                  # build, join, compress, write the .glb and manifest
+# preview one figure (Cycles on the CPU, seconds):
+/snap/blender/current/blender -b --factory-startup --python tools/blender/characters/view.py -- \
+    --arch kudzu --lod 0 --views front,q,back,headq --out /tmp/k [--pose walk:0.25] [--w 600 --h 900]
+```
+
+| Module | What |
+|---|---|
+| `skeleton.py` | The 22 bones (names without dots, `_L` is the figure's left, +X), where each one is, the ragdoll's eleven bodies and the bone each drives, and the material slots (regions) a face can have. Heights follow `src/shared/ragdoll.ts`: pelvis 1.0, hips 0.91, knees 0.49, shoulders 1.45, head joint 1.52, 1.74 m tall, feet on y = 0. |
+| `shapes.py` | `Tube`: rings of superellipse sections along an axis (limbs, torso, shoes, straps), with clothing as `Layer`s on it (a span, a material, a thickness, a hem at each end), masks for paint (a zip, a tie, a vest's stripes), and skin weights from the distance to the bones a tube may use (`Weighter`). |
+| `body.py` | The parametric body: `Build` (shoulders, chest, waist, hips, bust, belly, limb thickness) and the curves for torso, arm, hand, leg and shoe; one function per part at each level of detail (`LODS`). |
+| `head.py` | The head as one grid of vertices (rows of heights, columns of angles), shaped by side and front profiles and gaussian bumps for brow, nose, cheek, lips and chin; hair and beard are offsets on the same vertices with their cover written to the vertex colour (the shader draws the hairline, beard, brows, eyes and lips). Hats (`hat_shell`) and hanging hair (`hair_curtain`). |
+| `outfits.py` | The sixteen archetypes (Kudzu, suit, office, casual, cap, hoodie, beanie, dress, student, worker, tourist, layered clothes, officers) as a build, a head and layers, plus extras (boots, belts, holster, pack, hats). |
+| `anim.py` | Poses as rotations in the figure's rest axes, forward kinematics, two-bone IK for arms, baking a clip to an action. |
+| `clips.py` | The clips: a gait generator (leg IK on a foot path, arm swing, twist, bob) for walk, jog, sprint and flee, and poses with a little motion for the rest (idle, sit, phone, film, cower, chat, ATM, browse, fight, punch, aim, cover, reload, drive, enter and exit a car, dragged, stumble, flinch, fall, get up). |
+| `rig.py`, `build.py` | The armature, skinned objects, baked ambient occlusion in the vertex colour (red: occlusion, green: hair cover, blue: beard cover), the report. |
+| `build.mjs`, `verify.ts` | Joins each mesh's primitives into one with a `_REGION` byte, drops animation channels that never move, compresses; the checks (`tests/characterAssets.test.ts`). |
+
+A pose angle is a rotation about the figure's X, Y and Z axes (X left, Y up, Z forward) applied to a bone
+in its parent's carried rest frame; the exporter's bones point along their own axes, so `anim.py` turns an
+angle into the bone's own with `R^-1 d R`, and `src/client/render/chars/ragBones.ts` uses the same rule
+the other way round to drive the bones from the ragdoll (`d = Q_parent^-1 Q_part`).
+
+Budgets (the verify step fails outside them): LOD0 3,000 to 5,000 triangles, LOD1 800 to 1,600, LOD2 250 to
+650; a person stands on y = 0 and is 1.7 to 1.82 m tall; at most four joints a vertex, summing to one.
+
+Adding a body: write an `Arch` in `outfits.py` (copy the closest one), add its name to `ARCHETYPES` in
+`src/client/render/chars/outfits.ts` (same order as `outfits.py` registers them), give an outfit in
+`CHAR_OUTFITS` (and the groups of `data/cities/<city>/population.json`) a use for it, `npm run assets`.
+Adding an outfit alone (a new colour scheme) needs no Blender: `CHAR_OUTFITS` and `OUTFIT_COUNT`
+(`src/shared/entityDefs.ts`, kept equal by a test).
+
+How the game uses them: `src/client/render/chars/` (`characterAssets.ts` loads the file once at boot, `PedViews.ts`
+draws every pedestrian: `PedActor` skinned figures with a mixer for the player, officers, the nearest
+dozen and every ragdoll, `SkinnedCrowd` for the rest with the clips baked into a texture by `BakedAnims`,
+`animSelect.ts` the sim's flags to clips, `ragBones.ts` the ragdoll to the bones, `outfits.ts` who wears
+what, `pedMaterial.ts` the shading). `?peds=box` draws the old block figures instead, and so does a
+failed load. `scripts/char-shots.mjs` takes the pictures (`.shots/chars-*.png`).
+
+## Hero landmarks (`landmarks/`)
+
+`npm run assets` also builds the hand-built models of real Downtown buildings into `public/assets/landmarks/<id>.glb`, each with
+a `<id>.json` sidecar (where it stands, what it replaces, its collision hull, its levels of detail; manifest
+`src/client/render/landmarkAssets.manifest.json`). The pipeline reads the sidecars (it suppresses the generic buildings the
+models replace and gives them their hull), the client draws the models. The mechanism and the files are in
+`docs/contracts/m1-tile-format.md`, "Hero landmarks". They are original interpretations written in Python from public
+descriptions and photographs: no third-party model, no copied texture, no brand marks or lettering (see `LICENSES.md`).
+
+```
+node tools/blender/landmarks/footprints.mjs              # the real footprints from the pipeline cache -> landmarks/footprints.json (committed)
+node tools/blender/build.mjs --only westin-peachtree-plaza   # one model
+node scripts/landmark-shots.mjs [--only <id>] [--times day,night]   # .shots/landmark-<id>-<view>-<day|night>.png (needs `npm run dev`)
+node scripts/landmark-names.mjs                                      # the street-name label at the landmarks
+```
+
+| Module | What |
+|---|---|
+| `footprints.mjs`, `footprints.json` | Each landmark's anchor (a game point and its lon/lat), the real outline and the Overture parts (floors, heights), so a model is drawn on the real footprint, in the world's axes (no yaw), at the real height. Re-run when the cached Overture release changes. |
+| `lm.py` | The geometry kit: `Lod` (one level of detail) with `poly`, `ring_walls` and `facade_quad` (facade quads with the look's per-vertex data: `u` along the wall, `_WALL`, `_BLD` kind/floors/band, `_BID`), `prism`, `box`, `beam`, `tube`, `lathe`, `skin`, `cap`, `merge` (turn a part built in a rectangle's frame into the model frame), `min_obb`; and `emit`, which makes the Blender objects `lod<N>_<material>`. Plain Python lists, welded and deterministic. |
+| `parts.py` | Ledges and cornices (`band`), pyramidal roofs, columns, ring simplification. |
+| `common.py` | `report()`: the sidecar (hull prisms, cut-out, level distances). |
+| `<id>.py` | One landmark: `ID`, `build(asset)` that fills a `Lod` per level and returns `common.report(...)`. |
+
+Materials are named for what the game does with them (`lm.py` header). A facade (`bld_wall`, `bld_glass`) is drawn by the look's
+window shader, lit at night and dirtied like the baked buildings; give it `floor_h` and a `kind` (`lm.K_GLASS`, `K_OFFICE`,
+`K_CIVIC`, `K_BRICK`, `K_VENUE`...). `lm_glow`, `lm_lit` and `lm_flood` are the night signatures (lit rings, a roof lit from
+within, a floodlit dome). Budgets (`landmarks/verify.ts`, run by `tests/landmarkAssets.test.ts`): LOD0 up to 40k triangles
+(the current ones are 0.3 to 4.6k), the far level a few hundred, 400 KB a file, a hull no taller than the model.
+
+Adding a landmark: add it to `HEROES` in `footprints.mjs` (an Overture building by name, or an OSM way) and run it; write
+`landmarks/<name>.py` from the closest existing script; list it in `assets.json` under `"landmarks"` with the id of the city pack
+(`data/cities/<city>/landmarks.json`, which names it); `npm run assets`, bake (`npm run bake` in `tools/pipeline/`), and look at it
+with `scripts/landmark-shots.mjs`.

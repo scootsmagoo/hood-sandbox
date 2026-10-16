@@ -23,8 +23,12 @@ const VIEWS = {
   'street-night': { time: '23:30', eye: [-74, 3.8, -66], look: [-165, 16, -185], fov: 62 },
   'aerial-day': { time: '14:00', eye: [150, 150, 210], look: [-80, 20, -160], fov: 55 },
   'aerial-night': { time: '23:30', eye: [150, 150, 210], look: [-80, 20, -160], fov: 55 },
+  // the trees' worst cases: Centennial Park (the densest 100 m of the tile) and a tree-lined street in Sweet Auburn
+  'park-day': { time: '14:00', eye: [-203, -10.5, -640], look: [-320, -14, -730], fov: 70 },
+  'auburn-day': { time: '14:00', eye: [535, -8.3, -140], look: [640, -14, -138.5], fov: 62 },
+  'auburn-night': { time: '23:30', eye: [535, -8.3, -140], look: [640, -14, -138.5], fov: 62 },
 };
-const QUERY = { classic: 'gfx=classic', default: '', post: 'gfxoff=post', facade: 'gfxoff=facade', surface: 'gfxoff=surface', haze: 'gfxoff=haze', lamps: 'gfxoff=lamps', bloom: 'gfxoff=bloom' };
+const QUERY = { classic: 'gfx=classic', default: '', post: 'gfxoff=post', facade: 'gfxoff=facade', surface: 'gfxoff=surface', haze: 'gfxoff=haze', lamps: 'gfxoff=lamps', bloom: 'gfxoff=bloom', trees: 'gfxoff=trees' };
 
 const server = await startServer(args);
 const browser = await launch({ uncapped: true });
@@ -76,12 +80,13 @@ try {
             return mid.reduce((x, y) => x + y, 0) / mid.length;
           });
           row[variant] = mean;
+          row[`${variant}:calls`] = await page.evaluate(() => `${window.__hood.game.renderer.info.render.calls} draws ${Math.round(window.__hood.game.renderer.info.render.triangles / 1000)}k tris`);
         } finally {
           await ctx.close();
         }
       }
       rows.push(row);
-      console.log(`${tier.padEnd(7)} ${view.padEnd(13)} ${variants.map((x) => `${x} ${row[x].toFixed(2)}`).join('  ')}`);
+      console.log(`${tier.padEnd(7)} ${view.padEnd(13)} ${variants.map((x) => `${x} ${row[x].toFixed(2)} (${row[`${x}:calls`]})`).join('  ')}`);
     }
   }
 } finally {

@@ -17,7 +17,7 @@ export function probeFrom(sim: Simulation, x: number, y: number, z: number): Cle
   return (heading, maxDist) => {
     const dx = Math.sin(heading);
     const dz = Math.cos(heading);
-    const hit = sim.physics.world.castShape({ x, y: y + 1.15, z }, { x: 0, y: 0, z: 0, w: 1 }, { x: dx, y: 0, z: dz }, b, 0, maxDist, true, undefined, GROUPS.actorQuery, sim.physics.terrain);
+    const hit = sim.physics.world.castShape({ x, y: y + 1.15, z }, { x: 0, y: 0, z: 0, w: 1 }, { x: dx, y: 0, z: dz }, b, 0, maxDist, true, undefined, GROUPS.actorQuery, sim.physics.terrain, undefined, sim.physics.notTerrain);
     let clear = hit ? hit.time_of_impact : maxDist;
     for (let d = 1.5; d <= clear; d += 1.5) {
       if (Math.abs(sim.physics.groundHeight(x + dx * d, z + dz * d) - y) > 1.2) {

@@ -31,11 +31,22 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, arr) => (a.startsWith('--') ? [...acc, [a.slice(2), arr[i + 1]?.startsWith('--') ? true : arr[i + 1] ?? true]] : acc), []));
-const list = JSON.parse(readFileSync(join(here, 'assets.json'), 'utf8')).vehicles;
+const assetsJson = JSON.parse(readFileSync(join(here, 'assets.json'), 'utf8'));
+// vehicles -> public/assets/vehicles + carAssets.manifest.json; props (trees, street furniture) -> public/assets/props + propAssets.manifest.json
+// landmarks -> public/assets/landmarks (the .glb and a <name>.json sidecar: placement, collision hull, levels of detail) + landmarkAssets.manifest.json
+const list = [
+  ...assetsJson.vehicles.map((a) => ({ ...a, group: 'vehicles' })),
+  ...(assetsJson.props ?? []).map((a) => ({ ...a, group: 'props' })),
+  ...(assetsJson.landmarks ?? []).map((a) => ({ ...a, group: 'landmarks' })),
+];
 const only = typeof args.only === 'string' ? new Set(args.only.split(',')) : null;
 const jobs = Math.max(1, Number(args.jobs ?? 4));
-const outDir = join(root, 'public', 'assets', 'vehicles');
-const manifestPath = join(root, 'src', 'client', 'render', 'carAssets.manifest.json');
+const outDirs = { vehicles: join(root, 'public', 'assets', 'vehicles'), props: join(root, 'public', 'assets', 'props'), landmarks: join(root, 'public', 'assets', 'landmarks') };
+const manifestPaths = {
+  vehicles: join(root, 'src', 'client', 'render', 'carAssets.manifest.json'),
+  props: join(root, 'src', 'client', 'render', 'propAssets.manifest.json'),
+  landmarks: join(root, 'src', 'client', 'render', 'landmarkAssets.manifest.json'),
+};
 
 const blender = process.env.BLENDER ?? (existsSync('/snap/blender/current/blender') ? '/snap/blender/current/blender' : 'blender');
 
@@ -68,16 +79,33 @@ async function buildOne(a, tmp) {
   const doc = await io.read(raw);
   // the exporter's generator string carries Blender's version; keep the file stable across patch releases
   doc.getRoot().getAsset().generator = 'hood-sandbox tools/blender';
-  await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 }));
+  // a landmark is up to 300 m across and carries the facade shader's attributes (metres along the wall, the quad's span): more bits for them
+  const q = a.group === 'landmarks' ? { quantizePosition: 16, quantizeNormal: 10, quantizeTexcoord: 16, quantizeGeneric: 16 } : { quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 };
+  await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', ...q }));
+  if (a.group === 'landmarks') {
+    // the file's own triangle counts per level (the compression drops degenerate triangles)
+    const count = (n) => (n.getMesh()?.listPrimitives() ?? []).reduce((t, p) => t + (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3, 0) + n.listChildren().reduce((t, c) => t + count(c), 0);
+    report.tris = report.tris.map((_, i) => {
+      const g = doc.getRoot().listNodes().find((n) => n.getName() === `lod${i}`);
+      return g ? count(g) : 0;
+    });
+    report.sidecar.lods.forEach((l, i) => (l.tris = report.tris[i]));
+  }
   const bytes = await io.writeBinary(doc);
-  writeFileSync(join(outDir, `${a.name}.glb`), bytes);
+  writeFileSync(join(outDirs[a.group], `${a.name}.glb`), bytes);
   const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
+  if (a.group === 'landmarks') {
+    // the sidecar: where the model stands, what it replaces, its collision hull and its levels of detail (docs/contracts/m1-tile-format.md, "landmarks.json")
+    const side = { ...report.sidecar, id: a.name, model: `assets/landmarks/${a.name}.glb`, hash, bytes: bytes.length };
+    writeFileSync(join(outDirs.landmarks, `${a.name}.json`), `${JSON.stringify(side, null, 1)}\n`);
+  }
   return { report, bytes: bytes.length, hash };
 }
 
-mkdirSync(outDir, { recursive: true });
+for (const d of Object.values(outDirs)) mkdirSync(d, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'hood-assets-'));
-const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : { vehicles: {} };
+const readManifest = (g) => (existsSync(manifestPaths[g]) ? JSON.parse(readFileSync(manifestPaths[g], 'utf8')) : { [g]: {} });
+const manifests = { vehicles: readManifest('vehicles'), props: readManifest('props'), landmarks: readManifest('landmarks') };
 const todo = list.filter((a) => !only || only.has(a.name));
 let failed = 0;
 try {
@@ -88,7 +116,9 @@ try {
         const t0 = Date.now();
         try {
           const r = await buildOne(a, tmp);
-          manifest.vehicles[a.name] = { file: `assets/vehicles/${a.name}.glb`, type: a.type, police: !!a.police, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
+          if (a.group === 'landmarks') manifests.landmarks.landmarks[a.name] = { file: `assets/landmarks/${a.name}.glb`, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
+          else if (a.group === 'props') manifests.props.props[a.name] = { file: `assets/props/${a.name}.glb`, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
+          else manifests.vehicles.vehicles[a.name] = { file: `assets/vehicles/${a.name}.glb`, type: a.type, police: !!a.police, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
           const warn = r.report.warnings?.length ? `  WARN ${r.report.warnings.join('; ')}` : '';
           console.log(`${a.name.padEnd(14)} ${String(r.bytes).padStart(7)} B  tris ${r.report.tris.join(' / ')}  ${((Date.now() - t0) / 1000).toFixed(1)} s${warn}`);
         } catch (e) {
@@ -101,7 +131,10 @@ try {
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
-const sorted = { _comment: 'Written by tools/blender/build.mjs (npm run assets). Do not edit.', vehicles: Object.fromEntries(Object.keys(manifest.vehicles).sort().map((k) => [k, manifest.vehicles[k]])) };
-writeFileSync(manifestPath, `${JSON.stringify(sorted, null, 2)}\n`);
-console.log(`manifest: ${manifestPath}`);
+const sortedBy = (m, key, comment) => ({ _comment: comment, [key]: Object.fromEntries(Object.keys(m[key]).sort().map((k) => [k, m[key][k]])) });
+const comment = 'Written by tools/blender/build.mjs (npm run assets). Do not edit.';
+writeFileSync(manifestPaths.vehicles, `${JSON.stringify(sortedBy(manifests.vehicles, 'vehicles', comment), null, 2)}\n`);
+writeFileSync(manifestPaths.props, `${JSON.stringify(sortedBy(manifests.props, 'props', comment), null, 2)}\n`);
+writeFileSync(manifestPaths.landmarks, `${JSON.stringify(sortedBy(manifests.landmarks, 'landmarks', comment), null, 2)}\n`);
+console.log(`manifests: ${manifestPaths.vehicles}, ${manifestPaths.props}, ${manifestPaths.landmarks}`);
 process.exit(failed ? 1 : 0);

@@ -7,7 +7,7 @@ import os
 import bpy
 
 
-def glb(path):
+def glb(path, vertex_color='NONE', skins=False, animations=False, attributes=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.context.view_layer.update()
     bpy.ops.export_scene.gltf(
@@ -19,13 +19,16 @@ def glb(path):
         export_normals=True,
         export_tangents=False,
         export_materials='EXPORT',
-        export_vertex_color='NONE',
-        export_attributes=False,
+        export_vertex_color=vertex_color,
+        export_active_vertex_color_when_no_material=(vertex_color == 'ACTIVE'),
+        export_attributes=attributes,
         export_extras=True,
         export_cameras=False,
         export_lights=False,
-        export_animations=False,
-        export_skins=False,
+        export_animations=animations,
+        export_animation_mode='ACTIONS',
+        export_force_sampling=True,
+        export_skins=skins,
         export_morph=False,
         use_selection=False,
         export_draco_mesh_compression_enable=False,

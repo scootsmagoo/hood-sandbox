@@ -51,6 +51,10 @@ varying vec2 vUvR;
   attribute vec4 gSrf;
   varying vec4 vSrf;
 #endif
+#ifdef GFX_LOOK
+  attribute vec4 gLook;
+  varying vec4 vLook;
+#endif
 `;
 
 const VERT_BODY = /* glsl */ `
@@ -64,6 +68,9 @@ const VERT_BODY = /* glsl */ `
 #endif
 #ifdef GFX_SRF
   vSrf = gSrf;
+#endif
+#ifdef GFX_LOOK
+  vLook = gLook;
 #endif
 `;
 
@@ -79,6 +86,9 @@ varying vec2 vUvR;
 #endif
 #ifdef GFX_SRF
   varying vec4 vSrf;
+#endif
+#ifdef GFX_LOOK
+  varying vec4 vLook;
 #endif
 ${GLSL_NOISE}
 `;
@@ -216,18 +226,72 @@ const BODY: Record<Kind, string> = {
     vec2 p = vFW.xz;
     float d = distance(vFW, cameraPosition);
     float near = 1.0 - smoothstep(60.0, 260.0, d);
+    float nearer = 1.0 - smoothstep(25.0, 110.0, d);
     float cell = gfxH21(floor(p / 5.0));
     float n = gfxVn(p * 0.35) * 0.6 + gfxVn(p * 2.2) * 0.4;
+    // the roof material (0 membrane, 1 metal, 2 tile, 3 shingle, 4 concrete, 5 green, 6 copper, 7 gold, 8 white membrane)
+    float rm = 0.0;
+    #ifdef GFX_LOOK
+      rm = vLook.x;
+    #endif
+    bool rMetal = abs(rm - 1.0) < 0.5;
+    bool rTile = abs(rm - 2.0) < 0.5;
+    bool rConc = abs(rm - 4.0) < 0.5;
+    bool rGreen = abs(rm - 5.0) < 0.5;
+    bool rCopper = abs(rm - 6.0) < 0.5;
+    bool rGold = abs(rm - 7.0) < 0.5;
+    bool rWhite = abs(rm - 8.0) < 0.5;
+    float sf = 0.0;
+    #ifdef GFX_SRF
+      sf = vSrf.x;
+    #endif
     diffuseColor.rgb *= (0.8 + 0.2 * n + (cell - 0.5) * 0.12 * near) * vec3(1.0, 0.96, 0.88); // tar and gravel, weathered
+    if (sf < 0.5) {
+      // a flat roof: gravel on a membrane, standing seams, slab joints, a green roof, patina
+      #ifndef GFX_LITE
+      if (rMetal) {
+        float sx = vUvR.y / 0.5;
+        diffuseColor.rgb *= 1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.1, abs(fract(sx) - 0.5) - 0.38)) * nearer;
+      } else if (rConc) {
+        vec2 g = abs(fract(vUvR / 3.5) - 0.5);
+        diffuseColor.rgb *= 1.0 - 0.22 * smoothstep(0.485, 0.5, max(g.x, g.y)) * nearer;
+      } else if (rGreen) {
+        float sp = gfxVn(p * 3.0) * 0.6 + gfxH21(floor(p * 9.0)) * 0.4;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.085, 0.03) * (0.7 + 0.6 * sp), 0.6);
+      } else if (rCopper) {
+        diffuseColor.rgb *= 0.9 + 0.2 * gfxVn(vec2(vUvR.x * 0.8, vUvR.y * 0.15));
+      } else if (rGold) {
+        diffuseColor.rgb *= 1.35;
+      } else {
+        // gravel specks, and the seams of a membrane every metre
+        float peb = gfxH21(floor(p * 16.0));
+        diffuseColor.rgb *= 1.0 + (peb - 0.5) * 0.24 * nearer;
+        diffuseColor.rgb *= 1.0 - (rWhite ? 0.1 : 0.06) * (1.0 - smoothstep(0.0, 0.05, abs(fract(vUvR.y) - 0.5) - 0.45)) * nearer;
+        if (rWhite) diffuseColor.rgb *= 0.9 + 0.18 * gfxVn(p * 0.6) ;
+      }
+      #endif
+    }
     #ifdef GFX_SRF
       // baked roof surfaces: 1 slope, 2 parapet face, 3 parapet cap, 4 gable end, 5 rooftop box, 6 soffit, 7 dome
-      float sf = vSrf.x;
       if (abs(sf - 1.0) < 0.5) {
-        float row = floor(vUvR.y / 0.4);
-        float tone = 0.72 + 0.34 * gfxH21(vec2(row, floor(vUvR.x / 0.6)));
-        float rowEdge = smoothstep(0.0, 0.08, fract(vUvR.y / 0.4)) * (0.82 + 0.18 * smoothstep(0.9, 0.5, fract(vUvR.y / 0.4)));
-        vec3 shingle = mix(vec3(0.42, 0.36, 0.32), vec3(0.5, 0.28, 0.2), step(0.6, gfxH21(floor(vFW.xz / 25.0))));
-        diffuseColor.rgb = shingle * tone * mix(1.0, rowEdge, near) * 0.7;
+        // the baked colour (the roof material's) with the pattern of its courses: shingle rows, clay tiles, standing seams
+        if (rMetal) {
+          float sx = vUvR.x / 0.45;
+          float rib = 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.14, abs(fract(sx) - 0.5) - 0.36));
+          diffuseColor.rgb *= rib * (0.92 + 0.16 * gfxH21(vec2(floor(sx), 3.0)));
+        } else if (rTile) {
+          float row = floor(vUvR.y / 0.42);
+          float tx = vUvR.x / 0.3 + 0.5 * mod(row, 2.0);
+          float tone = 0.78 + 0.34 * gfxH21(vec2(floor(tx), row));
+          float curve = 0.88 + 0.12 * sin(fract(tx) * 6.2832 - 1.5708);
+          float lap = smoothstep(0.0, 0.1, fract(vUvR.y / 0.42));
+          diffuseColor.rgb *= tone * mix(1.0, curve * (0.8 + 0.2 * lap), near);
+        } else {
+          float row = floor(vUvR.y / 0.4);
+          float tone = 0.72 + 0.34 * gfxH21(vec2(row, floor(vUvR.x / 0.6)));
+          float rowEdge = smoothstep(0.0, 0.08, fract(vUvR.y / 0.4)) * (0.82 + 0.18 * smoothstep(0.9, 0.5, fract(vUvR.y / 0.4)));
+          diffuseColor.rgb *= tone * mix(1.0, rowEdge, near) * 1.15;
+        }
       } else if (abs(sf - 3.0) < 0.5) diffuseColor.rgb *= 1.25;
       else if (abs(sf - 5.0) < 0.5) diffuseColor.rgb = vec3(dot(diffuseColor.rgb, vec3(0.333))) * vec3(0.95, 0.97, 1.0) * 1.1;
       else if (abs(sf - 6.0) < 0.5) diffuseColor.rgb *= 0.55;
@@ -256,7 +320,7 @@ const BODY: Record<Kind, string> = {
 /** What a surface program is built with. `level` is `fx.surfaces` (1 is the cheap variant); `features` says which baked attributes the geometry has. */
 export interface SurfaceOptions {
   level: () => number;
-  features: { roadUv: boolean; land: boolean; srf: boolean };
+  features: { roadUv: boolean; land: boolean; srf: boolean; look?: boolean };
 }
 
 /** Names the baked attributes of a surface geometry for the shader (the same buffers) and says which of them it has. Idempotent. */
@@ -270,7 +334,9 @@ export function prepareSurfaceGeometry(mesh: THREE.Mesh): SurfaceOptions['featur
   if (roadUv && !g.getAttribute('gUv1')) g.setAttribute('gUv1', uv1!);
   if (land && !g.getAttribute('gLand')) g.setAttribute('gLand', land);
   if (srf && !g.getAttribute('gSrf')) g.setAttribute('gSrf', srf);
-  return { roadUv, land: !!land && land.itemSize === 4, srf: !!srf && !!uv && srf.itemSize === 4 };
+  const look = g.getAttribute('_look') ?? g.getAttribute('gLook');
+  if (look && !g.getAttribute('gLook')) g.setAttribute('gLook', look);
+  return { roadUv, land: !!land && land.itemSize === 4, srf: !!srf && !!uv && srf.itemSize === 4, look: !!look && look.itemSize === 4 };
 }
 
 /** Patches one baked material by name. Returns false when the name is not one of the surfaces. */
@@ -279,7 +345,7 @@ export function patchSurfaceMaterial(mat: THREE.Material, opt: SurfaceOptions): 
   if (!kind) return false;
   const m = mat as THREE.MeshStandardMaterial;
   const f = opt.features;
-  const defs = () => [f.roadUv && (kind === 'asphalt' || kind === 'sidewalk') ? '#define GFX_ROAD_UV' : '', f.land && kind === 'ground' ? '#define GFX_LAND' : '', f.srf && kind === 'roof' ? '#define GFX_SRF' : '', opt.level() < 2 ? '#define GFX_LITE' : ''].filter(Boolean).join('\n');
+  const defs = () => [f.roadUv && (kind === 'asphalt' || kind === 'sidewalk') ? '#define GFX_ROAD_UV' : '', f.land && kind === 'ground' ? '#define GFX_LAND' : '', f.srf && kind === 'roof' ? '#define GFX_SRF' : '', f.look && kind === 'roof' ? '#define GFX_LOOK' : '', opt.level() < 2 ? '#define GFX_LITE' : ''].filter(Boolean).join('\n');
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uAo = U.uAo;
     const d = defs();
@@ -293,7 +359,7 @@ export function patchSurfaceMaterial(mat: THREE.Material, opt: SurfaceOptions): 
     // The night glow Atmosphere puts on every building material would make the roofs orange.
     if (kind === 'roof') shader.fragmentShader = shader.fragmentShader.replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = vec3(0.0);');
   };
-  m.customProgramCacheKey = () => `look-surface-${kind}-${opt.level() < 2 ? 'lite' : 'full'}-${f.roadUv ? 'r' : ''}${f.land ? 'l' : ''}${f.srf ? 's' : ''}-v3`;
+  m.customProgramCacheKey = () => `look-surface-${kind}-${opt.level() < 2 ? 'lite' : 'full'}-${f.roadUv ? 'r' : ''}${f.land ? 'l' : ''}${f.srf ? 's' : ''}${f.look ? 'k' : ''}-v4`;
   m.needsUpdate = true;
   return true;
 }

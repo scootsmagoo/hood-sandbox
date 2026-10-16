@@ -28,5 +28,5 @@ if opts.get('blend'):
 if opts.get('preview'):
     from hoodlib import preview
     preview.render(opts['preview'])
-export.glb(opts['out'])
+export.glb(opts['out'], getattr(mod, 'VERTEX_COLOR', 'NONE'), getattr(mod, 'SKINS', False), getattr(mod, 'ANIMATIONS', False), getattr(mod, 'ATTRIBUTES', False))
 print('ASSET_REPORT ' + json.dumps(report))

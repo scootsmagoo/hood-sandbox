@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MeshBuilder } from '../src/mesh/builder';
 import { buildRoads, planRoads } from '../src/world/roads';
 import type { RoadWay } from '../src/world/osm';
-import { makeHeightmap } from '../src/world/terrain';
+import { makeHeightmap, surfaceHeight } from '../src/world/terrain';
 import type { V2 } from '../src/geo';
 
 const bounds = { minX: -200, minZ: -200, maxX: 200, maxZ: 200 };
@@ -64,7 +64,9 @@ describe('road meshes', () => {
     const top = r.asphalt;
     let maxY = 0;
     for (let i = 0; i < top.vertexCount; i++) maxY = Math.max(maxY, top.positions[i * 3 + 1]);
-    expect(maxY).toBeGreaterThan(5.5);
+    // the deck and the road under it are designed together: the deck climbs and the road dips until there is a car's
+    // clearance and the slab between them
+    expect(maxY - surfaceHeight(hm, 0, 0)).toBeGreaterThan(6);
     expect(r.stats.deckWays).toBe(1);
     expect(r.collision.triangleCount).toBeGreaterThan(100);
     // skirt and underside faces point away from the slab centre line
@@ -74,6 +76,42 @@ describe('road meshes', () => {
     for (const t of sideways) expect(t.n[2] * t.c[2]).toBeGreaterThan(0);
     // no pier stands inside the crossed road
     expect(r.stats.piers).toBeGreaterThan(0);
+  });
+
+  it('lands a bridge: its collision slab meets the ground at the ends, with no edge standing proud of the road', () => {
+    const under = way(1, 'secondary', [[0, -150], [0, 150]]);
+    const bridge = way(2, 'motorway', [[-180, 0], [-100, 0], [100, 0], [180, 0]], { bridge: true, layer: 1, width: 12, oneway: true });
+    const a1 = way(3, 'motorway', [[-195, 0], [-180, 0]], { width: 12, nodeIds: [3000, bridge.nodeIds[0]] });
+    const a2 = way(4, 'motorway', [[180, 0], [195, 0]], { width: 12, nodeIds: [bridge.nodeIds[3], 4001] });
+    const flat = makeHeightmap(101, 101, 4, -200, -200);
+    const r = buildRoads([under, bridge, a1, a2], flat, bounds);
+    // the slab's top vertices at the two ends (x = -180 and 180): at or a little under the (carved) ground, never above it
+    const P = r.collision.positions;
+    let ends = 0;
+    for (let i = 0; i < r.collision.vertexCount; i++) {
+      const x = P[i * 3], z = P[i * 3 + 2], y = P[i * 3 + 1] - surfaceHeight(flat, x, z);
+      if (Math.abs(Math.abs(x) - 180) > 0.5 || y < -0.5) continue;
+      ends++;
+      expect(y).toBeLessThanOrEqual(0.001);
+      expect(y).toBeGreaterThan(-0.1);
+    }
+    expect(ends).toBeGreaterThanOrEqual(4);
+    expect(r.stats.landedDeckEnds).toBeGreaterThanOrEqual(2);
+  });
+
+  it('caps the joint where two bridge ways meet at an angle, and keeps piers out of every carriageway (a lower deck too)', () => {
+    // two deck ways meeting at 30 degrees at (0, 0), and a second, lower deck under the first
+    const d1 = way(1, 'primary', [[-120, 0], [-60, 0], [0, 0]], { bridge: true, layer: 2, width: 12 });
+    const d2 = way(2, 'primary', [[0, 0], [52, 30], [104, 60]], { bridge: true, layer: 2, width: 12, nodeIds: [d1.nodeIds[2], 2001, 2002] });
+    const low = way(3, 'secondary', [[-90, -60], [-90, 60]], { bridge: true, layer: 1, width: 10 });
+    const r = buildRoads([d1, d2, low], hm, bounds);
+    expect(r.stats.deckCaps).toBeGreaterThanOrEqual(1);
+    // no pier box of the upper deck stands within the lower deck's carriageway (x = -90 +- 5 m)
+    const P = r.collision.positions;
+    for (let i = 0; i < r.collision.vertexCount; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      if (y < -0.4 && Math.abs(z) < 7) expect(Math.abs(x + 90)).toBeGreaterThan(5);
+    }
   });
 
   it('keeps footways out of roads.json', () => {
@@ -124,7 +162,9 @@ describe('road meshes', () => {
     const cut = makeHeightmap(101, 101, 4, -200, -200);
     for (let rr = 0; rr < 101; rr++) for (let c = 0; c < 101; c++) cut.data[rr * 101 + c] = Math.abs(c * 4 - 200) < 10 ? -5 : 0;
     const street = way(1, 'tertiary', [[-190, 0], [190, 0]], { width: 8 });
-    const plan = planRoads([street], cut);
+    // a railway runs along the bottom of the cut, so the street bridges it
+    const rail = way(2, 'rail', [[0, -190], [0, 190]], { kind: 'rail', width: 3 });
+    const plan = planRoads([street, rail], cut);
     expect(plan.spans[0].length).toBe(1);
     const r = buildRoads(plan, cut, bounds);
     const bridge = r.json.filter((j) => j.derived);
@@ -133,5 +173,18 @@ describe('road meshes', () => {
     expect(bridge[0].layer).toBe(1);
     for (const p of bridge[0].points) expect(p[1]).toBeGreaterThan(-1.5);
     expect(r.stats.deckWays).toBeGreaterThanOrEqual(1);
+  });
+
+  it('fills a dip with nothing in it as an embankment, not a bridge', () => {
+    const cut = makeHeightmap(101, 101, 4, -200, -200);
+    for (let rr = 0; rr < 101; rr++) for (let c = 0; c < 101; c++) cut.data[rr * 101 + c] = Math.abs(c * 4 - 200) < 10 ? -5 : 0;
+    const street = way(1, 'tertiary', [[-190, 0], [190, 0]], { width: 8 });
+    const plan = planRoads([street], cut);
+    expect(plan.spans[0].length).toBe(0);
+    expect(plan.stats.embankedSpans).toBe(1);
+    // the ground under the street is filled to its height across the dip
+    const r = buildRoads(plan, cut, bounds);
+    expect(r.json.some((j) => j.derived)).toBe(false);
+    for (const x of [-8, 0, 8]) expect(Math.abs(cut.data[50 * 101 + 50 + x / 4])).toBeLessThan(0.3);
   });
 });

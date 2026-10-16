@@ -76,3 +76,21 @@ export class RoadMask {
     return false;
   }
 }
+
+/** The road masks of a streamed city's tiles, asked together (each tile adds and drops its own). */
+export class RoadMaskSet {
+  private readonly parts = new Map<string, RoadMask>();
+
+  add(key: string, roads: readonly RoadData[] = [], junctions?: JunctionsData) {
+    this.parts.set(key, new RoadMask(roads, junctions));
+  }
+
+  remove(key: string) {
+    this.parts.delete(key);
+  }
+
+  contains(x: number, z: number, margin = 0): boolean {
+    for (const m of this.parts.values()) if (m.contains(x, z, margin)) return true;
+    return false;
+  }
+}

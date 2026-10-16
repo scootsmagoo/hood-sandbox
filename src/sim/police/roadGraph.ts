@@ -60,7 +60,21 @@ export class RoadGraph {
   private readonly nodeKey = new Map<string, number>();
   private samples: SamplePoint[] | null = null;
 
+  /** The edges each tile added (a streamed city: docs/contracts/city-tiles.md), and the ids of dropped ones to reuse. */
+  private readonly byTile = new Map<string, number[]>();
+  private readonly freeEdges: number[] = [];
+  private live = 0;
+
   constructor(roads: readonly RoadData[]) {
+    this.addRoads('', roads);
+  }
+
+  /**
+   * Adds a tile's roads. Their ends join any node already there (within 0.5 m), so a road cut by a seam continues into the
+   * neighbouring tile's piece without anything more.
+   */
+  addRoads(key: string, roads: readonly RoadData[]) {
+    const ids: number[] = this.byTile.get(key) ?? [];
     for (const r of roads) {
       if (SKIP_CLASSES.has(r.class) || r.bridge || r.points.length < 2) continue;
       let steep = false;
@@ -77,15 +91,39 @@ export class RoadGraph {
       if (a === b) continue;
       const cum = [0];
       for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
-      const id = this.edges.length;
-      this.edges.push({ id, from: a, to: b, pts, cum, length: cum[cum.length - 1], oneway: r.oneway, cls: r.class, width: r.width || 7 });
+      const id = this.freeEdges.length ? this.freeEdges.pop()! : this.edges.length;
+      this.edges[id] = { id, from: a, to: b, pts, cum, length: cum[cum.length - 1], oneway: r.oneway, cls: r.class, width: r.width || 7 };
       this.nodes[a].out.push(id);
       this.nodes[b].out.push(id);
+      ids.push(id);
+      this.live++;
     }
+    this.byTile.set(key, ids);
+    this.samples = null;
+  }
+
+  /** Drops a tile's roads: their edges become empty (they are never the nearest to anything) and their ids are reused later. */
+  removeTile(key: string) {
+    const ids = this.byTile.get(key);
+    if (!ids) return;
+    this.byTile.delete(key);
+    for (const id of ids) {
+      const e = this.edges[id];
+      for (const n of [e.from, e.to]) {
+        const out = this.nodes[n].out;
+        const i = out.indexOf(id);
+        if (i >= 0) out.splice(i, 1);
+      }
+      this.edges[id] = { id, from: e.from, to: e.to, pts: [], cum: [0], length: 0, oneway: true, cls: '', width: 0 };
+      this.freeEdges.push(id);
+      this.live--;
+    }
+    this.freeEdges.sort((a, b) => b - a);
+    this.samples = null;
   }
 
   get empty(): boolean {
-    return this.edges.length === 0;
+    return this.live === 0;
   }
 
   /** The paved width of an edge's road, m. */
@@ -129,7 +167,8 @@ export class RoadGraph {
   nearest(x: number, z: number, accept?: (e: Edge) => boolean): Snap | null {
     let best: Snap | null = null;
     for (const e of this.edges) {
-      if (accept && !accept(e)) continue;
+      // (a dropped tile's edges are empty)
+      if (e.pts.length < 2 || (accept && !accept(e))) continue;
       for (let i = 1; i < e.pts.length; i++) {
         const a = e.pts[i - 1];
         const b = e.pts[i];

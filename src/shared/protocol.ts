@@ -1,3 +1,4 @@
+import type { CityIndex } from './city';
 /**
  * The wire protocol between the presentation (main thread) and the simulation (worker, or later a
  * server). Everything here is plain data and travels through postMessage, a WebSocket or a
@@ -88,6 +89,8 @@ export type SimEvent =
   | { type: 'ped:unstuck'; tick: number; pedId: EntityId; reason: 'inside' | 'overlap' | 'no-progress' | 'fell'; action: 'depenetrate' | 'snap-node' | 'teleport' | 'rollback' | 'despawn'; fromX: number; fromZ: number; toX: number; toZ: number }
   /** An entity came to exist. Carries its definition (see shared/entityDefs.ts). */
   | { type: 'entity:spawn'; tick: number; def: EntityDef }
+  /** A streamed city's tile came in (its physics, graphs and seams are in), was dropped, or could not be loaded. */
+  | { type: 'stream:tile'; tick: number; id: string; state: 'ready' | 'dropped' | 'failed' }
   | { type: 'entity:despawn'; tick: number; id: EntityId }
   /**
    * A ped started pulling the driver out of a car. This is the crime the law and heat system
@@ -215,6 +218,13 @@ export interface CrimeDescription {
 
 export interface SimInit {
   seed: number;
+  /**
+   * A streamed city (docs/contracts/city-tiles.md): the URL of its `index.json` (or its directory), or `fixture` for the procedural
+   * test city. When set, `tileBaseUrl` is ignored.
+   */
+  cityUrl?: string | null;
+  /** The near ring of a streamed city by graphics tier (`RINGS` in shared/city.ts; default `high`). */
+  streamTier?: 'high' | 'medium' | 'low';
   /** Where to find `tile.json`, e.g. `/tiles/atlanta/m1-five-points/`. Null or a failed load uses the procedural test ground. */
   tileBaseUrl: string | null;
   /** When set the sim writes snapshots here (a `SnapshotRing`) instead of posting them. */
@@ -253,6 +263,8 @@ export interface SimInit {
 
 export interface SimReady {
   tile: TileManifest;
+  /** A streamed city's index (then `tile` is its composite manifest). */
+  city?: CityIndex;
   tileSource: 'baked' | 'procedural';
   /** Why the baked tile was not used, when it was not. */
   fallbackReason?: string;

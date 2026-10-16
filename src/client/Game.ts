@@ -12,6 +12,7 @@ import type { SimReady } from '../shared/protocol';
 import type { Transport } from '../shared/transport';
 import { GraphicsGovernor, pickTier, TIERS, tierBelow, type Tier } from './graphics';
 import { Input } from './input/Input';
+import { ownDepthAll } from './render/depthMaterials';
 
 export interface System {
   readonly name: string;
@@ -57,6 +58,10 @@ export class Game {
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     // Multisampling is the costliest default on a phone's tile-based GPU: off on touch devices and on Low.
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && params.get('graphics') !== 'low', powerPreference: 'high-performance' });
+    // The scene never moves. With the default (an automatic matrix) it re-composes itself every frame, which marks its
+    // world matrix as changed, and three.js then recomputes the world matrix of every object under it, thousands of
+    // multiplications for a scene whose parts nearly all stand still. The things that do move set their own flag.
+    this.scene.matrixAutoUpdate = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -134,6 +139,8 @@ export class Game {
     this.input.beginFrame(dt);
     for (const s of this.systems) s.update?.(dt);
     for (const s of this.systems) s.lateUpdate?.(dt);
+    // (about twice a second: instanced casters get a depth material of their own kind, see depthMaterials.ts)
+    if ((this.frame & 31) === 0 && this.renderer.shadowMap.enabled) ownDepthAll(this.scene);
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
     this.cpuMs = performance.now() - cpu0;

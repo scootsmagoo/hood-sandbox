@@ -144,7 +144,7 @@ if (want('crossing')) {
       void t;
       // along the sidewalk that leads to the crossing's end
       let e2 = -1;
-      for (let s = g.adjStart[from]; s < g.adjStart[from + 1]; s++) if (g.adjEdges[s] !== best && g.kindOf(g.adjEdges[s]) !== 'crossing') { e2 = g.adjEdges[s]; break; }
+      for (const e of g.edgesAt(from)) if (e !== best && g.kindOf(e) !== 'crossing') { e2 = e; break; }
       if (e2 < 0) continue;
       const far = g.other(e2, from);
       const f = 0.25 + 0.55 * ((k >> 1) / 5);

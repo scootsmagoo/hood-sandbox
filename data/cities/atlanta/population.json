@@ -3,7 +3,9 @@
     "business": {
       "outfits": [
         1,
-        2
+        2,
+        18,
+        19
       ],
       "walkSpeed": [
         1.2,
@@ -17,7 +19,8 @@
     "students": {
       "outfits": [
         3,
-        4
+        4,
+        8
       ],
       "walkSpeed": [
         1.1,
@@ -30,8 +33,8 @@
     },
     "tourists": {
       "outfits": [
-        3,
-        5
+        5,
+        6
       ],
       "walkSpeed": [
         0.9,
@@ -44,8 +47,10 @@
     },
     "locals": {
       "outfits": [
-        2,
-        4
+        7,
+        8,
+        9,
+        20
       ],
       "walkSpeed": [
         1,
@@ -58,7 +63,9 @@
     },
     "nightlife": {
       "outfits": [
-        5
+        10,
+        11,
+        12
       ],
       "walkSpeed": [
         1,
@@ -71,8 +78,8 @@
     },
     "workers": {
       "outfits": [
-        1,
-        2
+        13,
+        14
       ],
       "walkSpeed": [
         1.3,
@@ -85,8 +92,9 @@
     },
     "unhoused": {
       "outfits": [
-        1,
-        3
+        15,
+        16,
+        17
       ],
       "walkSpeed": [
         0.9,

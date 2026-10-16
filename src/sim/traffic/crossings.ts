@@ -38,12 +38,19 @@ export const YIELD = {
 
 /** Lane edges (lanes only, not connectors) with the unsignalled crossings they cross, in order along the lane. */
 export function indexCrossings(lanes: LaneGraph, walk: WalkGraph): LaneCrossing[][] {
-  const kinds = new Set(['crossing'] as const);
   const out: LaneCrossing[][] = [];
-  for (let e = 0; e < lanes.count; e++) {
+  indexCrossingRange(lanes, walk, 0, lanes.count, out);
+  return out;
+}
+
+/** The same for the edges `from .. to - 1` only, written into `out` (a streamed city indexes each tile's lanes as it comes). */
+export function indexCrossingRange(lanes: LaneGraph, walk: WalkGraph, from: number, to: number, out: LaneCrossing[][]) {
+  const kinds = new Set(['crossing'] as const);
+  while (out.length < to) out.push([]);
+  for (let e = from; e < to; e++) {
     const list: LaneCrossing[] = [];
-    out.push(list);
-    if (lanes.isConnector[e]) continue;
+    out[e] = list;
+    if (lanes.isConnector[e] || !lanes.alive[e]) continue;
     const p = lanes.pts[e], cum = lanes.cum[e];
     const seen = new Set<number>();
     for (let k = 0; k + 1 < p.length / 3; k++) {
@@ -63,7 +70,6 @@ export function indexCrossings(lanes: LaneGraph, walk: WalkGraph): LaneCrossing[
     }
     list.sort((q, r) => q.s - r.s);
   }
-  return out;
 }
 
 /**

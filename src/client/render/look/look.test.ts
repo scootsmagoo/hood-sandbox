@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { lookMode, resolveFx, TIERS } from '../../graphics';
 import { hazeClear } from './fog';
-import { deriveWallAttributes, hasBakedWalls, prepareWallGeometry } from './facade';
+import { deriveWallAttributes, hasBakedLook, hasBakedWalls, prepareWallGeometry } from './facade';
 import { lampsFromProps, placeLamps } from './lamps';
 import { prepareSurfaceGeometry } from './surfaces';
 
@@ -17,12 +17,13 @@ describe('the look and its tiers', () => {
   });
 
   it('gives High and Medium everything and Low a cheaper subset with a single grade pass', () => {
-    for (const t of [TIERS.high, TIERS.medium]) expect(t.fx).toEqual({ facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2 });
+    for (const t of [TIERS.high, TIERS.medium]) expect(t.fx).toEqual({ facade: 2, surfaces: 2, post: 2, bloom: 2, haze: true, lamps: 2, trees: 2 });
     const low = TIERS.low.fx;
     expect(low.post).toBe(1);
     expect(low.bloom).toBe(0);
     expect(low.facade).toBeLessThan(2);
     expect(low.facade).toBeGreaterThan(0);
+    expect(low.trees).toBe(1); // no alpha leaf cards on Low
   });
 
   it('turns parts off with ?gfxoff= for A/B tests, and drops bloom with the post pass', () => {
@@ -124,14 +125,52 @@ describe('facade attributes', () => {
     expect(hasBakedWalls(twoWalls())).toBe(false);
   });
 
+  it('names the baked appearance for the shader, and gives an older tile all zeros (material and style unknown) so the kind alone lays the wall out', () => {
+    const baked = twoWalls();
+    baked.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(16).fill(1), 2));
+    baked.setAttribute('_wall', new THREE.Float32BufferAttribute(new Array(32).fill(3), 4));
+    baked.setAttribute('_bld', new THREE.Uint8BufferAttribute(new Array(32).fill(2), 4));
+    baked.setAttribute('_bid', new THREE.Uint16BufferAttribute(new Array(16).fill(5), 2));
+    const look = new THREE.Uint8BufferAttribute([4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64, 4, 5, 11, 64], 4);
+    baked.setAttribute('_look', look);
+    expect(hasBakedLook(baked)).toBe(true);
+    prepareWallGeometry(new THREE.Mesh(baked));
+    expect(baked.getAttribute('gLook')).toBe(look);
+    // meshFormat 2: no _look, but the walls are baked
+    const old = twoWalls();
+    old.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(16).fill(1), 2));
+    old.setAttribute('_wall', new THREE.Float32BufferAttribute(new Array(32).fill(3), 4));
+    old.setAttribute('_bld', new THREE.Uint8BufferAttribute(new Array(32).fill(2), 4));
+    old.setAttribute('_bid', new THREE.Uint16BufferAttribute(new Array(16).fill(5), 2));
+    expect(hasBakedLook(old)).toBe(false);
+    prepareWallGeometry(new THREE.Mesh(old));
+    const zeros = old.getAttribute('gLook');
+    expect(zeros.count).toBe(8);
+    expect([zeros.getX(0), zeros.getY(0), zeros.getZ(0), zeros.getW(0)]).toEqual([0, 0, 0, 0]);
+    // no baked walls at all: derived, with the same zeros
+    const derived = twoWalls();
+    deriveWallAttributes(derived, new THREE.Matrix4());
+    expect(derived.getAttribute('gLook').getX(3)).toBe(0);
+  });
+
+  it('names the baked roof appearance for the roof shader', () => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Array(12).fill(0), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(8).fill(0), 2));
+    g.setAttribute('_srf', new THREE.Uint8BufferAttribute(new Array(16).fill(0), 4));
+    g.setAttribute('_look', new THREE.Uint8BufferAttribute(new Array(16).fill(8), 4));
+    expect(prepareSurfaceGeometry(new THREE.Mesh(g))).toEqual({ roadUv: false, land: false, srf: true, look: true });
+    expect(g.getAttribute('gLook')).toBe(g.getAttribute('_look'));
+  });
+
   it('names the baked road, land and roof attributes for the shader and says which a geometry has', () => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(new Array(12).fill(0), 3));
-    expect(prepareSurfaceGeometry(new THREE.Mesh(g))).toEqual({ roadUv: false, land: false, srf: false });
+    expect(prepareSurfaceGeometry(new THREE.Mesh(g))).toEqual({ roadUv: false, land: false, srf: false, look: false });
     g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(8).fill(0), 2));
     g.setAttribute('uv1', new THREE.Float32BufferAttribute(new Array(8).fill(0), 2));
     g.setAttribute('_land', new THREE.Uint8BufferAttribute(new Array(16).fill(0), 4));
-    expect(prepareSurfaceGeometry(new THREE.Mesh(g))).toEqual({ roadUv: true, land: true, srf: false });
+    expect(prepareSurfaceGeometry(new THREE.Mesh(g))).toEqual({ roadUv: true, land: true, srf: false, look: false });
     expect(g.getAttribute('gUv1')).toBe(g.getAttribute('uv1'));
     expect(g.getAttribute('gLand')).toBe(g.getAttribute('_land'));
   });

@@ -43,12 +43,25 @@ export const GROUPS = {
   wallQuery: groups(Group.Query, Group.World),
   /** Sees other vehicles only (traffic looking for a car ahead). */
   vehicleQuery: groups(Group.Query, Group.Vehicle),
+  /**
+   * A car's wheel rays see only the drivable world: the ground and the decks (and walls and roofs, which a ray from a wheel's
+   * hardpoint never reaches). Not street furniture (a bollard or a pole's base under a wheel was a ramp that threw the car) and
+   * not other cars (a hardpoint inside another car's body read as a fully compressed spring); the hull meets both instead.
+   */
+  wheelQuery: groups(Group.Query, Group.World),
   /** The camera arm sees only the world. */
   cameraQuery: groups(Group.Query, Group.World),
   /** A bullet sees the world, cars and people. (Its membership is World because a person's collider only answers to World.) */
   bullet: groups(Group.World, Group.World | Group.Vehicle | Group.Ped | Group.Prop | Group.Ragdoll),
   /** A ragdoll part. */
   ragdoll: groups(Group.Ragdoll, Group.World | Group.Vehicle | Group.Prop),
+  /**
+   * The ground and the decks are built twice (World.ts): this copy is the one everything but a car's hull meets (people, ragdolls,
+   * props, every query and ray, the wheel rays included), and `carGround` is the one the hulls meet, with the internal edges fixed.
+   */
+  worldNoCars: groups(Group.World, 0xffff & ~Group.Vehicle),
+  /** The ground and the decks as a car's hull meets them (see `worldNoCars`). */
+  carGround: groups(Group.World, Group.Vehicle),
   /** A fixed prop: collides with whatever lists Prop in its filter. */
   prop: groups(Group.Prop, 0xffff),
 } as const;

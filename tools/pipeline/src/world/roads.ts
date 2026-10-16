@@ -1,5 +1,5 @@
 import type { Rect, V2, V3 } from '../geo.js';
-import { clipPolyline, clipPolylineWithValues, polylineLength, simplifyLine3 } from '../geo.js';
+import { clipPolyline, clipPolylineWithValues, polylineLength, segmentIntersection, simplifyLine3 } from '../geo.js';
 import { MeshBuilder } from '../mesh/builder.js';
 import { addOrientedBox } from '../mesh/extrude.js';
 import { dedupe, pointAlong, ribbonEdges, ribbonIndices } from '../mesh/ribbon.js';
@@ -10,9 +10,10 @@ import { addJunctionMesh, buildJunctions, DEFAULT_JUNCTION_OPTIONS, trimKey, tri
 import { DEFAULT_DECK_OPTIONS, densifyWay, solveDecks, type RefWay } from './decks.js';
 import type { RoadWay } from './osm.js';
 import type { CarveSegment, Heightmap, UnderDeckSegment } from './terrain.js';
-import { carveTerrain, lowerTerrainUnder, surfaceHeight } from './terrain.js';
-import { solveProfiles, type DeckSpan, type ProfileOptions, type ProfileResult } from './profile.js';
+import { carveTerrain, lowerTerrainUnder, smoothCorridor, surfaceHeight } from './terrain.js';
+import { solveProfiles, type Clearance, type DeckSpan, type ProfileOptions, type ProfileResult } from './profile.js';
 import { srgbToLinear } from './buildings.js';
+import { weldDeckTops, type WeldPolygon, type WeldSegment } from './deckWeld.js';
 
 export interface RoadJson {
   id: string;
@@ -52,7 +53,7 @@ export interface RoadMeshes {
   exported: JunctionsFile;
   /** OSM crossing ways: centreline with height, and what the nodes say about them */
   crossings: { id: number; points: V3[]; signals: boolean }[];
-  stats: { ways: number; drivableWays: number; deckWays: number; deckMetres: number; piers: number; maxDeckHeightAboveGround: number };
+  stats: { ways: number; drivableWays: number; deckWays: number; deckMetres: number; piers: number; maxDeckHeightAboveGround: number; deckCaps?: number; landedDeckEnds?: number; pedSlabSegmentsDropped?: number; deckJunctions?: number; deckLevels?: number; weldedTriangles?: number; weldFailedLevels?: number; deckClashes?: number };
 }
 
 const RANK: Record<string, number> = {
@@ -64,6 +65,14 @@ const ASPHALT_GRAY: Record<string, number> = {
 
 const CLEARANCE = { car: 5.0, rail: 6.0, ped: 3.0 };
 const SEG = 5;
+/** A bridge the pipeline made has landed when the carved ground at its end is within this of its height (m). */
+const LAND_TOL = 0.05;
+/** A mapped car bridge whose design stays within this of the terrain (m) and clears nothing is built as a road on the ground. */
+const AT_GRADE = 1.0;
+/** A bridge the pipeline made grows to at most this many nodes (5 m apart) looking for ground to land on. */
+const MAX_DECK_NODES = 60;
+/** Ground within this of where a deck lands is left out of the corridor smoothing (m): the deck's end must meet it exactly. */
+const FREEZE_R = 7;
 /** How strongly a bridge's wish for the height of the road it starts from counts against the terrain (1 per node). */
 const ANCHOR_WEIGHT = 400;
 
@@ -101,6 +110,14 @@ type Dense = { w: RoadWay; pts: V2[]; nodeIds: number[] };
 export const GRADE_LIMIT: Record<string, number> = {
   motorway: 0.06, motorway_link: 0.08, trunk: 0.07, trunk_link: 0.08, primary: 0.08, secondary: 0.08, service: 0.1,
 };
+/** A road's design speed, km/h: its posted limit, else the class's (as lanes.ts has them), at least 30. */
+export function designSpeed(w: RoadWay): number {
+  if (w.maxspeed) return Math.max(30, w.maxspeed);
+  const base: Record<string, number> = { motorway: 105, trunk: 89, primary: 64, secondary: 56, tertiary: 48, unclassified: 48, residential: 40 };
+  const v = base[w.highway.replace(/_link$/, '')] ?? 30;
+  return Math.max(30, w.highway.endsWith('_link') ? v * 0.7 : v);
+}
+
 export function gradeLimit(highway: string): number {
   return GRADE_LIMIT[highway] ?? 0.09;
 }
@@ -119,7 +136,7 @@ export interface RoadPlan {
   /** the ways on decks (OSM bridges), as indices into `dense`, and the deck surface height at each of their nodes */
   deckWays: number[];
   deckY: number[][];
-  stats: ProfileResult['stats'] & { carvedVertices: number; maxCut: number; maxFill: number; underDeckCut: number };
+  stats: ProfileResult['stats'] & { carvedVertices: number; maxCut: number; maxFill: number; underDeckCut: number; smoothedVertices: number; smoothMaxChange: number; deckNodesExtended: number; deckEndsUnlanded: number; embankedSpans: number; atGradeBridges: number };
 }
 
 /**
@@ -150,7 +167,16 @@ export function planRoads(ways: RoadWay[], hm: Heightmap, profile: Partial<Profi
   };
   const ground = (x: number, z: number) => surfaceHeight(hm, x, z);
   const demand = new Map<number, number>();
-  solveDecks(bridges, { groundAt: ground, groundNodeIds, groundRefs: refsAt(), demand });
+  // the car bridges are designed with the ground roads, in one solve (below); what each would like, clear of what passes
+  // under it, is its target there. The other bridges (rail, footbridges) only ask the ground roads to meet them.
+  let deckWays: number[] = [];
+  dense.forEach((d, di) => { if (d.w.bridge) deckWays.push(di); });
+  const isCarDeck = (di: number) => dense[di].w.kind === 'car' && dense[di].w.sub !== 'crossing';
+  const wish = solveDecks(bridges, { groundAt: ground, groundNodeIds, groundRefs: refsAt(), demand });
+  const otherEnds = new Set<number>();
+  deckWays.forEach((di) => { if (!isCarDeck(di)) { const ids = dense[di].nodeIds; otherEnds.add(ids[0]).add(ids[ids.length - 1]); } });
+  for (const id of [...demand.keys()]) if (!otherEnds.has(id)) demand.delete(id);
+  let carDecks = deckWays.map((di, k) => ({ di, k })).filter(({ di }) => isCarDeck(di));
   const wanted = new Map<number, { y: number; weight: number }>();
   // (outside the heightmap the ground is just its edge value, so what a bridge wants there means nothing)
   const nodeAt = new Map<number, V2>();
@@ -161,42 +187,353 @@ export function planRoads(ways: RoadWay[], hm: Heightmap, profile: Partial<Profi
     if (p && p[0] > hm.minX + 6 && p[0] < x1 - 6 && p[1] > hm.minZ + 6 && p[1] < z1 - 6) wanted.set(id, { y, weight: ANCHOR_WEIGHT });
   }
 
+  const solveWays = [...profiled, ...carDecks.map((c) => c.di)];
+  const clearances = deckClearances(dense, solveWays, profiled.length, deckWays, wish, ground);
   const res = solveProfiles(
-    profiled.map((i) => ({ nodeIds: dense[i].nodeIds, pts: dense[i].pts, maxGrade: gradeLimit(dense[i].w.highway) })),
-    { terrain: ground, wanted, ...profile },
+    solveWays.map((i, si) => ({
+      nodeIds: dense[i].nodeIds, pts: dense[i].pts, maxGrade: gradeLimit(dense[i].w.highway), halfWidth: dense[i].w.width / 2, speed: designSpeed(dense[i].w), rank: deckRank(dense[i].w),
+      deck: si < profiled.length ? undefined : { target: wish[carDecks[si - profiled.length].k] },
+    })),
+    { terrain: ground, wanted, clearances, ...profile },
   );
+  // A mapped car bridge the design keeps within AT_GRADE of the terrain all along, with nothing to clear under it (a bridge over a
+  // culvert, a creek the bare-earth model has filled in, something not in the data): a road on the ground, carved like one. As a
+  // deck it was only seams with the ground, at its ends and wherever a lane crossed its kerbs.
+  let atGrade = 0;
+  {
+    const P0 = profiled.length;
+    const clearOf = new Set<number>();
+    for (const c of clearances) clearOf.add(c.upper[0]);
+    const keep: typeof carDecks = [];
+    const conv: number[] = [];
+    carDecks.forEach((cd, j) => {
+      const d = dense[cd.di];
+      let mx = -Infinity;
+      d.pts.forEach((p, i) => { mx = Math.max(mx, res.h[P0 + j][i] - ground(p[0], p[1])); });
+      if (mx < AT_GRADE && !clearOf.has(P0 + j)) conv.push(j); else keep.push(cd);
+    });
+    if (conv.length) {
+      const rows = res.h;
+      const newH = rows.slice(0, P0);
+      const gone = new Set<number>();
+      for (const j of conv) {
+        const cd = carDecks[j];
+        newH.push(rows[P0 + j]);
+        profIndex.set(cd.di, profiled.length);
+        profiled.push(cd.di);
+        gone.add(cd.di);
+        const d = dense[cd.di];
+        d.w = { ...d.w, bridge: false, layer: 0 };
+        for (const id of d.nodeIds) if (id > 0) groundNodeIds.add(id);
+      }
+      for (const cd of keep) newH.push(rows[P0 + carDecks.indexOf(cd)]);
+      res.h = newH;
+      carDecks = keep;
+      deckWays = deckWays.filter((di) => !gone.has(di));
+      atGrade = conv.length;
+    }
+  }
   const nodeY = new Map<number, number>();
-  const segs: CarveSegment[] = [];
   const spans: DeckSpan[][] = profiled.map(() => []);
-  for (const d of res.decks) spans[d.way].push(d);
+  // A span the design lifts over a dip is a bridge only where something passes under it (a road, a railway, a path at least
+  // 2.5 m lower): over a dip with nothing in it (most often the bare-earth model's hollow where an overpass was taken out) it is an
+  // embankment, carved like any other road. A deck there was only ever a seam with the ground at both ends.
+  const passesUnder = underpassTest(dense, profiled, res.h, ground);
+  let embanked = 0;
+  for (const d of res.decks) {
+    if (passesUnder(d.way, d.from, d.to)) spans[d.way].push(d);
+    else embanked++;
+  }
   profiled.forEach((di, pi) => {
     const d = dense[di];
-    const onDeck = new Uint8Array(d.pts.length);
-    for (const sp of spans[pi]) for (let i = sp.from; i < sp.to; i++) onDeck[i] = 1;
     for (let i = 0; i < d.pts.length; i++) if (d.nodeIds[i] > 0) nodeY.set(d.nodeIds[i], res.h[pi][i]);
-    for (let i = 0; i + 1 < d.pts.length; i++) {
-      if (onDeck[i]) continue;
-      segs.push({ a: d.pts[i], b: d.pts[i + 1], ha: res.h[pi][i], hb: res.h[pi][i + 1], halfWidth: d.w.width / 2 });
-    }
   });
-  const carved = carveTerrain(hm, segs);
+  const osmDeckEnds: V2[] = [];
+  for (const di of deckWays) {
+    const d = dense[di];
+    for (const k of [0, d.pts.length - 1]) if (groundNodeIds.has(d.nodeIds[k])) osmDeckEnds.push(d.pts[k]);
+  }
 
-  // OSM bridges: deck heights over the designed ground, then the ground is cut away where it would stand above a deck
-  const deckWays: number[] = [];
-  dense.forEach((d, di) => { if (d.w.bridge) deckWays.push(di); });
-  const deckY = solveDecks(
-    deckWays.map((di) => ({ nodeIds: dense[di].nodeIds, pts: dense[di].pts, layer: dense[di].w.layer })),
-    { groundAt: ground, groundNodeIds, groundRefs: refsAt(res.h), groundNodeY: nodeY, thickness: DEFAULT_DECK_OPTIONS.thickness },
+  const orig = Float32Array.from(hm.data);
+  let segs: CarveSegment[] = [];
+  let carved = { cut: 0, fill: 0, vertices: 0 };
+  let smoothed = { vertices: 0, maxChange: 0 };
+  let extendedNodes = 0;
+  let unlanded = 0;
+  // Cut and fill to the design, then smooth the creases of the carved corridor (crossings at different grades, the edges of cuts),
+  // but not where a deck lands: its end must meet the ground exactly. A bridge the pipeline made must start where the carved
+  // ground is at its height; where another road pulls the ground lower there (a road under the bridge, close to its abutment, has
+  // its own height), the bridge starts a node earlier and the ground is carved again, until its ends land.
+  for (let round = 0; round < 6; round++) {
+    hm.data.set(orig);
+    segs = [];
+    profiled.forEach((di, pi) => {
+      const d = dense[di];
+      const onDeck = new Uint8Array(d.pts.length);
+      for (const sp of spans[pi]) for (let i = sp.from; i < sp.to; i++) onDeck[i] = 1;
+      for (let i = 0; i + 1 < d.pts.length; i++) {
+        if (onDeck[i]) continue;
+        segs.push({ a: d.pts[i], b: d.pts[i + 1], ha: res.h[pi][i], hb: res.h[pi][i + 1], halfWidth: d.w.width / 2 });
+      }
+    });
+    carved = carveTerrain(hm, segs);
+    const deckEnds: V2[] = [...osmDeckEnds];
+    profiled.forEach((di, pi) => { for (const sp of spans[pi]) for (const k of [sp.from, sp.to]) deckEnds.push(dense[di].pts[k]); });
+    const endGrid = new Map<string, V2[]>();
+    for (const p of deckEnds) {
+      const k = `${Math.floor(p[0] / 16)},${Math.floor(p[1] / 16)}`;
+      const l = endGrid.get(k);
+      if (l) l.push(p); else endGrid.set(k, [p]);
+    }
+    const nearDeckEnd = (x: number, z: number) => {
+      for (let gx = Math.floor((x - FREEZE_R) / 16); gx <= Math.floor((x + FREEZE_R) / 16); gx++) {
+        for (let gz = Math.floor((z - FREEZE_R) / 16); gz <= Math.floor((z + FREEZE_R) / 16); gz++) {
+          for (const p of endGrid.get(`${gx},${gz}`) ?? []) if (Math.hypot(p[0] - x, p[1] - z) < FREEZE_R) return true;
+        }
+      }
+      return false;
+    };
+    smoothed = smoothCorridor(hm, segs, nearDeckEnd);
+    // the ends of the bridges the pipeline made: does the ground meet them?
+    let grew = 0;
+    unlanded = 0;
+    profiled.forEach((di, pi) => {
+      const d = dense[di];
+      const h = res.h[pi];
+      for (const sp of spans[pi]) {
+        const low = (k: number) => ground(d.pts[k][0], d.pts[k][1]) < h[k] - LAND_TOL;
+        if (low(sp.from)) { if (sp.from > 0 && sp.to - sp.from < MAX_DECK_NODES) { sp.from--; grew++; } else unlanded++; }
+        if (low(sp.to)) { if (sp.to < d.pts.length - 1 && sp.to - sp.from < MAX_DECK_NODES) { sp.to++; grew++; } else unlanded++; }
+      }
+      // spans that have grown into each other are one
+      spans[pi].sort((x, y) => x.from - y.from);
+      const merged: DeckSpan[] = [];
+      for (const sp of spans[pi]) {
+        const last = merged[merged.length - 1];
+        if (last && sp.from <= last.to) last.to = Math.max(last.to, sp.to);
+        else merged.push(sp);
+      }
+      spans[pi] = merged;
+    });
+    extendedNodes += grew;
+    if (!grew) break;
+  }
+  // OSM bridges: deck heights over the designed ground, then the ground is cut away where it would stand above a deck. A deck lands
+  // at the design height of the road it starts from. (Landing it at the carved ground's height instead was tried: where the
+  // ground there is pulled off the design, the deck then climbed steeply away from it. The deck's end is brought onto the
+  // ground in `emitPiece` instead, gently.)
+  // the car decks were designed with the ground roads; the others clear them and the roads under them
+  const others = deckWays.filter((di) => !isCarDeck(di));
+  const carRefs: RefWay[] = carDecks.map(({ di }, j) => ({ nodeIds: dense[di].nodeIds, pts: dense[di].pts, width: dense[di].w.width, layer: dense[di].w.layer, clearance: CLEARANCE.car, heights: res.h[profiled.length + j].map((y) => y + 0.1) }));
+  const otherY = solveDecks(
+    others.map((di) => ({ nodeIds: dense[di].nodeIds, pts: dense[di].pts, layer: dense[di].w.layer })),
+    { groundAt: ground, groundNodeIds, groundRefs: [...refsAt(res.h), ...carRefs], groundNodeY: nodeY, thickness: DEFAULT_DECK_OPTIONS.thickness },
   );
+  const deckY: number[][] = [];
+  { let o = 0, c = 0; for (const di of deckWays) deckY.push(isCarDeck(di) ? res.h[profiled.length + c++] : otherY[o++]); }
+  const groundH = res.h.slice(0, profiled.length);
   const under: UnderDeckSegment[] = [];
   deckWays.forEach((di, k) => {
     const d = dense[di];
-    for (let i = 0; i + 1 < d.pts.length; i++) under.push({ a: d.pts[i], b: d.pts[i + 1], ya: deckY[k][i], yb: deckY[k][i + 1], halfWidth: d.w.width / 2 });
+    const m = d.pts.length;
+    for (let i = 0; i + 1 < m; i++) under.push({ a: d.pts[i], b: d.pts[i + 1], ya: deckY[k][i], yb: deckY[k][i + 1], halfWidth: d.w.width / 2, endA: i === 0 && groundNodeIds.has(d.nodeIds[0]), endB: i + 2 === m && groundNodeIds.has(d.nodeIds[m - 1]) });
   });
-  const lowered = lowerTerrainUnder(hm, under);
+  // and under the bridges the pipeline made (at their heights once landed, as buildRoads will have them): the round end of the
+  // corridor carved to the road a bridge starts from reaches in under the deck, which goes down from there (0.3 m over the
+  // ground 4 m in, where the wheels fell to the deck)
+  profiled.forEach((di, pi) => {
+    const d = dense[di];
+    for (const sp of spans[pi]) {
+      const pts = d.pts.slice(sp.from, sp.to + 1);
+      const ys = landDeckEnds(pts, res.h[pi].slice(sp.from, sp.to + 1), ground, 20, true, true);
+      for (let i = 0; i + 1 < pts.length; i++) under.push({ a: pts[i], b: pts[i + 1], ya: ys[i], yb: ys[i + 1], halfWidth: d.w.width / 2, endA: i === 0, endB: i + 2 === pts.length });
+    }
+  });
+  // the carriageways on the ground (within their strips, not the round ends of the corridors) keep their carved height
+  // (and around a junction of three or more of them, its corners)
+  const strips = new DeckFootprints();
+  for (const sg of segs) strips.addStrip(sg.a, sg.b, sg.halfWidth + 0.5);
+  const legs = new Map<string, { n: number; p: V2; r: number }>();
+  for (const sg of segs) for (const p of [sg.a, sg.b]) {
+    const k = endKey(p);
+    const l = legs.get(k);
+    if (l) { l.n++; l.r = Math.max(l.r, sg.halfWidth + 2.5); } else legs.set(k, { n: 1, p, r: sg.halfWidth + 2.5 });
+  }
+  // (a deck that starts there is a leg too)
+  const deckLeg = (p: V2, half: number) => { const l = legs.get(endKey(p)); if (l) { l.n++; l.r = Math.max(l.r, half + 2.5); } };
+  for (const { di } of carDecks) { const d = dense[di]; deckLeg(d.pts[0], d.w.width / 2); deckLeg(d.pts[d.pts.length - 1], d.w.width / 2); }
+  profiled.forEach((di, pi) => { for (const sp of spans[pi]) { const d = dense[di]; deckLeg(d.pts[sp.from], d.w.width / 2); deckLeg(d.pts[sp.to], d.w.width / 2); } });
+  for (const l of legs.values()) if (l.n >= 3) strips.addStrip(l.p, l.p, l.r);
+  // (within 1.5 m of the deck and blending out over 3 m: a wider bank dug into the junctions and kerbs beside a deck)
+  const lowered = lowerTerrainUnder(hm, under, undefined, 1.5, 3, undefined, (x, z) => strips.containsStrip(x, z));
   return {
-    dense, profiled, heights: res.h, spans, nodeY, deckWays, deckY,
-    stats: { ...res.stats, carvedVertices: carved.vertices, maxCut: carved.cut, maxFill: carved.fill, underDeckCut: lowered.cut },
+    dense, profiled, heights: groundH, spans, nodeY, deckWays, deckY,
+    stats: { ...res.stats, deckSpans: res.stats.deckSpans - embanked, embankedSpans: embanked, carvedVertices: carved.vertices, maxCut: carved.cut, maxFill: carved.fill, underDeckCut: lowered.cut, smoothedVertices: smoothed.vertices, smoothMaxChange: smoothed.maxChange, deckNodesExtended: extendedNodes, deckEndsUnlanded: unlanded, atGradeBridges: atGrade },
+  };
+}
+
+/** Extra length on each side of a crossed way that a deck keeps its clearance over it (m), as solveDecks has it. */
+const CROSS_MARGIN = 3;
+
+/**
+ * Where a car deck (one of `solveWays` from index `firstDeck` on) crosses a way under it: a road of the ground network (also
+ * designed in the solve: the deck and the road keep the clearance between them, the road dipping as much as the deck climbs, by
+ * their weights), a lower car deck (likewise), or anything else (a railway, a path, a footbridge: a fixed height to clear). Every
+ * deck node over the crossed way's width (and a margin) against every node of that way under the deck's width.
+ */
+export function deckClearances(dense: Dense[], solveWays: number[], firstDeck: number, deckWays: number[], wish: number[][], ground: (x: number, z: number) => number): Clearance[] {
+  const solveOf = new Map<number, number>();
+  solveWays.forEach((di, si) => solveOf.set(di, si));
+  const wishOf = new Map<number, number[]>();
+  deckWays.forEach((di, k) => wishOf.set(di, wish[k]));
+  const G = 32;
+  const grid = new Map<string, [number, number][]>();
+  dense.forEach((d, di) => {
+    if (d.w.sub === 'crossing') return;
+    for (let j = 0; j + 1 < d.pts.length; j++) {
+      const a = d.pts[j], b = d.pts[j + 1];
+      for (let gx = Math.floor(Math.min(a[0], b[0]) / G); gx <= Math.floor(Math.max(a[0], b[0]) / G); gx++) {
+        for (let gz = Math.floor(Math.min(a[1], b[1]) / G); gz <= Math.floor(Math.max(a[1], b[1]) / G); gz++) {
+          const key = `${gx},${gz}`;
+          const l = grid.get(key);
+          if (l) l.push([di, j]); else grid.set(key, [[di, j]]);
+        }
+      }
+    }
+  });
+  const out: Clearance[] = [];
+  const seen = new Set<string>();
+  // nodes of a way within `reach` (m, along it) of a point on segment i at parameter t
+  const near = (pts: V2[], i: number, t: number, reach: number): number[] => {
+    const at: V2 = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t];
+    const list = [i, i + 1];
+    for (const dir of [-1, 1]) {
+      let m = dir < 0 ? i : i + 1, dist = Math.hypot(pts[m][0] - at[0], pts[m][1] - at[1]);
+      for (;;) {
+        const nx = m + dir;
+        if (nx < 0 || nx >= pts.length) break;
+        dist += Math.hypot(pts[nx][0] - pts[m][0], pts[nx][1] - pts[m][1]);
+        if (dist > reach) break;
+        list.push(nx);
+        m = nx;
+      }
+    }
+    return list;
+  };
+  for (let si = firstDeck; si < solveWays.length; si++) {
+    const d = dense[solveWays[si]];
+    for (let i = 0; i + 1 < d.pts.length; i++) {
+      const a0 = d.pts[i], a1 = d.pts[i + 1];
+      const cand = new Set<string>();
+      for (let gx = Math.floor(Math.min(a0[0], a1[0]) / G); gx <= Math.floor(Math.max(a0[0], a1[0]) / G); gx++) {
+        for (let gz = Math.floor(Math.min(a0[1], a1[1]) / G); gz <= Math.floor(Math.max(a0[1], a1[1]) / G); gz++) {
+          for (const [ri, j] of grid.get(`${gx},${gz}`) ?? []) cand.add(`${ri},${j}`);
+        }
+      }
+      for (const c of cand) {
+        const [ri, j] = c.split(',').map(Number);
+        if (ri === solveWays[si]) continue;
+        const r = dense[ri];
+        if (r.w.layer >= d.w.layer) continue;
+        const b0 = r.pts[j], b1 = r.pts[j + 1];
+        if (d.nodeIds[i] === r.nodeIds[j] || d.nodeIds[i] === r.nodeIds[j + 1] || d.nodeIds[i + 1] === r.nodeIds[j] || d.nodeIds[i + 1] === r.nodeIds[j + 1]) continue;
+        const x = segmentIntersection(a0, a1, b0, b1);
+        if (!x) continue;
+        const la = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]), lb = Math.hypot(b1[0] - b0[0], b1[1] - b0[1]);
+        if (la < 1e-6 || lb < 1e-6) continue;
+        const sin = Math.max(0.3, Math.abs(((a1[0] - a0[0]) * (b1[1] - b0[1]) - (a1[1] - a0[1]) * (b1[0] - b0[0])) / (la * lb)));
+        const gap = CLEARANCE[r.w.kind] + DEFAULT_DECK_OPTIONS.thickness + 0.1;
+        const up = near(d.pts, i, x.t, (r.w.width / 2 + CROSS_MARGIN) / sin);
+        const rs = solveOf.get(ri);
+        if (rs !== undefined) {
+          for (const k of near(r.pts, j, x.u, (d.w.width / 2 + CROSS_MARGIN) / sin)) {
+            for (const m of up) {
+              const key = `${si},${m},${rs},${k}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              out.push({ upper: [si, m], lower: [rs, k], gap });
+            }
+          }
+        } else {
+          const w = wishOf.get(ri);
+          const lower = w ? w[j] + (w[j + 1] - w[j]) * x.u : ground(x.x, x.z) + 0.1;
+          for (const m of up) out.push({ upper: [si, m], lower, gap });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether anything passes under the span `from..to` of profiled way `pi`: a segment of another way on the ground (a road, a
+ * railway, a path; not one sharing a node with the span) that crosses it in plan at least `clearance` m below the design.
+ */
+export function underpassTest(dense: Dense[], profiled: number[], h: number[][], ground: (x: number, z: number) => number, clearance = 2.5): (pi: number, from: number, to: number) => boolean {
+  const prof = new Map<number, number>();
+  profiled.forEach((di, pi) => prof.set(di, pi));
+  const cell = 32;
+  const grid = new Map<string, { di: number; i: number }[]>();
+  dense.forEach((d, di) => {
+    if (d.w.bridge) return;
+    for (let i = 0; i + 1 < d.pts.length; i++) {
+      const a = d.pts[i], b = d.pts[i + 1];
+      for (let gx = Math.floor(Math.min(a[0], b[0]) / cell); gx <= Math.floor(Math.max(a[0], b[0]) / cell); gx++) {
+        for (let gz = Math.floor(Math.min(a[1], b[1]) / cell); gz <= Math.floor(Math.max(a[1], b[1]) / cell); gz++) {
+          const k = `${gx},${gz}`;
+          const l = grid.get(k);
+          if (l) l.push({ di, i }); else grid.set(k, [{ di, i }]);
+        }
+      }
+    }
+  });
+  return (pi, from, to) => {
+    const di0 = profiled[pi];
+    const d0 = dense[di0];
+    const ids = new Set(d0.nodeIds.slice(from, to + 1));
+    for (let i = from; i < to; i++) {
+      const a = d0.pts[i], b = d0.pts[i + 1];
+      const seen = new Set<string>();
+      for (let gx = Math.floor(Math.min(a[0], b[0]) / cell); gx <= Math.floor(Math.max(a[0], b[0]) / cell); gx++) {
+        for (let gz = Math.floor(Math.min(a[1], b[1]) / cell); gz <= Math.floor(Math.max(a[1], b[1]) / cell); gz++) {
+          for (const { di, i: j } of grid.get(`${gx},${gz}`) ?? []) {
+            if (di === di0) continue;
+            const key = `${di}:${j}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const o = dense[di];
+            if (ids.has(o.nodeIds[j]) || ids.has(o.nodeIds[j + 1])) continue;
+            const x = segmentIntersection(a, b, o.pts[j], o.pts[j + 1]);
+            if (!x) continue;
+            const top = h[pi][i] + (h[pi][i + 1] - h[pi][i]) * x.t;
+            const op = prof.get(di);
+            const below = op !== undefined ? h[op][j] + (h[op][j + 1] - h[op][j]) * x.u : ground(x.x, x.z);
+            if (top - below >= clearance) return true;
+          }
+        }
+      }
+    }
+    // A fill would also bury, or pull down, a road that runs close beside the span at another height (a ramp, a carriageway in
+    // the dip next to it): the carving cannot give both their heights in the space between them, so the span stays a bridge.
+    for (let i = from; i <= to; i++) {
+      const p = d0.pts[i];
+      const hw = d0.w.width / 2;
+      for (const { di, i: j } of grid.get(`${Math.floor(p[0] / cell)},${Math.floor(p[1] / cell)}`) ?? []) {
+        if (di === di0) continue;
+        const o = dense[di];
+        if (o.w.kind === 'ped' || ids.has(o.nodeIds[j]) || ids.has(o.nodeIds[j + 1])) continue;
+        const a = o.pts[j], b = o.pts[j + 1];
+        const dx = b[0] - a[0], dz = b[1] - a[1];
+        const l2 = dx * dx + dz * dz;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / l2));
+        const dist = Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dz));
+        if (dist > hw + o.w.width / 2 + 3) continue;
+        const op = prof.get(di);
+        const oy = op !== undefined ? h[op][j] + (h[op][j + 1] - h[op][j]) * t : ground(a[0] + t * dx, a[1] + t * dz);
+        if (Math.abs(h[pi][i] - oy) > 1) return true;
+      }
+    }
+    return false;
   };
 }
 
@@ -284,11 +621,32 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
       }
     }
   };
+  // The deck heights of the bridges the pipeline made: the design profile, except near the ends, which take the carved ground's
+  // height there and blend back into the design over up to 20 m. The carving puts the ground at the design height, but not
+  // always exactly: a parallel carriageway, a ramp or a road below that overlaps the end pulls it (the Downtown Connector's
+  // carriageways overlap, and a deck end stood 0.47 m off the ground). The deck's top then equals the heightmap at its ends.
+  // (only an end that is on its own: where it meets another deck, a mapped bridge or another of these, it is a joint in the air)
+  const deckWaysAt = new Map<number, Set<number>>();
+  const mark = (id: number, di: number) => { const st = deckWaysAt.get(id); if (st) st.add(di); else deckWaysAt.set(id, new Set([di])); };
+  plan.profiled.forEach((di, pi) => { for (const sp of plan.spans[pi]) for (let i = sp.from; i <= sp.to; i++) mark(dense[di].nodeIds[i], di); });
+  for (const di of plan.deckWays) for (const id of dense[di].nodeIds) mark(id, di);
+  const deckHeights = new Map<string, number[]>();
+  plan.profiled.forEach((di, pi) => {
+    const d = dense[di];
+    for (const sp of plan.spans[pi]) {
+      const hs = plan.heights[pi].slice(sp.from, sp.to + 1);
+      const pts = d.pts.slice(sp.from, sp.to + 1);
+      // (a joint with another deck lands too where it is on the ground: every deck there is brought down alike)
+      const alone = (k: number) => (deckWaysAt.get(d.nodeIds[k])?.size ?? 0) <= 1 || Math.abs(ground(d.pts[k][0], d.pts[k][1]) - plan.heights[pi][k]) <= JOINT_LAND;
+      deckHeights.set(`${pi}:${sp.from}`, landDeckEnds(pts, hs, ground, 20, alone(sp.from), alone(sp.to)));
+    }
+  });
+  const deckH = (pi: number, from: number, i: number) => deckHeights.get(`${pi}:${from}`)?.[i - from] ?? plan.heights[pi][i];
   // sidewalks and paths that run beside a bridge the pipeline made go over the same gap
   const bridgeSegs: { a: V2; b: V2; ha: number; hb: number; reach: number }[] = [];
   plan.profiled.forEach((di, pi) => {
     const d = dense[di];
-    for (const sp of plan.spans[pi]) for (let i = sp.from; i < sp.to; i++) bridgeSegs.push({ a: d.pts[i], b: d.pts[i + 1], ha: plan.heights[pi][i], hb: plan.heights[pi][i + 1], reach: d.w.width / 2 + 5 });
+    for (const sp of plan.spans[pi]) for (let i = sp.from; i < sp.to; i++) bridgeSegs.push({ a: d.pts[i], b: d.pts[i + 1], ha: deckH(pi, sp.from, i), hb: deckH(pi, sp.from, i + 1), reach: d.w.width / 2 + 5 });
   });
   const pedDeckRuns = (g: Dense): { from: number; to: number; y: number[] }[] => {
     if (!bridgeSegs.length || g.w.kind !== 'ped' || g.w.sub === 'crossing' || g.w.highway === 'steps') return [];
@@ -340,7 +698,7 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
     const runs = spans.length ? splitRuns(g.pts.length, spans) : [{ from: 0, to: g.pts.length - 1, deck: false }];
     for (const run of runs) {
       if (run.deck) {
-        const ys = plan.heights[pi!].slice(run.from, run.to + 1).map((y) => y + lift);
+        const ys = plan.heights[pi!].slice(run.from, run.to + 1).map((_, k) => deckH(pi!, run.from, run.from + k) + lift);
         const pts = g.pts.slice(run.from, run.to + 1);
         for (const c of clipPolylineWithValues(pts, ys, bounds)) pieces.push({ way: g.w, pts: c.pts, deckY: c.vals, derived: true });
         clipTo(g.w, pts, ys, true);
@@ -373,8 +731,8 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
     }
   });
 
-  // reference segments of car and rail ways on the ground, for keeping piers out of the road below
-  const below = groundWays.filter((g) => g.w.kind !== 'ped');
+  // every car and rail way, on the ground or on a deck: a pier never stands in a carriageway, whichever level it is on
+  const below = dense.filter((g) => g.w.kind !== 'ped');
 
   const clean = (piece: Piece): Piece | null => {
     if (piece.pts.length < 2) return null;
@@ -392,17 +750,51 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
     }
     return pts.length < 2 ? null : { ...piece, pts, deckY: ys };
   };
+  // where car decks overlap, their ribbons share one surface (DeckBlend)
+  const blend = new DeckBlend(meshPieces.map(clean).filter((c): c is Piece => !!c && !!c.deckY && c.way.kind === 'car').map((c) => ({ way: c.way, pts: c.pts, y: c.deckY!.map((y) => y - (c.derived ? roadLift(c.way) : 0)) })));
+  res.stats.deckJunctions = blend.count;
+  // the ends of car deck pieces that meet another deck (an end or a vertex of another deck way): joints, not landings
+  const joints = new Set<string>();
+  {
+    const carDeckPieces = meshPieces.map(clean).filter((c): c is Piece => !!c && !!c.deckY && c.way.kind === 'car');
+    const at = new Map<string, Set<number>>();
+    for (const c of carDeckPieces) for (const p of c.pts) { const k = endKey(p); const st = at.get(k); if (st) st.add(c.way.id); else at.set(k, new Set([c.way.id])); }
+    const endCount = new Map<string, number>();
+    for (const c of carDeckPieces) for (const p of [c.pts[0], c.pts[c.pts.length - 1]]) endCount.set(endKey(p), (endCount.get(endKey(p)) ?? 0) + 1);
+    for (const c of carDeckPieces) {
+      for (const p of [c.pts[0], c.pts[c.pts.length - 1]]) {
+        const k = endKey(p);
+        if ((at.get(k)?.size ?? 0) > 1 || (endCount.get(k) ?? 0) > 1) joints.add(k);
+      }
+    }
+  }
   for (const piece of pieces) {
     const c = clean(piece);
-    if (c) emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { mesh: false });
+    if (c) emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { mesh: false, blend, joints });
   }
-  for (const piece of meshPieces) {
-    const c = clean(piece);
+  // the car decks' footprints: a sidewalk's slab is not solid where it overlaps one (it would be a step in the carriageway)
+  const carDecks = new DeckFootprints();
+  const cleaned = trimDeckJoins(meshPieces.map(clean));
+  cleaned.forEach((c) => { if (c && c.deckY && c.way.kind === 'car') carDecks.add(c.pts, c.way.width / 2); });
+  // ... and the carriageways on the ground: a footbridge or a rail deck that crosses one too low for a car to pass under is not
+  // solid there (the profile could not lift it clear: its slab stood in the lane, a metre over the road)
+  const carRoads = new DeckFootprints();
+  cleaned.forEach((c) => { if (c && !c.deckY && c.way.kind === 'car') carRoads.add(c.pts, c.way.width / 2); });
+  const deckEnds: DeckEnd[] = [];
+  const weld = { segs: [] as WeldSegment[], polys: [] as WeldPolygon[], piece: 0 };
+  for (const c of cleaned) {
     if (!c) continue;
     if (c.way.sub === 'crossing') continue; // crossings are zebra markings now (below)
-    emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { json: false });
+    weld.piece++;
+    emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { json: false, carDecks, carRoads, ends: deckEnds, blend, joints, weld });
     if (c.way.kind === 'car') res.runs.push({ way: c.way, pts: c.pts, deckY: c.deckY, startJ: c.startJ, endJ: c.endJ });
   }
+  res.stats.deckCaps = addDeckCaps(res, deckEnds, thickness, weld.polys);
+  const welded = weldDeckTops(res.collision, weld.segs, weld.polys, 4, [bounds.minX, bounds.minZ], ground);
+  res.stats.deckLevels = welded.levels;
+  res.stats.weldedTriangles = welded.triangles;
+  res.stats.weldFailedLevels = welded.failedLevels;
+  res.stats.deckClashes = welded.clashes ?? 0;
 
   // markings
   const mk = res.markings;
@@ -460,7 +852,7 @@ function emitPiece(
   thickness: number,
   below: { w: RoadWay; pts: V2[] }[],
   derived = false,
-  what: { json?: boolean; mesh?: boolean } = {},
+  what: { json?: boolean; mesh?: boolean; carDecks?: DeckFootprints; carRoads?: DeckFootprints; ends?: DeckEnd[]; blend?: DeckBlend; joints?: Set<string>; weld?: { segs: WeldSegment[]; polys: WeldPolygon[]; piece: number } } = {},
 ): void {
   const wantJson = what.json ?? true;
   const wantMesh = what.mesh ?? true;
@@ -486,11 +878,17 @@ function emitPiece(
   const topY: number[] = [];
   const lY: number[] = [];
   const rY: number[] = [];
+  // a deck the pipeline made is drawn `lift` over the surface it is solid at (see the collision slab below)
+  const drop = deckY && derived ? lift : 0;
   for (let i = 0; i < n; i++) {
     if (deckY) {
-      topY.push(deckY[i]);
-      lY.push(deckY[i]);
-      rY.push(deckY[i]);
+      // where decks overlap every ribbon takes the blended height, corner by corner, so overlapping ribbons coincide
+      const col = deckY[i] - drop;
+      const pl = what.blend;
+      const rk = way.kind === 'car' ? deckRank(way) : Infinity;
+      topY.push((pl ? pl.adjust(pts[i][0], pts[i][1], col, rk) : col) + drop);
+      lY.push((pl ? pl.adjust(left[i][0], left[i][1], col, rk) : col) + drop);
+      rY.push((pl ? pl.adjust(right[i][0], right[i][1], col, rk) : col) + drop);
     } else {
       const c = ground(pts[i][0], pts[i][1]);
       const l = ground(left[i][0], left[i][1]);
@@ -498,6 +896,28 @@ function emitPiece(
       topY.push(c + lift);
       lY.push(Math.max(c - 0.5, Math.min(c + 0.5, l)) + lift);
       rY.push(Math.max(c - 0.5, Math.min(c + 0.5, r)) + lift);
+    }
+  }
+
+  if (deckY && n >= 2) {
+    // An end that lands (on its own, not a joint with another deck, and within 1.5 m of the ground) is brought to the ground's
+    // height there, the move fading out over up to 20 m: whatever the blending above or the carving below did, the deck's top
+    // equals the heightmap where the car crosses from one to the other.
+    const s: number[] = [0];
+    for (let i = 1; i < n; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const len = s[n - 1];
+    const L = Math.max(1, Math.min(20, len / 2));
+    const fade = (d: number) => { const u = Math.max(0, Math.min(1, d / L)); return 1 - u * u * (3 - 2 * u); };
+    for (const [i, from] of [[0, (k: number) => s[k]], [n - 1, (k: number) => len - s[k]]] as const) {
+      const e = ground(pts[i][0], pts[i][1]) - (topY[i] - drop);
+      // a joint with another deck is in the air, unless it is on the ground (the decks of a fork that starts at a junction)
+      if (what.joints?.has(endKey(pts[i])) && Math.abs(e) > JOINT_LAND) continue;
+      // (no more than 6% of extra grade: a short piece far off the ground is not brought down in a metre)
+      if (Math.abs(e) > Math.min(1.5, 0.06 * L) || Math.abs(e) < 1e-4) continue;
+      for (let k = 0; k < n; k++) {
+        const f = e * fade(from(k));
+        topY[k] += f; lY[k] += f; rY[k] += f;
+      }
     }
   }
 
@@ -581,25 +1001,59 @@ function emitPiece(
     }
   }
 
+  // The collision slab. Its top is the road surface without the drawn lift where the deck is one the pipeline made (a derived
+  // bridge, or a sidewalk beside one): the ground road it continues is the heightmap itself, so a lifted deck was a 6 to 10 cm
+  // step at both ends. An end that lands on the ground goes a little under it at each corner, so the wheel rays pass from the
+  // heightmap to the deck where the two cross, with no step and no edge standing proud of the road.
+  const colL: number[] = [];
+  const colR: number[] = [];
+  for (let i = 0; i < n; i++) { colL.push(lY[i] - drop); colR.push(rY[i] - drop); }
+  for (const i of [0, n - 1]) {
+    const gc = ground(pts[i][0], pts[i][1]);
+    const top = (colL[i] + colR[i]) / 2;
+    if (Math.abs(top - gc) > LANDED) continue;
+    // (a corner over ground that falls away, the side of an embankment the end stands on, stays at the deck's height: brought
+    // down to that ground it tilted the deck's end a metre sideways under the lanes)
+    const gl = ground(left[i][0], left[i][1]) - BURY, gr = ground(right[i][0], right[i][1]) - BURY;
+    if (gl > colL[i] - MAX_BURY) colL[i] = Math.min(colL[i], gl);
+    if (gr > colR[i] - MAX_BURY) colR[i] = Math.min(colR[i], gr);
+    res.stats.landedDeckEnds = (res.stats.landedDeckEnds ?? 0) + 1;
+  }
+  // a sidewalk's slab where it overlaps a car deck is left out: the car deck is the floor there
+  const solid: boolean[] = [];
+  for (let i = 0; i + 1 < n; i++) {
+    const corners = [left[i], right[i], left[i + 1], right[i + 1]];
+    const lowOver = way.kind !== 'car' && !!what.carRoads && corners.some((q) => what.carRoads!.contains(q[0], q[1], -0.5) && Math.min(colL[i], colR[i], colL[i + 1], colR[i + 1]) - thickness < ground(q[0], q[1]) + LOW_DECK);
+    const over = lowOver || (way.kind === 'ped' && !!what.carDecks && corners.some((q) => what.carDecks!.contains(q[0], q[1])));
+    solid.push(!over);
+    if (over) res.stats.pedSlabSegmentsDropped = (res.stats.pedSlabSegmentsDropped ?? 0) + 1;
+  }
   const col = res.collision;
   const cb = col.vertexCount;
   for (let i = 0; i < n; i++) {
-    col.vertex(left[i][0], lY[i], left[i][1], 0, 1, 0);
-    col.vertex(right[i][0], rY[i], right[i][1], 0, 1, 0);
+    col.vertex(left[i][0], colL[i], left[i][1], 0, 1, 0);
+    col.vertex(right[i][0], colR[i], right[i][1], 0, 1, 0);
   }
   for (let i = 0; i < n; i++) {
-    col.vertex(left[i][0], lY[i] - thickness, left[i][1], 0, 1, 0);
-    col.vertex(right[i][0], rY[i] - thickness, right[i][1], 0, 1, 0);
+    col.vertex(left[i][0], colL[i] - thickness, left[i][1], 0, 1, 0);
+    col.vertex(right[i][0], colR[i] - thickness, right[i][1], 0, 1, 0);
   }
-  col.indices.push(...ribbonIndices(n, cb));
-  col.indices.push(...ribbonIndices(n, cb + 2 * n, true));
   const topL = (i: number) => cb + 2 * i;
   const topR = (i: number) => cb + 2 * i + 1;
   const botL = (i: number) => cb + 2 * n + 2 * i;
   const botR = (i: number) => cb + 2 * n + 2 * i + 1;
   for (let i = 0; i + 1 < n; i++) {
+    if (!solid[i]) continue;
+    // top (up), underside (down), and the two sides; a car deck's top is welded into its level's one surface instead (deckWeld.ts)
+    if (what.weld && way.kind === 'car') {
+      what.weld.segs.push({ piece: what.weld.piece, rank: deckRank(way), a: pts[i], b: pts[i + 1], half, l0: left[i], r0: right[i], l1: left[i + 1], r1: right[i + 1], hl0: colL[i], hr0: colR[i], hl1: colL[i + 1], hr1: colR[i + 1] });
+    } else col.indices.push(topL(i), topR(i), topL(i + 1), topL(i + 1), topR(i), topR(i + 1));
+    col.indices.push(botL(i), botL(i + 1), botR(i), botL(i + 1), botR(i + 1), botR(i));
     col.indices.push(topL(i), topL(i + 1), botL(i), botL(i), topL(i + 1), botL(i + 1));
     col.indices.push(topR(i), botR(i), topR(i + 1), topR(i + 1), botR(i), botR(i + 1));
+  }
+  if (what.ends && way.kind === 'car') {
+    for (const i of [0, n - 1]) what.ends.push({ x: pts[i][0], z: pts[i][1], l: left[i], r: right[i], y: (lY[i] + rY[i]) / 2, cy: (colL[i] + colR[i]) / 2, gray: color[0], way, drop, blend: what.blend });
   }
 
   // piers every ~30 m where the deck is well above the ground
@@ -623,18 +1077,346 @@ function emitPiece(
     res.stats.maxDeckHeightAboveGround = Math.max(res.stats.maxDeckHeightAboveGround, y - g);
     const bottom = y - thickness;
     if (bottom - g < 2.5) continue;
-    if (overRoad(p, below.filter((b) => b.w !== way))) continue;
     const halfW = way.kind === 'ped' ? 0.4 : Math.max(0.7, Math.min(4, way.width * 0.3));
     const halfL = way.kind === 'ped' ? 0.4 : 0.9;
+    // (the whole pier, not only its centre: a wide one reached 4 m into the road beside it)
+    if (overRoad(p, below.filter((b) => b.w !== way), Math.max(halfW, halfL))) continue;
     addOrientedBox(c, p[0], p[1], g - 0.5, bottom, dir, halfL, halfW, colC);
     addOrientedBox(col, p[0], p[1], g - 0.5, bottom, dir, halfL, halfW);
     res.stats.piers++;
   }
 }
 
-function overRoad(p: V2, below: { w: RoadWay; pts: V2[] }[]): boolean {
+/**
+ * A deck's heights (`hs` at `pts`) with each end (`start`, `end`: those that land) moved to the ground's height there and the move faded out (smoothstep) over the
+ * first and last `blend` metres (at most half the deck each), so the deck meets the ground exactly and keeps a smooth profile.
+ */
+export function landDeckEnds(pts: V2[], hs: number[], ground: (x: number, z: number) => number, blend = 20, start = true, end = true): number[] {
+  const n = pts.length;
+  if (n < 2) return hs.slice();
+  const s: number[] = [0];
+  for (let i = 1; i < n; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const len = s[n - 1];
+  const L = Math.max(1, Math.min(blend, len / 2));
+  // (an end more than 1.5 m off the ground is not landing: it is left as it is)
+  const off = (e: number) => (Math.abs(e) <= Math.min(1.5, 0.06 * L) ? e : 0);
+  const e0 = start ? off(ground(pts[0][0], pts[0][1]) - hs[0]) : 0;
+  const e1 = end ? off(ground(pts[n - 1][0], pts[n - 1][1]) - hs[n - 1]) : 0;
+  const fade = (d: number) => { const u = Math.max(0, Math.min(1, d / L)); return 1 - u * u * (3 - 2 * u); };
+  return hs.map((h, i) => h + e0 * fade(s[i]) + e1 * fade(len - s[i]));
+}
+
+/** A deck piece's end, by position (0.5 m). */
+const endKey = (p: V2) => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`;
+
+/** A deck end this close (m) to the ground at its centre has landed: its collision slab goes under the ground there. */
+const LANDED = 0.3;
+/** A joint of decks this close (m) to the ground lands like an end on its own: every deck at it is brought to the ground alike. */
+const JOINT_LAND = 0.6;
+/** A footbridge's or a rail deck's underside less than this over a carriageway below it leaves the slab out there, m. */
+const LOW_DECK = 4;
+/** How far under the ground a landed deck end's slab goes at each corner, m. */
+const BURY = 0.03;
+/** A landed end's corner is never taken further down than this (m) to meet the ground. */
+const MAX_BURY = 0.6;
+
+/** The car decks' footprints (each segment's centreline and half width), on a 16 m grid. */
+export class DeckFootprints {
+  private readonly segs: { ax: number; az: number; bx: number; bz: number; half: number }[] = [];
+  private readonly cells = new Map<string, number[]>();
+
+  /** One segment, for `containsStrip`. */
+  addStrip(a: V2, b: V2, half: number) {
+    this.add([a, b], half);
+  }
+
+  /** Inside one of the segments' strips: beside it within its half width, between its ends (not past them). */
+  containsStrip(x: number, z: number): boolean {
+    for (const k of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = this.segs[k];
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      if (l2 === 0) { if (Math.hypot(x - s.ax, z - s.az) <= s.half) return true; continue; }
+      const t = ((x - s.ax) * dx + (z - s.az) * dz) / l2;
+      if (t < 0 || t > 1) continue;
+      if (Math.hypot(x - (s.ax + t * dx), z - (s.az + t * dz)) <= s.half) return true;
+    }
+    return false;
+  }
+
+  add(pts: V2[], half: number) {
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const k = this.segs.length;
+      const a = pts[i], b = pts[i + 1];
+      this.segs.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], half });
+      for (let gx = Math.floor((Math.min(a[0], b[0]) - half) / 16); gx <= Math.floor((Math.max(a[0], b[0]) + half) / 16); gx++) {
+        for (let gz = Math.floor((Math.min(a[1], b[1]) - half) / 16); gz <= Math.floor((Math.max(a[1], b[1]) + half) / 16); gz++) {
+          const key = `${gx},${gz}`;
+          const l = this.cells.get(key);
+          if (l) l.push(k); else this.cells.set(key, [k]);
+        }
+      }
+    }
+  }
+
+  /** Whether (x, z) is on a car deck (a little inside its edge). */
+  contains(x: number, z: number, inset = 0.1): boolean {
+    for (const k of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = this.segs[k];
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / l2));
+      if (Math.hypot(x - (s.ax + t * dx), z - (s.az + t * dz)) < s.half - inset) return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Where car decks overlap (a crossing or a fork on a bridge, two ways meeting at an angle, a ramp leaving a viaduct), each ribbon is
+ * flat across its width at its own centreline's height, so where two cross at different grades their overlapping parts differ by
+ * the grade times the distance from the node: a step in the carriageway (0.35 m 7 m out at 5%). This blends them the way the
+ * carving blends the ground: a deck vertex takes the mean of the heights of every deck at its own level (within 1.5 m) whose
+ * carriageway is near it, each weighted by the distance from that carriageway's edge (inside it: full weight), so where ribbons
+ * overlap they have one surface, and a ribbon on its own keeps its height.
+ */
+export class DeckBlend {
+  private readonly segs: { ax: number; az: number; bx: number; bz: number; ha: number; hb: number; half: number; rank: number }[] = [];
+  private readonly cells = new Map<string, number[]>();
+  /** How many deck vertices are shared by two or more ways (junctions on decks). */
+  readonly count: number;
+
+  constructor(pieces: { way: RoadWay; pts: V2[]; y: number[] }[]) {
+    const at = new Map<string, Set<number>>();
+    for (const pc of pieces) {
+      for (let i = 0; i < pc.pts.length; i++) {
+        const k = `${Math.round(pc.pts[i][0] * 2)},${Math.round(pc.pts[i][1] * 2)}`;
+        const set = at.get(k);
+        if (set) set.add(pc.way.id); else at.set(k, new Set([pc.way.id]));
+        if (i + 1 >= pc.pts.length) continue;
+        const a = pc.pts[i], b = pc.pts[i + 1], half = pc.way.width / 2;
+        const j = this.segs.length;
+        this.segs.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], ha: pc.y[i], hb: pc.y[i + 1], half, rank: deckRank(pc.way) });
+        const r = half + REACH;
+        for (let gx = Math.floor((Math.min(a[0], b[0]) - r) / 16); gx <= Math.floor((Math.max(a[0], b[0]) + r) / 16); gx++) {
+          for (let gz = Math.floor((Math.min(a[1], b[1]) - r) / 16); gz <= Math.floor((Math.max(a[1], b[1]) + r) / 16); gz++) {
+            const key = `${gx},${gz}`;
+            const l = this.cells.get(key);
+            if (l) l.push(j); else this.cells.set(key, [j]);
+          }
+        }
+      }
+    }
+    let n = 0;
+    for (const set of at.values()) if (set.size > 1) n++;
+    this.count = n;
+  }
+
+  /**
+   * The height a deck vertex at (x, z) whose own height is `y` takes where decks overlap. A vertex of a lesser road (`rank`) that
+   * lies on a greater one's carriageway takes that carriageway's height (a ramp or a side street joining a viaduct meets its
+   * cross-section, as a minor road meets a major one, instead of standing on it at its own grade: half a metre proud 7 m in).
+   */
+  adjust(x: number, z: number, y: number, rank = Infinity): number {
+    let sw = 0, sy = 0;
+    let top = -Infinity, topH = 0;
+    for (const j of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = this.segs[j];
+      if (s.rank <= rank || s.rank <= top) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : ((x - s.ax) * dx + (z - s.az) * dz) / l2;
+      if (t < 0 || t > 1) continue;
+      if (Math.hypot(x - (s.ax + t * dx), z - (s.az + t * dz)) > s.half) continue;
+      const hy = s.ha + (s.hb - s.ha) * t;
+      if (Math.abs(hy - y) > DOMINATE) continue;
+      top = s.rank;
+      topH = hy;
+    }
+    if (top > -Infinity) return topH;
+    // (a lesser road beside does not bend a greater one: its vertices blend only with roads at least as great)
+    for (const j of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = this.segs[j];
+      if (s.rank < rank && rank !== Infinity) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / l2));
+      const d = Math.hypot(x - (s.ax + t * dx), z - (s.az + t * dz));
+      if (d > s.half + REACH) continue;
+      const hy = s.ha + (s.hb - s.ha) * t;
+      // a deck far above or below is another level (one passing over or under), not one to blend with
+      if (Math.abs(hy - y) > 0.6) continue;
+      const edge = Math.max(0, d - s.half) + 0.35;
+      const w = 1 / (edge * edge * edge);
+      sw += w;
+      sy += w * hy;
+    }
+    return sw > 0 ? sy / sw : y;
+  }
+}
+
+/**
+ * A lesser car deck that joins a greater one (a ramp or a side street meeting a viaduct at a node in its middle, or at its end) is
+ * drawn and made solid only up to `TRIM_IN` inside the greater one's kerb: its ribbon, flat across at its own grade, stood up to
+ * half a metre proud of the greater carriageway where it lay over it (a step under the wheels of the traffic on the greater road).
+ * The greater deck's surface is the junction there; the lesser one's end takes its height at the kerb (see `DeckBlend.adjust`).
+ */
+function trimDeckJoins(pieces: (Piece | null)[]): (Piece | null)[] {
+  const segs: { ax: number; az: number; bx: number; bz: number; half: number; rank: number; ha: number; hb: number; k: number }[] = [];
+  const cells = new Map<string, number[]>();
+  pieces.forEach((c, k) => {
+    if (!c || !c.deckY || c.way.kind !== 'car') return;
+    for (let i = 0; i + 1 < c.pts.length; i++) {
+      const a = c.pts[i], b = c.pts[i + 1], half = c.way.width / 2;
+      const j = segs.length;
+      segs.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], half, rank: deckRank(c.way), ha: c.deckY[i], hb: c.deckY[i + 1], k });
+      for (let gx = Math.floor((Math.min(a[0], b[0]) - half) / 16); gx <= Math.floor((Math.max(a[0], b[0]) + half) / 16); gx++) {
+        for (let gz = Math.floor((Math.min(a[1], b[1]) - half) / 16); gz <= Math.floor((Math.max(a[1], b[1]) + half) / 16); gz++) {
+          const key = `${gx},${gz}`;
+          const l = cells.get(key);
+          if (l) l.push(j); else cells.set(key, [j]);
+        }
+      }
+    }
+  });
+  // inside a greater deck's carriageway (more than `inset` in from its kerb), at about its height
+  const under = (x: number, z: number, y: number, rank: number, k: number, inset = TRIM_IN): boolean => {
+    for (const j of cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = segs[j];
+      if (s.k === k || s.rank <= rank) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : ((x - s.ax) * dx + (z - s.az) * dz) / l2;
+      if (t < -0.02 || t > 1.02) continue;
+      const tc = Math.max(0, Math.min(1, t));
+      if (Math.hypot(x - (s.ax + tc * dx), z - (s.az + tc * dz)) > s.half - inset) continue;
+      if (Math.abs(s.ha + (s.hb - s.ha) * tc - y) > DOMINATE) continue;
+      return true;
+    }
+    return false;
+  };
+  return pieces.map((c, k) => {
+    if (!c || !c.deckY || c.way.kind !== 'car' || c.pts.length < 2) return c;
+    const rank = deckRank(c.way);
+    const hw = c.way.width / 2;
+    let pts = c.pts, ys = c.deckY;
+    // the whole cross-section of the lesser deck there is on the greater one (its kerbs too, give or take): a T, not a fork,
+    // where the lesser one's outer side is off the greater deck and must stay
+    const covered = (x: number, z: number, y: number, ux: number, uz: number): boolean =>
+      under(x, z, y, rank, k) && under(x - uz * hw, z + ux * hw, y, rank, k, -0.3) && under(x + uz * hw, z - ux * hw, y, rank, k, -0.3);
+    for (const fromEnd of [false, true]) {
+      if (fromEnd) { pts = [...pts].reverse(); ys = [...ys].reverse(); }
+      {
+        const l0 = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]) || 1;
+        if (!covered(pts[0][0], pts[0][1], ys[0], (pts[1][0] - pts[0][0]) / l0, (pts[1][1] - pts[0][1]) / l0)) { if (fromEnd) { pts = [...pts].reverse(); ys = [...ys].reverse(); } continue; }
+      }
+      const total = polylineLength(pts);
+      // walk in from the end in 0.25 m steps until out from under the greater deck
+      let s = 0, i = 0, cut: { i: number; t: number } | null = null;
+      while (i + 1 < pts.length && s < total * 0.6) {
+        const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+        let found = false;
+        for (let d = 0; d < l; d += 0.25) {
+          const t = l > 0 ? d / l : 0;
+          const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, z = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t;
+          if (!covered(x, z, ys[i] + (ys[i + 1] - ys[i]) * t, (pts[i + 1][0] - pts[i][0]) / l, (pts[i + 1][1] - pts[i][1]) / l)) { cut = { i, t }; found = true; break; }
+        }
+        if (found) break;
+        s += l;
+        i++;
+      }
+      if (cut) {
+        const a = pts[cut.i], b = pts[cut.i + 1];
+        const p: V2 = [a[0] + (b[0] - a[0]) * cut.t, a[1] + (b[1] - a[1]) * cut.t];
+        const y = ys[cut.i] + (ys[cut.i + 1] - ys[cut.i]) * cut.t;
+        const rest = pts.slice(cut.i + 1), restY = ys.slice(cut.i + 1);
+        if (Math.hypot(p[0] - rest[0][0], p[1] - rest[0][1]) > 0.01) { pts = [p, ...rest]; ys = [y, ...restY]; } else { pts = rest; ys = restY; }
+      }
+      if (fromEnd) { pts = [...pts].reverse(); ys = [...ys].reverse(); }
+      if (pts.length < 2) return c;
+    }
+    return pts === c.pts ? c : { ...c, pts, deckY: ys, startJ: undefined, endJ: undefined };
+  });
+}
+/** How far inside a greater deck's kerb a lesser deck that joins it stops (m): enough overlap for one welded surface. */
+const TRIM_IN = 0.5;
+
+/** Decks within this of a deck vertex (m beyond their carriageway's edge) blend into its height. */
+const REACH = 2;
+/** A lesser deck's vertex on a greater deck's carriageway and within this of its height (m) takes that height (see `adjust`). */
+const DOMINATE = 1.5;
+/** Which of two decks is the greater road: the higher class, then the wider. */
+function deckRank(w: RoadWay): number {
+  return rankOf(w.highway) * 100 + w.width;
+}
+
+/** The end of a car deck piece: its centre, its two corners, the drawn top and the collision top there. */
+export interface DeckEnd { x: number; z: number; l: V2; r: V2; y: number; cy: number; gray: number; way: RoadWay; drop: number; blend?: DeckBlend }
+
+/**
+ * Where two car deck pieces meet (the ends of two bridge ways at a shared node, a bridge the pipeline made against a mapped one),
+ * their ribbons end square to their own directions, so at an angle there is a wedge-shaped gap on the outside of the bend (a
+ * 7-lane motorway bending 10 degrees leaves a 2 m hole under its outer lane). Each such joint gets a cap: the convex hull of the
+ * ends' corners, at their height, drawn (asphalt over a concrete underside) and solid (a slab like the decks'). Returns how many.
+ */
+export function addDeckCaps(res: RoadMeshes, ends: DeckEnd[], thickness: number, weld?: WeldPolygon[]): number {
+  const used = new Uint8Array(ends.length);
+  let caps = 0;
+  for (let i = 0; i < ends.length; i++) {
+    if (used[i]) continue;
+    const group = [i];
+    for (let j = i + 1; j < ends.length; j++) if (!used[j] && Math.hypot(ends[j].x - ends[i].x, ends[j].z - ends[i].z) < 0.6) group.push(j);
+    if (group.length < 2) continue;
+    for (const k of group) used[k] = 1;
+    const pts: V2[] = [];
+    for (const k of group) pts.push(ends[k].l, ends[k].r, [ends[k].x, ends[k].z]);
+    const hull = convexHull(pts);
+    if (hull.length < 3) continue;
+    const cys = group.map((k) => ends[k].cy);
+    const cy = cys.reduce((a, b) => a + b, 0) / cys.length;
+    const drop = Math.min(...group.map((k) => ends[k].drop));
+    const pl = ends[group[0]].blend;
+    // each corner at the blended deck height there (as the ribbons are), else at the ends' mean height
+    const at = (q: V2) => (pl ? pl.adjust(q[0], q[1], cy) : cy);
+    const g = ends[group[0]].gray;
+    // drawn: the top over the asphalt (a hair under the ribbons, so they win where they overlap), the underside in concrete
+    const top = res.asphalt.vertexCount;
+    for (const q of hull) res.asphalt.vertex(q[0], at(q) + drop - 0.005, q[1], 0, 1, 0, g, g, g * 1.02);
+    for (let k = 1; k + 1 < hull.length; k++) res.asphalt.indices.push(top, top + k + 1, top + k);
+    const cg = srgbToLinear(0.55);
+    const und = res.concrete.vertexCount;
+    for (const q of hull) res.concrete.vertex(q[0], at(q) + drop - thickness, q[1], 0, -1, 0, cg, cg, cg);
+    for (let k = 1; k + 1 < hull.length; k++) res.concrete.indices.push(und, und + k, und + k + 1);
+    // solid: welded into the level's surface (deckWeld.ts), or a slab at the collision top
+    if (weld) { weld.push({ ring: hull, heights: hull.map(at) }); caps++; continue; }
+    const cb = res.collision.vertexCount;
+    for (const q of hull) res.collision.vertex(q[0], at(q), q[1], 0, 1, 0);
+    for (const q of hull) res.collision.vertex(q[0], at(q) - thickness, q[1], 0, 1, 0);
+    const m = hull.length;
+    for (let k = 1; k + 1 < m; k++) {
+      res.collision.indices.push(cb, cb + k + 1, cb + k);
+      res.collision.indices.push(cb + m, cb + m + k, cb + m + k + 1);
+    }
+    caps++;
+  }
+  return caps;
+}
+
+/** Convex hull of points in (x, z), counter-clockwise seen from above (+y), without collinear points. */
+function convexHull(pts: V2[]): V2[] {
+  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o: V2, a: V2, b: V2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: V2[] = [];
+  for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 1e-9) lower.pop(); lower.push(q); }
+  const upper: V2[] = [];
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 1e-9) upper.pop(); upper.push(q); }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+function overRoad(p: V2, below: { w: RoadWay; pts: V2[] }[], extent = 0): boolean {
   for (const b of below) {
-    const reach = b.w.width / 2 + 1.5;
+    const reach = b.w.width / 2 + 1.5 + extent;
     for (let i = 0; i + 1 < b.pts.length; i++) {
       const a = b.pts[i], c = b.pts[i + 1];
       if (p[0] < Math.min(a[0], c[0]) - reach || p[0] > Math.max(a[0], c[0]) + reach || p[1] < Math.min(a[1], c[1]) - reach || p[1] > Math.max(a[1], c[1]) + reach) continue;

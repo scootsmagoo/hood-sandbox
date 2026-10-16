@@ -378,6 +378,10 @@ export interface LaneOptions {
   snap?: number;
 }
 
+/** A signal pole stands at least this far from every lane's and turn's centreline (m), moving out up to `HEAD_MAX_MOVE` to get there. */
+const HEAD_CLEAR = 1.8;
+const HEAD_MAX_MOVE = 3;
+
 export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: LaneOptions = {}): LanesFile {
   const snap = opts.snap ?? SNAP;
   const roads: Road[] = [];
@@ -823,6 +827,38 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
   }
 
   // ---- junction records, signal heads
+  // A head's pole stands on the kerb to the right of its approach, unless a lane or a turn passes that close (a right turn from
+  // the outer lane sweeps round the corner just past the stop bar): then it moves further out, so no car's path meets the pole.
+  const headGrid = new Map<string, number[]>();
+  const headSegs: number[] = [];
+  for (const e of edges) {
+    const p = e.pts;
+    for (let k = 0; k + 5 < p.length; k += 3) {
+      const id = headSegs.length / 4;
+      headSegs.push(p[k], p[k + 2], p[k + 3], p[k + 5]);
+      for (let gx = Math.floor(Math.min(p[k], p[k + 3]) / 16); gx <= Math.floor(Math.max(p[k], p[k + 3]) / 16); gx++) {
+        for (let gz = Math.floor(Math.min(p[k + 2], p[k + 5]) / 16); gz <= Math.floor(Math.max(p[k + 2], p[k + 5]) / 16); gz++) {
+          const key = `${gx},${gz}`;
+          const l = headGrid.get(key);
+          if (l) l.push(id); else headGrid.set(key, [id]);
+        }
+      }
+    }
+  }
+  const pathDist = (x: number, z: number): number => {
+    let best = Infinity;
+    for (let gx = Math.floor((x - 4) / 16); gx <= Math.floor((x + 4) / 16); gx++) {
+      for (let gz = Math.floor((z - 4) / 16); gz <= Math.floor((z + 4) / 16); gz++) {
+        for (const id of headGrid.get(`${gx},${gz}`) ?? []) {
+          const ax = headSegs[id * 4], az = headSegs[id * 4 + 1], dx = headSegs[id * 4 + 2] - ax, dz = headSegs[id * 4 + 3] - az;
+          const l2 = dx * dx + dz * dz;
+          const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+          best = Math.min(best, Math.hypot(x - (ax + t * dx), z - (az + t * dz)));
+        }
+      }
+    }
+    return best;
+  };
   const records: LanesJunction[] = [];
   for (const node of nodes) {
     if (!connByNode.get(node)!.length && !node.legs.some((l) => l.arrive.length)) continue;
@@ -840,12 +876,15 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
         const offs = lanes.map((e) => laneOffset(leg.road, e));
         const outer = Math.max(...offs);
         // the stop line is laid across the middle of the approach lanes
-        const off = outer + leg.road.lw / 2 + 0.9 - offs.reduce((a, v) => a + v, 0) / offs.length;
+        let off = outer + leg.road.lw / 2 + 0.9 - offs.reduce((a, v) => a + v, 0) / offs.length;
+        const at = (o: number): [number, number] => [l.stopLine![0] + rx * o + tx * 1.5, l.stopLine![2] + rz * o + tz * 1.5];
+        for (let moved = 0; moved < HEAD_MAX_MOVE && pathDist(...at(off)) < HEAD_CLEAR; moved += 0.25) off += 0.25;
+        const [hx, hz] = at(off);
         rec.heads!.push({
           leg: leg.srcIndex,
-          x: round(l.stopLine[0] + rx * off + tx * 1.5, 2),
+          x: round(hx, 2),
           y: round(l.stopLine[1], 2),
-          z: round(l.stopLine[2] + rz * off + tz * 1.5, 2),
+          z: round(hz, 2),
           yaw: round(Math.atan2(l.dir[0], l.dir[1]), 3),
         });
       });

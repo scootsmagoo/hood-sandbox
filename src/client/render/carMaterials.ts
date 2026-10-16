@@ -11,6 +11,7 @@
  * traffic uses the same code with per-instance attributes in place of per-car uniforms.
  */
 import * as THREE from 'three';
+import { addSodium } from './look/sodium';
 
 /** The sky colours the reflections take; `EntityViews` updates them from the time of day. */
 export const CAR_SKY = {
@@ -236,6 +237,8 @@ metalnessFactor *= 1.0 - dirtMask;`,
 }
 #include <opaque_fragment>`,
       );
+    // sodium street light from the nearest lamps at night (look/sodium.ts); a no-op by day. Paint is bright and glossy, so a third.
+    addSodium(shader, 0.35);
   };
   return mat;
 }
@@ -268,8 +271,18 @@ export function sharedCarMaterials() {
   return shared;
 }
 
+/**
+ * A car window: see-through, seen from both sides. three.js draws a transparent double-sided material twice (inside
+ * faces, then outside faces), flipping `side` and setting `needsUpdate` around each draw, and a changed `version`
+ * means a new shader program lookup (parameters, cache key string) for each draw, every frame, and a program switch
+ * between the two passes. One pass (`forceSinglePass`) draws every face once. The only difference is the blend order
+ * where two panes overlap on screen (the dark tint is nearly the same on both, so the pixels agree to within a
+ * level: rendering the same frames both ways differed by 0 of 255 on every pixel).
+ */
 export function newGlass(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: 0x0f1518, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.MeshStandardMaterial({ color: 0x0f1518, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
+  m.forceSinglePass = true;
+  return m;
 }
 
 export function newPaint(color: number, u: CarUniforms, instanced = false): THREE.MeshStandardMaterial {
