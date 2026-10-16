@@ -376,6 +376,13 @@ function laneLayout(r: RoadInput): { fwd: number; bwd: number; lw: number; odd: 
 export interface LaneOptions {
   /** metres: a free road end this close to another end or road joins it */
   snap?: number;
+  /**
+   * A grid tile's bounds (its seams): a piece of road that ends on them is kept however short (a way whose next node is just across
+   * the seam, 0.2 m in, still has its lanes on this side to meet the neighbour's), and a lane end within 0.3 m of a bounds line is
+   * put on it (a lane offset from a centreline that crosses the seam at an angle ended a few centimetres off it, and its seam port
+   * did not meet the neighbour's).
+   */
+  bounds?: { minX: number; minZ: number; maxX: number; maxZ: number };
 }
 
 /** A signal pole stands at least this far from every lane's and turn's centreline (m), moving out up to `HEAD_MAX_MOVE` to get there. */
@@ -389,7 +396,9 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
   for (const r of roadsIn) {
     if (SKIP.has(r.class) || r.points.length < 2) continue;
     const poly = mkPoly(r.points);
-    if (poly.len < 2) continue;
+    const b = opts.bounds;
+    const onB = (p: number[]) => !!b && (Math.abs(p[0] - b.minX) < 0.01 || Math.abs(p[0] - b.maxX) < 0.01 || Math.abs(p[2] - b.minZ) < 0.01 || Math.abs(p[2] - b.maxZ) < 0.01);
+    if (poly.len < 2 && !(poly.len > 0.05 && (onB(r.points[0]) || onB(r.points[r.points.length - 1])))) continue;
     const lay = laneLayout(r);
     const road: Road = { r, poly, cuts: [], speed: speedLimit(r), fwdLanes: lay.fwd, bwdLanes: lay.bwd, lw: lay.lw, oddMiddle: lay.odd };
     roads.push(road);
@@ -905,6 +914,7 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
     largestComponent: 0,
     largestComponentStreets: 0,
   };
+  if (opts.bounds) snapToBounds(edges, opts.bounds);
   const file: LanesFile = { format: 'hood-lanes', version: 1, edges, junctions: records, stats };
   const conn = connectivity(file);
   stats.largestComponent = round(conn.share, 4);
@@ -1040,4 +1050,26 @@ export function connectivity(file: Pick<LanesFile, 'edges'>): { comp: Int32Array
     if (comp[i] === largest) streetsIn += e.len;
   }
   return { comp, largest, share: total > 0 ? (sizes[largest] ?? 0) / total : 0, streetShare: streets > 0 ? streetsIn / streets : 0, sizes };
+}
+
+/** Puts the ends of lanes (not connectors) that are within 0.3 m of a bounds line on it, along the lane (see `LaneOptions.bounds`). */
+function snapToBounds(edges: Edge[], b: { minX: number; minZ: number; maxX: number; maxZ: number }) {
+  for (const e of edges) {
+    if (e.t !== 0 || e.pts.length < 6) continue;
+    const p = e.pts;
+    for (const [i, j] of [[0, 3], [p.length - 3, p.length - 6]]) {
+      const dx = p[i] - p[j], dy = p[i + 1] - p[j + 1], dz = p[i + 2] - p[j + 2];
+      for (const [axis, line] of [[0, b.minX], [0, b.maxX], [2, b.minZ], [2, b.maxZ]] as const) {
+        const off = line - p[i + axis];
+        if (Math.abs(off) > 0.3 || Math.abs(off) < 1e-4) continue;
+        const d = axis === 0 ? dx : dz;
+        if (Math.abs(d) < 1e-6) continue;
+        const t = off / d;
+        p[i] = Math.round((p[i] + dx * t) * 100) / 100;
+        p[i + 1] = Math.round((p[i + 1] + dy * t) * 100) / 100;
+        p[i + 2] = Math.round((p[i + 2] + dz * t) * 100) / 100;
+        p[i + axis] = line;
+      }
+    }
+  }
 }

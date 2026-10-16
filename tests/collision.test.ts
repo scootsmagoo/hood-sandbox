@@ -114,6 +114,18 @@ describe('footprints from the collision mesh', () => {
   });
 });
 
+describe('floating footprints', () => {
+  it('a skybridge drawn on the corners of the tower it joins starts where it starts, not at the tower\'s ground', () => {
+    // the tower's west wall (x = 20, z -2.5 to 2.5) is the tube's east end: the two share their corners; the tube hangs from 10 to 14 m
+    const m = boxMesh([{ x0: 20, z0: -2.5, x1: 60, z1: 30, h: 90 }, { x0: 0, z0: -2.5, x1: 20, z1: 2.5, h: 14, y0: 10 }]);
+    const fp = new FootprintIndex(m.positions, m.indices, m.indices.length / 3);
+    expect(fp.inside(40, 0, 10)).toBe(true);           // in the tower
+    expect(fp.inside(10, 0.8, 0)).toBe(false);          // the street under the tube
+    expect(fp.inside(10, 11, 0)).toBe(true);            // in the tube
+    expect(fp.nearestWall(10, 0, 4, undefined, 0.8)).toBe(Infinity);
+  });
+});
+
 describe('nobody stays in a wall', () => {
   it('moves someone put inside a building out of it, and says so', async () => {
     const sim = await Simulation.create({ seed: 1, tile: boxTile([{ x0: 20, z0: -10, x1: 40, z1: 10, h: 12 }]), driver: false, parkedCars: 0 });

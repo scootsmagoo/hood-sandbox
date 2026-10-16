@@ -90,6 +90,8 @@ function clipWith(buildings: Building[], ways: RoadWay[], margin: number, minAre
   const stats: ClipStats = { clipped: 0, pieces: 0, dropped: 0, removedAreaM2: 0, failed: 0 };
   const out: Building[] = [];
   for (const b of buildings) {
+    // a skybridge crosses the street over the traffic: nothing of it is in the road
+    if (b.skybridge) { out.push(b); continue; }
     const bb = ringBounds(b.rings[0]);
     const near = new Set<number>();
     for (let x = Math.floor(bb.minX / cell); x <= Math.floor(bb.maxX / cell); x++) {

@@ -136,6 +136,44 @@ def point_hand(p, side, direction):
     p.rot[f'hand_{side}'] = Qf.inverted() @ arc(h0, d)
 
 
+# ---------------------------------------------------------------- hands
+# What the fingers do: (index_a, index_b, fingers_a, fingers_b) are curls in radians (positive closes the
+# hand, negative opens it past the relaxed bind shape), thumb is (a: swing across the palm, b: bend, a: lift).
+FINGER_POSES = {
+    'relaxed': (0, 0, 0, 0, (0, 0, 0), (0, 0, 0)),
+    'open': (-0.45, -0.7, -0.5, -0.8, (0.0, -0.35, 0.0), (0.0, -0.3, 0.0)),
+    'fist': (1.2, 1.1, 1.3, 1.15, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    # a pistol's grip hand: the first finger lies along the frame, the rest curl round the grip
+    'grip': (0.1, 0.0, 1.0, 0.9, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    'trigger': (0.55, 0.45, 1.05, 0.95, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    # the other hand under or over it
+    'support': (0.8, 0.7, 1.0, 0.9, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    # round a steering wheel's rim
+    'wheel': (0.85, 0.75, 0.9, 0.8, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    # a held phone, a cup
+    'hold': (0.55, 0.5, 0.65, 0.55, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+    'point': (-0.3, -0.4, 1.0, 0.95, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+}
+
+
+def finger_pose(p, side, name='relaxed'):
+    """Sets one hand's six finger bones. Curls are about the figure's Z axis in a left hand and its mirror in a right one (Pose.side)."""
+    ia, ib, fa, fb, ta, tb = FINGER_POSES[name]
+    p.side('index_a', side, 0.0, 0.0, -ia)
+    p.side('index_b', side, 0.0, 0.0, -ib)
+    p.side('fingers_a', side, 0.0, 0.0, -fa)
+    p.side('fingers_b', side, 0.0, 0.0, -fb)
+    p.side('thumb_a', side, *ta)
+    p.side('thumb_b', side, *tb)
+    return p
+
+
+def hands(p, left='relaxed', right='relaxed'):
+    finger_pose(p, 'L', left)
+    finger_pose(p, 'R', right)
+    return p
+
+
 def wob(u, k, ph=0.0):
     return math.sin(TAU * (u * k + ph))
 
@@ -229,6 +267,7 @@ def phone(u):
     p.r('neck', -0.02, 0.0, -0.06)
     hp = head_pos(p)
     reach(p, 'R', (hp.x - 0.075, hp.y - 0.055, hp.z + 0.01), pole=(-0.6, -0.9, -0.7), hand=(-0.55 + 0.05 * wob(u, 1, 0.1), 0.0, 0.5))
+    finger_pose(p, 'R', 'hold')
     return p
 
 
@@ -242,6 +281,7 @@ def film(u):
     for side in ('L', 'R'):
         s = 1 if side == 'L' else -1
         reach(p, side, (s * 0.085, 1.42 + 0.01 * wob(u, 2), 0.36), pole=(s * 0.8, -0.7, -0.2), hand=(-0.7, 0.0, 0.0))
+    hands(p, 'hold', 'hold')
     return p
 
 
@@ -264,6 +304,7 @@ def cower(u):
     for side in ('L', 'R'):
         s = 1 if side == 'L' else -1
         reach(p, side, (s * 0.09, hp.y + 0.1, hp.z + 0.04), pole=(s * 0.9, 0.2, -0.3), hand=(-0.5, 0.0, 0.0))
+    hands(p, 'hold', 'hold')
     return p
 
 
@@ -326,6 +367,7 @@ def fight(u):
     p.move('pelvis', 0.0, bounce, 0.0)
     reach(p, 'L', (0.08, 1.42 + bounce, 0.30), pole=(0.5, -1.0, -0.2), hand=(-0.4, 0.0, 0.0))
     reach(p, 'R', (-0.1, 1.38 + bounce, 0.18), pole=(-0.6, -1.0, -0.2), hand=(-0.4, 0.0, 0.0))
+    hands(p, 'fist', 'fist')
     return p
 
 
@@ -341,6 +383,7 @@ def punch(u):
     x = mix(-0.1, -0.16, wind)
     x = mix(x, 0.0, strike)
     reach(p, 'R', (x, 1.40 + 0.04 * strike, z), pole=(-0.8, -0.9, -0.1), hand=(-0.3, 0.0, 0.0))
+    hands(p, 'fist', 'fist')
     return p
 
 
@@ -366,6 +409,7 @@ def hold_gun_pose(p, long_gun=False, aim_stance=True):
         reach(p, 'L', (0.035, 1.445, 0.52), pole=(0.8, -1.0, -0.2))
         point_hand(p, 'R', (0.0, 0.0, 1.0))
         point_hand(p, 'L', (-0.1, 0.0, 1.0))
+    hands(p, 'support', 'trigger')
     return p
 
 
@@ -387,22 +431,28 @@ def aim_rifle(u):
 
 @clip('aim_crouch', 1.0)
 def aim_crouch(u):
-    """Down on one knee behind low cover, gun up."""
+    """Taking a knee behind low cover: the right knee on the ground, the shin along it, the left foot flat out front, gun up."""
     p = Pose()
-    drop = 0.38 + 0.004 * wob(u, 1)
+    drop = 0.44 + 0.004 * wob(u, 1)
     hip = HIP_H - drop
-    p.move('pelvis', 0.0, -drop, 0.05)
-    p.r('pelvis', 0.1, -0.2, 0.0)
-    p.r('spine', 0.1, -0.1, 0.0)
-    p.r('chest', 0.05, -0.1, 0.0)
-    p.r('neck', -0.1, 0.25, 0.0)
-    put_leg(p, 'L', 0.34, hip - ANKLE_H + 0.0, 0.0, 0.1, 0.1, 0.05)
-    put_leg(p, 'R', -0.06, hip - ANKLE_H - 0.34, 0.0, 0.1, 0.1, 0.0)
-    p.side('foot', 'R', 0.9, 0.0, 0.0)
-    reach(p, 'R', (-0.055, 1.12, 0.52), pole=(-0.8, -1.0, -0.2))
-    reach(p, 'L', (0.035, 1.11, 0.52), pole=(0.8, -1.0, -0.2))
+    yaw = 0.3
+    prx = 0.06
+    p.move('pelvis', 0.0, -drop, 0.0)
+    p.r('pelvis', prx, -yaw * 0.5, 0.0)
+    p.r('spine', 0.1, -yaw * 0.3, 0.0)
+    p.r('chest', 0.05, -yaw * 0.2, 0.0)
+    p.r('neck', -0.1, yaw * 0.5, 0.0)
+    p.r('head', -0.05, 0.0, 0.0)
+    # front leg: the foot flat a stride ahead, the shin upright; back leg: the knee under the hip, the shin and the tucked toes on the ground behind
+    put_leg(p, 'L', 0.33, hip - ANKLE_H, 0.0, prx, yaw * 0.5, 0.04)
+    put_leg(p, 'R', -0.43, hip - 0.095, 0.0, prx, yaw * 0.5, 0.02)
+    # the arms: the same two-handed hold as standing, a head lower
+    sh = 1.0
+    reach(p, 'R', (-0.058, sh + 0.045, 0.5), pole=(-0.8, -1.0, -0.2))
+    reach(p, 'L', (0.035, sh + 0.035, 0.5), pole=(0.8, -1.0, -0.2))
     point_hand(p, 'R', (0.0, 0.0, 1.0))
     point_hand(p, 'L', (-0.1, 0.0, 1.0))
+    hands(p, 'support', 'trigger')
     return p
 
 
@@ -417,6 +467,7 @@ def cover(u):
     for side in ('L', 'R'):
         s = 1 if side == 'L' else -1
         reach(p, side, (s * 0.07, 1.32, 0.22), pole=(s * 0.8, -1.0, -0.3), hand=(-1.1, 0.0, 0.0))
+    hands(p, 'support', 'grip')
     return p
 
 
@@ -436,6 +487,7 @@ def cover_low(u):
     for side in ('L', 'R'):
         s = 1 if side == 'L' else -1
         reach(p, side, (s * 0.07, 1.0, 0.36), pole=(s * 0.8, -1.0, -0.3), hand=(-0.7, 0.0, 0.0))
+    hands(p, 'support', 'grip')
     return p
 
 
@@ -448,6 +500,7 @@ def reload(u):
     reach(p, 'L', (0.0 + 0.02 * wob(u, 3), mix(1.445, 1.17 + 0.05 * wob(u, 3), k), mix(0.52, 0.28, k)), pole=(0.8, -1.0, -0.2))
     point_hand(p, 'R', (0.0, mix(0.0, 0.5, k), 1.0))
     point_hand(p, 'L', (-0.1, mix(0.0, -0.4, k), 1.0))
+    hands(p, 'support', 'grip')
     return p
 
 
@@ -470,7 +523,8 @@ def drive_pose(u, steer=0.0):
     for side in ('L', 'R'):
         s = 1 if side == 'L' else -1
         a = steer
-        reach(p, side, (s * 0.17 * math.cos(a), 1.0 + WHEEL_Y + s * 0.17 * math.sin(a), WHEEL_Z - 0.01), pole=(s * 0.8, -1.0, -0.3), hand=(-0.3, 0.0, 0.0), mirror=False)
+        reach(p, side, (s * 0.205 * math.cos(a), 1.0 + WHEEL_Y + s * 0.2 * math.sin(a), WHEEL_Z - 0.01), pole=(s * 0.8, -1.0, -0.3), hand=(-0.3, 0.0, 0.0), mirror=False)
+    hands(p, 'wheel', 'wheel')
     return p
 
 
@@ -480,30 +534,60 @@ def drive(u):
     return drive_pose(u, 0.04 * wob(u, 1))
 
 
-@clip('enter_car', 0.7, loop=False)
+def _car_door_pose(stage):
+    """The ducked posture at the door ('door'), and the half-in one with the weight on the seat ('half'). The figure's own frame:
+    the game turns the whole body from facing the door to facing the road while it moves it in (PedActor)."""
+    p = Pose()
+    if stage == 'door':
+        # one hand on the roof edge, one on the door top, the head ducking under the frame
+        drop = 0.07
+        hip = HIP_H - drop
+        p.move('pelvis', 0.0, -drop, 0.06)
+        p.r('pelvis', 0.12, 0.35, 0.0)
+        p.r('spine', 0.5, 0.0, 0.0)
+        p.r('chest', 0.3, -0.1, 0.0)
+        p.r('neck', 0.45, 0.0, 0.0)
+        p.r('head', -0.15, 0.2, 0.0)
+        put_leg(p, 'L', 0.2, hip - ANKLE_H - 0.03, 0.0, 0.12, -0.2, 0.1)
+        put_leg(p, 'R', -0.1, hip - ANKLE_H, 0.0, 0.12, -0.2, 0.0)
+        reach(p, 'R', (-0.14, 1.38, 0.5), pole=(-0.8, -0.4, -0.5))
+        reach(p, 'L', (0.2, 1.05, 0.42), pole=(0.8, -0.8, -0.3))
+        hands(p, 'open', 'hold')
+    else:
+        # sitting down: the hips low on the seat's edge, the inside foot in the footwell, the other leg following, a hand on the wheel
+        drop = 0.16
+        hip = HIP_H - drop
+        p.move('pelvis', 0.0, -drop, -0.03)
+        p.r('pelvis', -0.2, 0.15, 0.0)
+        p.r('spine', 0.32, 0.0, 0.0)
+        p.r('chest', 0.14, 0.0, 0.0)
+        p.r('neck', 0.2, 0.0, 0.0)
+        put_leg(p, 'L', 0.6, 0.45, 0.35, -0.2, 0.0, 0.04)
+        put_leg(p, 'R', 0.3, hip - ANKLE_H - 0.12, 0.0, -0.2, 0.0, 0.2)
+        reach(p, 'L', (0.2, 1.05, 0.5), pole=(0.8, -1.0, -0.3))
+        reach(p, 'R', (-0.17, 1.28, 0.62), pole=(-0.8, -0.6, -0.3))
+        hands(p, 'hold', 'wheel')
+    return p
+
+
+@clip('enter_car', 0.9, loop=False)
 def enter_car(u):
-    """Folding in at the door: the head ducks under the frame and the hips drop into the seat."""
-    k = sstep(0.0, 1.0, u)
-    a = Pose()
-    a.move('pelvis', 0.0, -0.05, 0.12)
-    a.r('pelvis', 0.15, 0.3, 0.0)
-    a.r('spine', 0.45, 0.0, 0.0)
-    a.r('chest', 0.3, 0.0, 0.0)
-    a.r('neck', 0.3, 0.2, 0.0)
-    put_leg(a, 'L', 0.2, HIP_H - 0.05 - ANKLE_H - 0.12, 0.0, 0.1)
-    put_leg(a, 'R', -0.12, HIP_H - 0.05 - ANKLE_H, 0.0, 0.1)
-    a.side('upperarm', 'L', -0.7, 0.0, 0.2)
-    a.side('forearm', 'L', -1.1, 0.0, 0.0)
-    a.side('upperarm', 'R', 0.2, 0.0, 0.1)
-    a.side('forearm', 'R', -0.4, 0.0, 0.0)
-    return blend_poses(a, drive_pose(0.0), k)
+    """Getting in: duck under the frame at the door, a hand on the roof, the inside foot into the footwell, then the hips drop onto the seat."""
+    a, b, c = _car_door_pose('door'), _car_door_pose('half'), drive_pose(0.0)
+    if u < 0.45:
+        return blend_poses(a, b, sstep(0.0, 0.45, u))
+    return blend_poses(b, c, sstep(0.45, 1.0, u))
 
 
-@clip('exit_car', 0.7, loop=False)
+@clip('exit_car', 0.8, loop=False)
 def exit_car(u):
-    """Out of the seat: forward and up, a hand on the frame."""
-    k = sstep(0.0, 1.0, u)
-    return blend_poses(drive_pose(0.0), idle(0.0), k)
+    """Getting out: lean forward, a hand on the frame, swing the legs round and stand up under the roof."""
+    a, b, c = _car_door_pose('door'), _car_door_pose('half'), drive_pose(0.0)
+    if u < 0.4:
+        return blend_poses(c, b, sstep(0.0, 0.4, u))
+    if u < 0.75:
+        return blend_poses(b, a, sstep(0.4, 0.75, u))
+    return blend_poses(a, idle(0.0), sstep(0.75, 1.0, u))
 
 
 @clip('dragged', 0.6)
@@ -523,6 +607,7 @@ def dragged(u):
     p.side('forearm', 'L', -0.4, 0.0, 0.0)
     p.side('upperarm', 'R', -2.7 - 0.3 * wob(u, 2), 0.0, 0.8)
     p.side('forearm', 'R', -0.3, 0.0, 0.0)
+    hands(p, 'open', 'open')
     return p
 
 
@@ -543,6 +628,7 @@ def stumble(u):
     p.side('forearm', 'L', -0.5, 0.0, 0.0)
     p.side('upperarm', 'R', -0.7 - 0.2 * w, 0.0, 0.9)
     p.side('forearm', 'R', -0.6, 0.0, 0.0)
+    hands(p, 'open', 'open')
     return p
 
 
@@ -558,6 +644,7 @@ def flinch(u):
     p.side('forearm', 'L', -0.8 * k, 0.0, 0.0)
     p.side('upperarm', 'R', -0.5 * k, 0.0, 0.2 * k)
     p.side('forearm', 'R', -0.6 * k, 0.0, 0.0)
+    hands(p, 'open', 'hold')
     return p
 
 
@@ -574,6 +661,7 @@ def fall(u):
     p.side('forearm', 'L', -0.4, 0.0, 0.0)
     p.side('upperarm', 'R', -1.9 - 0.1 * w, 0.0, 0.5)
     p.side('forearm', 'R', -0.4, 0.0, 0.0)
+    hands(p, 'open', 'open')
     return p
 
 
@@ -584,35 +672,87 @@ def lying(p, face_down=False):
     return p
 
 
+def _floor_hands(p, y=0.04, dz=0.03, spread=0.0, hand=None):
+    """Both hands flat on the ground under the shoulders."""
+    F = fk(p)
+    for side in ('L', 'R'):
+        sx, sy, sz = F[f'upperarm_{side}'][0]
+        reach(p, side, (sx + (spread if side == 'L' else -spread), y, sz + dz), pole=(0.9 if side == 'L' else -0.9, 0.1, -0.5))
+        p.side('hand', side, -1.35, 0.0, 0.0)
+        finger_pose(p, side, 'open')
+    return p
+
+
+def _getup_keys(back):
+    """The keys of a get-up: where the body lies, the way it pushes up, a crouch with the hands down, a crouch, standing."""
+    down = lying(Pose(), not back)
+    down.r('head', 0.0)
+    down.side('upperarm', 'L', 0.15, 0.0, 0.5)
+    down.side('upperarm', 'R', 0.15, 0.0, 0.5)
+    if back:
+        # sit up: the bottom on the ground, the knees up, the arms behind taking the weight
+        k1 = Pose()
+        k1.move('pelvis', 0.0, -0.80, -0.06)
+        k1.r('pelvis', -0.1, 0.0, 0.0)
+        k1.r('spine', -0.28, 0.0, 0.0)
+        k1.r('chest', -0.14, 0.0, 0.0)
+        k1.r('neck', 0.22, 0.0, 0.0)
+        for side in ('L', 'R'):
+            put_leg(k1, side, 0.3, HIP_H - 0.80 - ANKLE_H + 0.02, 0.0, -0.1, 0.0, 0.1)
+        F = fk(k1)
+        for side in ('L', 'R'):
+            s_ = 1 if side == 'L' else -1
+            sx, sy, sz = F[f'upperarm_{side}'][0]
+            reach(k1, side, (sx + s_ * 0.06, 0.05, sz - 0.2), pole=(s_ * 0.6, 0.2, -0.9))
+            k1.side('hand', side, 0.9, 0.0, 0.0)
+    else:
+        # the push-up: a straight body held on the hands and toes
+        k1 = Pose()
+        k1.move('pelvis', 0.0, -0.58, 0.45)
+        k1.r('pelvis', 1.29, 0.0, 0.0)
+        k1.r('spine', -0.1, 0.0, 0.0)
+        k1.r('chest', -0.1, 0.0, 0.0)
+        k1.r('neck', -0.5, 0.0, 0.0)
+        k1.r('head', -0.2, 0.0, 0.0)
+        for side in ('L', 'R'):
+            put_leg(k1, side, -0.84, 0.28, 0.9, 1.29, 0.0, 0.06)
+            k1.side('toe', side, 0.5, 0.0, 0.0)
+        _floor_hands(k1, spread=0.03)
+    # a squat with the hands still down, the hips lifted
+    k2 = Pose()
+    k2.move('pelvis', 0.0, -0.46, 0.14)
+    k2.r('pelvis', 0.3, 0.0, 0.0)
+    k2.r('spine', 0.95, 0.0, 0.0)
+    k2.r('chest', 0.35, 0.0, 0.0)
+    k2.r('neck', -0.5, 0.0, 0.0)
+    for side in ('L', 'R'):
+        put_leg(k2, side, 0.2, HIP_H - 0.46 - ANKLE_H, 0.0, 0.3, 0.0, 0.14)
+    _floor_hands(k2, dz=0.05, spread=0.05)
+    k3 = Pose()
+    k3.move('pelvis', 0.0, -0.36, 0.0)
+    k3.r('pelvis', 0.1, 0.0, 0.0)
+    k3.r('spine', 0.5, 0.0, 0.0)
+    k3.r('chest', 0.3, 0.0, 0.0)
+    k3.r('neck', -0.4, 0.0, 0.0)
+    for side in ('L', 'R'):
+        put_leg(k3, side, 0.2, HIP_H - 0.36 - ANKLE_H, 0.0, 0.1, 0.0, 0.1)
+        k3.side('upperarm', side, -0.5, 0.0, 0.25)
+        k3.side('forearm', side, -0.7, 0.0, 0.0)
+    return [down, k1, k2, k3, idle(0.0)]
+
+
 def _getup(back):
+    keys = _getup_keys(back)
+    # where each key sits in the clip
+    at = [0.0, 0.3, 0.55, 0.78, 1.0]
+
     def fn(u):
-        down = lying(Pose(), not back)
-        down.r('head', 0.0)
-        p = Pose()
-        # keys: lying, rolled to sit/prone support, crouch, stand
-        crouch = Pose()
-        crouch.move('pelvis', 0.0, -0.4, -0.05)
-        crouch.r('spine', 0.5)
-        crouch.r('chest', 0.3)
-        for side in ('L', 'R'):
-            put_leg(crouch, side, 0.22, HIP_H - 0.4 - ANKLE_H, 0.0, 0.0, 0.0, 0.1)
-            crouch.side('upperarm', side, -0.8, 0.0, 0.2)
-            crouch.side('forearm', side, -0.7, 0.0, 0.0)
-        mid = Pose()
-        mid.move('pelvis', 0.0, -0.55, -0.1)
-        mid.r('pelvis', (-0.7 if back else 0.5), 0.0, 0.0)
-        mid.r('spine', (0.6 if back else -0.2))
-        for side in ('L', 'R'):
-            put_leg(mid, side, 0.25, HIP_H - 0.55 - ANKLE_H, 0.0, 0.0, 0.0, 0.2)
-            mid.side('upperarm', side, 0.5, 0.0, 0.4)
-        stand = idle(0.0)
-        if u < 0.4:
-            return blend_poses(down, mid, sstep(0.0, 0.4, u))
-        if u < 0.7:
-            return blend_poses(mid, crouch, sstep(0.4, 0.7, u))
-        return blend_poses(crouch, stand, sstep(0.7, 1.0, u))
+        for i in range(len(at) - 1):
+            if u <= at[i + 1]:
+                return blend_poses(keys[i], keys[i + 1], sstep(at[i], at[i + 1], u))
+        return keys[-1]
     return fn
 
 
-clip('getup_back', 1.6, loop=False)(_getup(True))
-clip('getup_front', 1.6, loop=False)(_getup(False))
+clip('getup_back', 2.0, loop=False)(_getup(True))
+clip('getup_front', 2.0, loop=False)(_getup(False))

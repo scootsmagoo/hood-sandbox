@@ -23,6 +23,10 @@ The design is in the README under [Pedestrians and the ambient city](../../READM
     "city":  [ { "type": "sedan", "weight": 6 }, { "type": "coupe", "weight": 2 }, { "type": "pickup", "weight": 1 } ],
     "night": [ { "type": "coupe", "weight": 3, "paints": ["#101010", "#f0f0f0"] }, { "type": "sedan", "weight": 2 } ]
   },
+  "freeway": {                              // optional: the motorways and trunk roads (below); a pack without it gets the engine's default
+    "weekday": [ /* 12 slots */ { "cars": 20, "speed": 0.8, "vehicleGroups": { "city": 1 } } ],
+    "weekend": [ /* 12 slots */ ]
+  },
   "zones": [
     {
       "id": "core",
@@ -58,7 +62,15 @@ The engine picks the city pack from the tile id (`atlanta/m1-five-points` → `d
 
 ## How traffic reads it (`src/sim/traffic/`)
 
-- Every sample point along the main lanes (one per 20 m) within 230 m of the player counts `slot.cars x lane length / 1000` toward the number of cars wanted, where `slot` is the one of the zone at that point, picked with `sim.clock` (slot and weekend). Lanes are weighted by road class (primary 1.7, secondary 1.5, tertiary 1, residential 0.55, unclassified 0.7, freeways 0.3, ramps 0.6 of that) because `cars` is "per km of driving lane" and the avenues carry the traffic. The sum is scaled by the tier's density (High 1, Medium 0.75, Low 0.5) and capped at 40 cars on High (`TRAFFIC.cap`), and nothing spawns while the registry is within 40 entities of the 256-entity snapshot.
+- Every sample point along the main lanes (one per 20 m) within 230 m of the player counts `slot.cars x lane length / 1000` toward the number of cars wanted, where `slot` is the one of the zone at that point, picked with `sim.clock` (slot and weekend). Lanes are weighted by road class (primary 1.7, secondary 1.5, tertiary 1, residential 0.55, unclassified 0.7, ramps 0.6 of their street class) because `cars` is "per km of driving lane" and the avenues carry the traffic. The sum is scaled by the tier's density (High 1, Medium 0.75, Low 0.5) and capped at 40 cars on High (`TRAFFIC.cap`), and nothing spawns while the registry is within 40 entities of the 256-entity snapshot.
 - A car is made 120 to 230 m from the player, out of the camera's view when it is closer than 200 m, on a lane with 16 m of room; the chance of a spot is `slot.cars x road weight` over the busiest zone's value, a little higher nearer the player. The first fill may use 60 m and up.
 - The slot's `vehicleGroups` weights pick the group, the group's weights the type (a `handling.json` id), and `paints` (hex) its colour, else the stand-in palette.
 - Cars are removed once they are farther than 320 m and out of the camera's view, or farther than 450 m; the table asking for fewer cars never removes one, it only stops new ones.
+
+### Freeways (`src/sim/traffic/`)
+
+A motorway or trunk lane (and a ramp: 0.7 of it) is not in the zone rows. Freeways do not loop inside a tile, so they are not in the main component; they are *through routes* (`LaneGraph.flow`): a lane that starts at the edge of the loaded area is a **source** (a car is put at its start now and then, as often as the row says cars pass a point), a lane that ends at it is a **sink** (a car that reaches its end is removed; a physics car near it is handed back to a spline follower first). The edge of the loaded area is the tile's bounds in a single-tile world and the union of the loaded tiles in a streamed one: a lane that ends at a seam to a loaded neighbour is neither, and streaming moves the sources and sinks with the tiles.
+
+- `freeway.weekday` / `freeway.weekend`: 12 slots of `{ cars, speed, vehicleGroups? }`. `cars` is per km of motorway or trunk lane within 200 m of the player; `speed` is the share of the free flow the traffic runs at (1 free, 0.5 a crawl); the group weights fall back to the zone's. The slots are read as the level at their middle and blended between, so the rush hour builds and eases off instead of stepping at a slot edge (`freewayAt`).
+- Free flow is 1.25 times the posted limit on the straights (a 55 mph limit runs about 65 mph), never over about 70 mph, and a bend runs at what the lane allows. A connector straight across a node of a freeway is as fast as the lanes it joins.
+- The freeway has its own cap, apart from the avenues': `TRAFFIC.freewayCap` (88 on High) times the tier's density squared (Low has a quarter of it) times how busy the row says the hour is (`cars` over 32, never under 0.3). The cars are spline followers except the few near the player, so they are cheap. Spawn ring 70 to 200 m, nearer spots likelier, removal beyond 250 m when unseen (380 m always), at least 38 m of room on the lane. Most of the cars drive past exits (the connector onto a ramp is 0.35 as likely as straight on).

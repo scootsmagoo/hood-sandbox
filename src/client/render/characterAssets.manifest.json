@@ -1,8 +1,8 @@
 {
   "_comment": "Written by tools/blender/characters/build.mjs (npm run assets). Do not edit.",
   "file": "assets/characters/characters.glb",
-  "hash": "174fb59a6356",
-  "bytes": 1749324,
+  "hash": "9a17b5bb9234",
+  "bytes": 2056776,
   "regions": [
     "skin",
     "lip",
@@ -197,57 +197,153 @@
         0.03,
         0.14
       ]
+    },
+    "thumb_a_L": {
+      "parent": "hand_L",
+      "head": [
+        0.3122,
+        0.8971,
+        0.077
+      ]
+    },
+    "thumb_b_L": {
+      "parent": "thumb_a_L",
+      "head": [
+        0.3127,
+        0.8617,
+        0.1064
+      ]
+    },
+    "index_a_L": {
+      "parent": "hand_L",
+      "head": [
+        0.3242,
+        0.8327,
+        0.0915
+      ]
+    },
+    "index_b_L": {
+      "parent": "index_a_L",
+      "head": [
+        0.3228,
+        0.7932,
+        0.0976
+      ]
+    },
+    "fingers_a_L": {
+      "parent": "hand_L",
+      "head": [
+        0.3255,
+        0.8247,
+        0.0725
+      ]
+    },
+    "fingers_b_L": {
+      "parent": "fingers_a_L",
+      "head": [
+        0.3197,
+        0.7816,
+        0.0791
+      ]
+    },
+    "thumb_a_R": {
+      "parent": "hand_R",
+      "head": [
+        -0.3122,
+        0.8971,
+        0.077
+      ]
+    },
+    "thumb_b_R": {
+      "parent": "thumb_a_R",
+      "head": [
+        -0.3127,
+        0.8617,
+        0.1064
+      ]
+    },
+    "index_a_R": {
+      "parent": "hand_R",
+      "head": [
+        -0.3242,
+        0.8327,
+        0.0915
+      ]
+    },
+    "index_b_R": {
+      "parent": "index_a_R",
+      "head": [
+        -0.3228,
+        0.7932,
+        0.0976
+      ]
+    },
+    "fingers_a_R": {
+      "parent": "hand_R",
+      "head": [
+        -0.3255,
+        0.8247,
+        0.0725
+      ]
+    },
+    "fingers_b_R": {
+      "parent": "fingers_a_R",
+      "head": [
+        -0.3197,
+        0.7816,
+        0.0791
+      ]
     }
   },
   "tris": {
-    "kudzu_lod0": 4538,
-    "kudzu_lod1": 1222,
-    "kudzu_lod2": 400,
-    "suit_m_lod0": 4122,
-    "suit_m_lod1": 1042,
-    "suit_m_lod2": 366,
-    "office_f_lod0": 4566,
-    "office_f_lod1": 1158,
-    "office_f_lod2": 430,
-    "casual_m_lod0": 4106,
-    "casual_m_lod1": 1034,
-    "casual_m_lod2": 360,
-    "casual_m_cap_lod0": 4468,
-    "casual_m_cap_lod1": 1172,
-    "casual_m_cap_lod2": 414,
-    "casual_f_lod0": 4454,
-    "casual_f_lod1": 1166,
-    "casual_f_lod2": 416,
-    "hoodie_m_lod0": 4278,
-    "hoodie_m_lod1": 1144,
-    "hoodie_m_lod2": 394,
-    "hoodie_m_beanie_lod0": 4598,
-    "hoodie_m_beanie_lod1": 1264,
-    "hoodie_m_beanie_lod2": 442,
-    "dress_f_lod0": 4478,
-    "dress_f_lod1": 1142,
-    "dress_f_lod2": 390,
-    "student_f_lod0": 4354,
-    "student_f_lod1": 1202,
-    "student_f_lod2": 392,
-    "worker_m_lod0": 4690,
-    "worker_m_lod1": 1282,
-    "worker_m_lod2": 496,
-    "tourist_m_lod0": 4592,
-    "tourist_m_lod1": 1264,
-    "tourist_m_lod2": 426,
-    "layers_m_lod0": 4766,
-    "layers_m_lod1": 1356,
-    "layers_m_lod2": 454,
-    "layers_f_lod0": 4754,
-    "layers_f_lod1": 1286,
-    "layers_f_lod2": 462,
-    "officer_m_lod0": 4792,
-    "officer_m_lod1": 1396,
-    "officer_m_lod2": 448,
-    "officer_f_lod0": 4856,
-    "officer_f_lod1": 1444,
-    "officer_f_lod2": 448
+    "kudzu_lod0": 5298,
+    "kudzu_lod1": 1386,
+    "kudzu_lod2": 420,
+    "suit_m_lod0": 4608,
+    "suit_m_lod1": 1074,
+    "suit_m_lod2": 392,
+    "office_f_lod0": 4718,
+    "office_f_lod1": 1098,
+    "office_f_lod2": 394,
+    "casual_m_lod0": 4664,
+    "casual_m_lod1": 1066,
+    "casual_m_lod2": 386,
+    "casual_m_cap_lod0": 5000,
+    "casual_m_cap_lod1": 1196,
+    "casual_m_cap_lod2": 434,
+    "casual_f_lod0": 4986,
+    "casual_f_lod1": 1190,
+    "casual_f_lod2": 436,
+    "hoodie_m_lod0": 4810,
+    "hoodie_m_lod1": 1168,
+    "hoodie_m_lod2": 414,
+    "hoodie_m_beanie_lod0": 5130,
+    "hoodie_m_beanie_lod1": 1288,
+    "hoodie_m_beanie_lod2": 462,
+    "dress_f_lod0": 4584,
+    "dress_f_lod1": 1042,
+    "dress_f_lod2": 360,
+    "student_f_lod0": 4948,
+    "student_f_lod1": 1248,
+    "student_f_lod2": 462,
+    "worker_m_lod0": 5198,
+    "worker_m_lod1": 1306,
+    "worker_m_lod2": 516,
+    "tourist_m_lod0": 5124,
+    "tourist_m_lod1": 1288,
+    "tourist_m_lod2": 446,
+    "layers_m_lod0": 5298,
+    "layers_m_lod1": 1380,
+    "layers_m_lod2": 474,
+    "layers_f_lod0": 5550,
+    "layers_f_lod1": 1422,
+    "layers_f_lod2": 482,
+    "officer_m_lod0": 5300,
+    "officer_m_lod1": 1420,
+    "officer_m_lod2": 468,
+    "officer_f_lod0": 5390,
+    "officer_f_lod1": 1480,
+    "officer_f_lod2": 468
   },
   "clips": {
     "walk": {
@@ -343,11 +439,11 @@
       "loop": true
     },
     "enter_car": {
-      "duration": 0.7,
+      "duration": 0.9,
       "loop": false
     },
     "exit_car": {
-      "duration": 0.7,
+      "duration": 0.8,
       "loop": false
     },
     "dragged": {
@@ -367,11 +463,11 @@
       "loop": true
     },
     "getup_back": {
-      "duration": 1.6,
+      "duration": 2,
       "loop": false
     },
     "getup_front": {
-      "duration": 1.6,
+      "duration": 2,
       "loop": false
     }
   }

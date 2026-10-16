@@ -300,7 +300,21 @@ beyond 450 m, police units beyond 130 m when they stand down and spawn within 20
 
 The per-tile bake's own requirements for clean seams (for the world agents, not done by the orchestrator): no junction polygon
 across a seam (end a junction's legs at it), decks cut at a seam with matching vertices on both sides, no turnaround connector at a
-seam line, and buildings assigned by their first vertex.
+seam line, and buildings assigned by their first vertex. **Done (ground lane, 2026-10-16):**
+
+- **Roads designed with the neighbours' roads.** A grid tile (`TileConfig.planMarginM`, the query margin less 32 m: 128 m) designs
+  its road profiles, decks and carving over its cell and the margin beyond (a heightmap of the cell plus the margin from the same
+  aligned DEM), and keeps the cell's part of the carved ground. Both tiles of a seam design the same roads over the same ground
+  there, so a road and a deck that cross the seam meet at about one height before the seam pass (the six smoke tiles: seam
+  deltas up to 1.74 m before, 0.043 m after; decks were 1.6 to 7.5 m apart). The deck ribbons are clipped at the bounds, so both
+  sides have a vertex on the seam line at that height.
+- **No junction polygon within 30 m of a tile's edge** (`buildRoads(..., { seamClear })`): the roads meet there as a junction
+  without a polygon, and their lanes run on to the seam.
+- **Lane ends on the seam** (`buildLanes(..., { bounds })`): a lane end within 0.3 m of a bounds line is put on it (lanes offset from
+  a centreline that crosses the seam at an angle ended a few centimetres off it), and a road piece that ends on the bounds is kept
+  however short (a way whose next node is 0.2 m across the seam).
+- Smoke tiles: lane ports 45 matched and 24 not before, 71 and 6 after; the seam audit's lanes across seams 50 before, 106 after,
+  with as many events at the seams as the same tiles merged into one world (the control): 6, 3 and 6 at 15, 25 and 35 m/s.
 
 ## 11. Hosting
 

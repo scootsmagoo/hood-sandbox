@@ -74,7 +74,7 @@ def face_bumps(x, y, z):
 
 
 class HeadSpec:
-    def __init__(self, hair='none', hair_th=0.012, hair_fade=0.0, beard=0.0, beard_zone='full', brow=True, crown=0.0, width=1.0, jaw=1.0, nose=1.0, hat=None, extras=(), skin_mat='skin'):
+    def __init__(self, hair='none', hair_th=0.012, hair_fade=0.0, beard=0.0, beard_zone='full', brow=True, crown=0.0, width=1.0, jaw=1.0, nose=1.0, hat=None, extras=(), skin_mat='skin', fade_cover=0.0, flat=0.0, quiff=0.0, back=0.0):
         self.hair = hair
         self.hair_th = hair_th
         self.hair_fade = hair_fade   # sides and back thinner by this fraction
@@ -87,6 +87,10 @@ class HeadSpec:
         self.nose = nose
         self.hat = hat
         self.extras = extras
+        self.fade_cover = fade_cover  # how far the sides and back are cut to the skin (cover drops there: a skin fade)
+        self.flat = flat              # a flat top at this height (a high-top)
+        self.quiff = quiff            # extra hair over the front hairline
+        self.back = back              # extra hair over the nape (a longer back)
 
 
 def head_shape(spec: HeadSpec, theta, y):
@@ -132,6 +136,10 @@ def hair_thickness(spec, theta, y):
     top = sstep(1.690, 1.725, y)
     th = th * (1 - spec.hair_fade * (1 - top))
     th += spec.crown * sstep(1.66, 1.74, y)
+    if spec.quiff:
+        th += spec.quiff * sstep(1.66, 1.71, y) * sstep(0.5, 0.0, at) * (1 - 0.0)
+    if spec.back:
+        th += spec.back * sstep(1.0, 2.6, at) * (1 - sstep(1.70, 1.64, y) * 0.0)
     return th * k
 
 
@@ -161,6 +169,13 @@ class Head:
             d = (p - HEAD_C)
             d.normalize()
             p = p + d * off
+            if spec.flat and p.y > spec.flat:
+                # a flat top: squared off, the edge a little rounded in
+                over = p.y - spec.flat
+                p.y = spec.flat
+                k = 1.0 - min(1.0, over * 4.0)
+                p.x *= 0.7 + 0.3 * k
+                p.z *= 0.7 + 0.3 * k
         return p
 
     def coverage(self, y, theta):
@@ -170,6 +185,10 @@ class Head:
         if spec.hair != 'none':
             hl = HAIRLINE(abs(theta))[0] - (0.004 if spec.hair in ('afro', 'curls') else 0.0)
             h = sstep(0.0, 0.016, y - hl)
+            if spec.fade_cover:
+                # a skin fade: the sides and the back are cut down to stubble, the top keeps its hair
+                top = sstep(1.688, 1.722, y)
+                h *= 1.0 - spec.fade_cover * (1.0 - top) * sstep(0.7, 1.2, abs(theta))
         bd = beard_mask(spec, theta, y) if spec.beard else 0.0
         if spec.beard > 0.0085:
             bd = -bd
@@ -337,3 +356,27 @@ def hair_curtain(mesh, spec, lod, y_end, spread=1.0, thick=0.014, side_span=2.35
     # close the lower edge
     for j in range(cols - 1):
         quad(mesh, [outer[rows][j], outer[rows][j + 1], inner[rows][j + 1], inner[rows][j]], mat)
+
+
+# ---------------------------------------------------------------- strands: braids, locs, tails
+def strand(mesh, spec, lod, y0, theta, length, radius, push=0.04, sway=0.0, droop=0.0, mat='hair', weighter=None, taper=0.35, sides=None, wave=0.0, hold=0.45):
+    """One hanging rope of hair (a braid, a loc): rooted on the scalp at height `y0` and angle `theta` from the front
+    (0 front, +/- pi the back), swinging out `push` metres over its first stretch, then hanging, `length` long, tapering
+    to `taper` of its radius. `sway` leans it sideways (m over its length), `droop` pulls its end in toward the head."""
+    from .fingers import polytube
+    w = weighter or Weighter(['head', 'neck', 'chest'], soft=0.03, scale={'chest': 0.45})
+    R = skull_point(spec, y0, theta, 0.004)
+    u = Vector((math.sin(theta), 0.0, math.cos(theta)))
+    nseg = {0: 4, 1: 3, 2: 2}[lod]
+    n = sides or {0: 4, 1: 4, 2: 3}[lod]
+    pts, radii = [], []
+    for k in range(nseg + 1):
+        s = k / nseg
+        out = push * sstep(0.0, hold, s) - droop * s * s
+        p = R + u * out + Vector((sway * s * s, -length * s, 0.0))
+        if wave:
+            p += Vector((wave * math.sin(s * math.pi * 3.0) * s, 0.0, 0.0))
+        pts.append(p)
+        # fat just below the root, then a taper to the tip
+        radii.append((radius * (1.0 - (1.0 - taper) * s ** 1.3),) * 2)
+    polytube(mesh, pts, radii, Vector((0, 1, 0)).cross(u).normalized() if abs(u.x) + abs(u.z) > 1e-6 else Vector((1, 0, 0)), n, mat, w)

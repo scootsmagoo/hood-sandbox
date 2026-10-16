@@ -5,7 +5,9 @@
 import * as THREE from 'three';
 import { EntityKind, type EntityId } from '../../shared/entities';
 import type { EntityDef } from '../../shared/entityDefs';
+import { doorGeometry } from '../../shared/doors';
 import { HANDLING } from '../../shared/handling';
+import { rotateVec } from '../../shared/math';
 import { HeliFlag, VehicleFlag } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
 import type { EntityState } from '../net/Interpolator';
@@ -281,7 +283,16 @@ export class EntityViews implements System {
       v.model.root.position.set(st.x, st.y, st.z);
       v.model.root.quaternion.set(st.q.x, st.q.y, st.q.z, st.q.w);
       {
-        const want = (st.flags & VehicleFlag.DoorOpen) !== 0 ? 1 : 0;
+        let want = (st.flags & VehicleFlag.DoorOpen) !== 0 ? 1 : 0;
+        if (st.kind === EntityKind.Vehicle && !(st.flags & VehicleFlag.Traffic)) {
+          // someone getting in or out at this car's driver's door holds it open
+          const def = defs.get(id);
+          if (def && def.kind === EntityKind.Vehicle) {
+            const g = doorGeometry(HANDLING[def.typeId] ?? HANDLING.sedan);
+            const w = rotateVec(st.q, g.stand.x, 0, g.stand.z);
+            want = Math.max(want, this.peds.doorOpenAt(st.x + w.x, st.z + w.z));
+          }
+        }
         v.door += (want - v.door) * Math.min(1, dt * 9);
         const m = v.model;
         if (m.setLod) m.setLod(pickLod(Math.hypot(st.x - cam.x, st.y - cam.y, st.z - cam.z), lodScale, m.lod));

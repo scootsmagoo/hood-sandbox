@@ -257,7 +257,7 @@ export class TileStreamer {
       name: `${key}:lanes`,
       cost: (tile.lanes?.edges.length ?? 0) * 5 + 20,
       run: () => {
-        if (tile.lanes) r.lanes = this.lanes.addTile(key, tile.lanes, r.ns);
+        if (tile.lanes) r.lanes = this.lanes.addTile(key, tile.lanes, r.ns, r.entry.bounds);
         return true;
       },
     });

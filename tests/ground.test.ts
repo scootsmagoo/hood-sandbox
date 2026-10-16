@@ -2,8 +2,10 @@
  * The ground audit's quick version (tests/audit/ground/; the whole tile is `npm run audit:ground`, docs/ground-audit.md).
  *
  * 1. On a synthetic ground (a slope with a few centimetres of noise at every 4 m vertex, the way a carved DEM is), a car held at
- *    30 m/s never leaves the road and is never pushed by the ground under its hull: the heightfield's internal edges are fixed.
- *    Without the fix the same run is thrown (the regression this guards).
+ *    30 m/s never leaves the road and is never pushed by the ground under its hull. Two things keep it down: the crash guard
+ *    (RaycastCar's GUARD: no predictive contacts against the road) and the heightfield's internal-edge fix (for the ticks the guard
+ *    is on, beside a wall, a barrier or a car). With the guard held on and without the fix the same run is thrown (the regression
+ *    the flag guards); with the guard and without the fix it is not (the regression the guard guards).
  * 2. On the baked tile, when there is one: no lane, junction curve or main road runs into a building, and a sample of the lanes
  *    driven at 25 m/s stays within the gate's limits.
  */
@@ -30,7 +32,7 @@ function noisyTile(noise: number): TileData {
 }
 
 /** Drives straight along +x at about 30 m/s for 8 s; returns the ticks in the air and the largest unexplained upward push (m/s). */
-async function runNoisy(fixInternalEdges: boolean) {
+async function runNoisy(fixInternalEdges: boolean, guardPinned = false) {
   const R = await initRapier();
   const tile = noisyTile(0.03);
   const gw = new GroundWorld(R, tile, { fixInternalEdges });
@@ -39,6 +41,7 @@ async function runNoisy(fixInternalEdges: boolean) {
   const car = new RaycastCar(R, gw.world, h, { x: x0, y: heightAt(tile, x0, z0) + RaycastCar.restHeight(h) + 0.02, z: z0, yaw: Math.PI / 2 });
   car.body.setLinvel({ x: 30, y: 30 * 0.05, z: 0 }, true);
   car.adopt();
+  car.guardPinned = guardPinned;
   let air = 0, maxAir = 0, prevVy = car.body.linvel().y, push = 0;
   for (let i = 0; i < 8 * 60; i++) {
     const v = car.speedForward;
@@ -65,9 +68,22 @@ describe('the ground under a car', () => {
     expect(r.push).toBeLessThan(0.3);
   });
 
-  it('would, without the fix (the regression the flag guards)', async () => {
-    const r = await runNoisy(false);
+  it('does not throw it with the crash guard held on either (predictive contacts live, as beside a wall): the fix holds it', async () => {
+    const r = await runNoisy(true, true);
+    expect(r.maxAir).toBeLessThan(3);
+    expect(r.push).toBeLessThan(0.3);
+  });
+
+  it('would, with the guard held on and without the fix (the regression the flag guards)', async () => {
+    const r = await runNoisy(false, true);
     expect(r.maxAir >= 3 || r.push >= 0.3).toBe(true);
+  });
+
+  it('does not, with the guard and without the fix (the regression the guard guards: no predictive contacts on the road)', async () => {
+    const r = await runNoisy(false);
+    expect(r.x).toBeGreaterThan(-300 + 200);
+    expect(r.maxAir).toBeLessThan(3);
+    expect(r.push).toBeLessThan(0.3);
   });
 });
 
@@ -91,8 +107,43 @@ describe.skipIf(!have)('the ground audit on the baked tile (a sample)', () => {
     console.log('ground sample', JSON.stringify({ km: (stats.metres / 1000).toFixed(1), covered: stats.covered, gate }));
     expect(stats.metres).toBeGreaterThan(500);
     expect(gate.launches).toBeLessThanOrEqual(QUICK.launches);
+    expect(gate.smoothLaunches).toBe(0);
     expect(gate.joltsPer10km).toBeLessThanOrEqual(QUICK.joltsPer10km);
   }, 120_000);
+});
+
+describe.skipIf(!have)('deck barriers on the baked tile', () => {
+  it('turns a car that hits a deck barrier at speed along it: it stays on the deck and is not thrown up', async () => {
+    const R = await initRapier();
+    const tile = await loadTile(DIR);
+    const gw = new GroundWorld(R, tile);
+    // Mitchell Street SW over the rail gulch, 7 m up: a two-lane deck with a barrier either side
+    const road = (tile as unknown as { roads: { id: string; bridge: boolean; width: number; points: number[][] }[] }).roads.find((r) => r.id === 'osm:way/54032243' && r.bridge);
+    expect(road).toBeTruthy();
+    const P = road!.points, m = Math.floor(P.length / 2);
+    const a = P[m - 1], b = P[m];
+    const dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz);
+    const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2, z = (a[2] + b[2]) / 2;
+    const h = HANDLING.sedan;
+    for (const [deg, v] of [[25, 25], [45, 35], [-25, 35]]) {
+      const yaw = Math.atan2(dx, dz) + (deg * Math.PI) / 180;
+      const car = new RaycastCar(R, gw.world, h, { x, y: y + RaycastCar.restHeight(h) + 0.02, z, yaw });
+      car.body.setLinvel({ x: Math.sin(yaw) * v, y: 0, z: Math.cos(yaw) * v }, true);
+      let off = 0, vy = 0, low = Infinity;
+      for (let t = 0; t < 120; t++) {
+        car.step(SIM_DT, { throttle: 0.5, brake: 0, steer: 0, handbrake: false });
+        gw.world.step();
+        const p = car.body.translation();
+        off = Math.max(off, Math.abs((p.x - x) * (-dz / l) + (p.z - z) * (dx / l)));
+        vy = Math.max(vy, car.body.linvel().y);
+        low = Math.min(low, p.y - y);
+      }
+      expect(off, `${deg} degrees at ${v} m/s`).toBeLessThan(road!.width / 2);
+      expect(vy).toBeLessThan(3);
+      expect(low).toBeGreaterThan(-1);
+      gw.world.removeRigidBody(car.body);
+    }
+  }, 60_000);
 });
 
 /** The sample's limits (looser than the full audit's gate: a sample is small, and a single spot is a big share of it). */

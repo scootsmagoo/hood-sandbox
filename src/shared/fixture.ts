@@ -22,6 +22,12 @@ export interface FixtureOptions {
   hills?: number;
   /** Leave out the buildings (a car test that only wants ground). */
   buildings?: boolean;
+  /**
+   * A freeway through every row of tiles: two one-way motorway carriageways of three lanes along the middle of the cell (z = S/2 +- 8),
+   * eastbound on the south side, with no junction on them and no walk network along them. Its lanes cross the seams and leave the
+   * loaded area at the ends of the city, so they do not loop (they are not in the main component).
+   */
+  freeway?: boolean;
 }
 
 const CELL = 4;
@@ -52,7 +58,7 @@ interface Street {
 }
 
 function opts(o: FixtureOptions = {}) {
-  return { tileSize: o.tileSize ?? 384, half: o.half ?? 1, hills: o.hills ?? 3, buildings: o.buildings ?? true };
+  return { tileSize: o.tileSize ?? 384, half: o.half ?? 1, hills: o.hills ?? 3, buildings: o.buildings ?? true, freeway: o.freeway ?? false };
 }
 
 /** The ground of the whole city: smooth hills and a gentle tilt, under 7% everywhere. */
@@ -156,7 +162,7 @@ const inCell = (b: Rect, x: number, z: number) => x >= b.minX && x < b.maxX && z
 
 /** One tile of the fixture: everything a baked tile has, clipped to its cell. */
 export function fixtureTile(i: number, j: number, o: FixtureOptions = {}): FixtureTile {
-  const { tileSize: S, hills, buildings: withBuildings } = opts(o);
+  const { tileSize: S, hills, buildings: withBuildings, freeway: withFreeway } = opts(o);
   const b = fixtureBounds(i, j, S);
   const id = `fixture/grid/${tileIdOf(i, j)}`;
   const all = streets(S, opts(o).half);
@@ -228,13 +234,25 @@ export function fixtureTile(i: number, j: number, o: FixtureOptions = {}): Fixtu
       node++;
     }
   }
+  const streetRoads = roads.slice();
+  if (withFreeway) {
+    // (z grows to the south, and traffic keeps right: eastbound is the south carriageway)
+    for (const [name, dz, dir] of [['e', 8, 1], ['w', -8, -1]] as const) {
+      const z = Math.round(b.minZ + S / 2 + dz);
+      const xs: number[] = [];
+      for (let t = b.minX; t < b.maxX; t += 8) xs.push(t);
+      xs.push(b.maxX);
+      if (dir < 0) xs.reverse();
+      roads.push({ id: `fx:fw:${name}`, class: 'motorway', name: 'Fixture Freeway', lanes: 3, oneway: true, bridge: false, layer: 0, width: 12, points: xs.map((x) => [round2(x), round2(fixtureHeight(x, z, hills)), z] as [number, number, number]) });
+    }
+  }
   const lanesFile = JSON.parse(JSON.stringify(buildLanes(roads as RoadInput[], jIn)));
   const lanes = parseLanes(lanesFile) ?? undefined;
   // signal heads stand on the kerb in a baked tile; these would stand in the road (the fixture's stop lines), so leave them out
   if (lanes) for (const jn of lanes.junctions) delete jn.heads;
 
   // the walk network: a sidewalk each side of every street, crossings round every junction, clipped to the cell
-  const paths = buildPaths(roads, junctions, b, hills);
+  const paths = buildPaths(streetRoads, junctions, b, hills);
 
   const buildings = withBuildings ? fixtureBuildings(b, all) : [];
   const mesh = buildingMesh(buildings, hills);

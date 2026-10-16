@@ -14,7 +14,7 @@ import { NodeIO, type Document, type Node } from '@gltf-transform/core';
 import { EXTMeshoptCompression, KHRMeshQuantization } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 
-export const MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark'];
+export const MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark', 'lm_water'];
 export const MAX_TRIS = [40000, 4000, 1500];
 export const MAX_BYTES = 400_000;
 

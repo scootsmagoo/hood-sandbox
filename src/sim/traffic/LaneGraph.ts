@@ -10,6 +10,7 @@
  * recomputed over everything loaded (`mainJob`, resumable so it can be spread over ticks). A dropped tile's
  * edges are dead (`alive` 0, no `next`, out of the main component) until the range is reused.
  */
+import type { Rect } from '../../shared/city';
 import type { LaneControl, LanesData } from '../../shared/lanes';
 import type { SignalJunction } from '../../shared/signals';
 
@@ -40,11 +41,35 @@ export interface SpawnSpot {
   s: number;
   /** how much this kind of road counts toward a zone's cars per km */
   weight: number;
+  /** 0 an ordinary lane, 1 a motorway or trunk lane, 2 a ramp (a link of those): these take the population table's freeway row */
+  fw: FreewayClass;
 }
 
+/** How a lane belongs to the freeway system: not at all, the carriageway itself, or a ramp. */
+export type FreewayClass = 0 | 1 | 2;
+
+/** The freeway class of a road class name (`motorway`, `trunk_link`, ...). */
+export function freewayClassOf(cls: string): FreewayClass {
+  if (cls === 'motorway' || cls === 'trunk') return 1;
+  if (cls === 'motorway_link' || cls === 'trunk_link') return 2;
+  return 0;
+}
+
+/**
+ * How far past the end of a lane (m) the loaded area must still be for the lane to be "inside it": a lane whose end, carried on this far
+ * along its heading, lies outside every loaded tile leaves the loaded area there (a sink, or for a lane's start a source). A lane that ends
+ * at a seam between two loaded tiles does not (the neighbour is there).
+ */
+export const EDGE_PROBE = 30;
+
 const SPOT_STEP = 20;
-/** How much of a zone's cars per km a kind of road gets: the avenues are busier than the side streets and the freeway is thinner. */
-const ROAD_WEIGHT: Record<string, number> = { motorway: 0.3, trunk: 0.5, primary: 1.7, secondary: 1.5, tertiary: 1, unclassified: 0.7, residential: 0.55, road: 0.55 };
+/**
+ * How much of a zone's cars per km a kind of road gets: the avenues are busier than the side streets. The freeways are not in this
+ * table: their cars per km come from the population table's own freeway row (`TrafficPopulation.freeway`), the weights here are the
+ * share of that row a motorway or trunk lane (1) and a ramp (0.7) gets.
+ */
+const ROAD_WEIGHT: Record<string, number> = { primary: 1.7, secondary: 1.5, tertiary: 1, unclassified: 0.7, residential: 0.55, road: 0.55 };
+const FREEWAY_WEIGHT: Record<number, number> = { 1: 1, 2: 0.7 };
 
 /** First-fit ranges of ids: freed ranges are reused, so the ids of what stays never move. Deterministic for a given sequence. */
 export class RangeAlloc {
@@ -100,6 +125,18 @@ export interface LaneTileRange {
 
 const EMPTY = new Int32Array(0);
 
+/** The box round all the points of a tile's lanes. */
+function lanesBounds(data: LanesData): Rect {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const e of data.edges) {
+    for (let i = 0; i < e.pts.length; i += 3) {
+      minX = Math.min(minX, e.pts[i]); maxX = Math.max(maxX, e.pts[i]);
+      minZ = Math.min(minZ, e.pts[i + 2]); maxZ = Math.max(maxZ, e.pts[i + 2]);
+    }
+  }
+  return minX <= maxX ? { minX, minZ, maxX, maxZ } : { minX: 0, minZ: 0, maxX: 0, maxZ: 0 };
+}
+
 export class LaneGraph {
   /** High-water mark of edge ids (dead edges included). */
   count = 0;
@@ -127,6 +164,20 @@ export class LaneGraph {
   oneWay = new Uint8Array(0);
   /** in the largest strongly connected component */
   main = new Uint8Array(0);
+  /**
+   * On a through route: a path from where traffic enters the loaded area (a lane that starts at its edge) or from the main component
+   * to where it leaves it (a lane that ends at its edge) or to the main component, and not in the main component itself. The freeway
+   * lanes that run through the tile (they do not loop, so they are not strongly connected) are these.
+   */
+  flow = new Uint8Array(0);
+  /** `main` or `flow`: the edges traffic routes over and spawns on. */
+  drive = new Uint8Array(0);
+  /** 1 a lane that starts at the edge of the loaded area (cars enter there), 2 a lane that ends at it (cars leave there) */
+  edgeKind = new Uint8Array(0);
+  /** the freeway class of a lane (`freewayClassOf` of its road class), 0 for connectors */
+  fwClass = new Uint8Array(0);
+  /** lanes cars enter the loaded area on (after the last `mainVersion`) */
+  sources: number[] = [];
   /** a live edge (of a loaded tile) */
   alive = new Uint8Array(0);
   readonly conflicts: Int32Array[] = [];
@@ -135,6 +186,10 @@ export class LaneGraph {
   readonly junctions: GraphJunction[] = [];
   readonly spots: SpawnSpot[] = [];
   private readonly spotCells = new Map<number, number[]>();
+  /** the spots of the through-route lanes that are not in the main component (`spotsAround` with `withFlow`) */
+  private readonly flowCells = new Map<number, number[]>();
+  /** 0 no spots, 1 spots in `spotCells`, 2 spots in `flowCells`, by edge */
+  private spotKind = new Uint8Array(0);
   /** spot ids by edge, so a tile's spots can be taken out */
   private readonly spotsOfEdge = new Map<number, number[]>();
   private readonly freeSpots: number[] = [];
@@ -146,6 +201,10 @@ export class LaneGraph {
   /** Lane direction along its road (+1, -1) and lane number, for the seams. */
   ldir = new Int8Array(0);
   lk = new Uint8Array(0);
+  /** Whether the through routes (`flow`) are worked out: a graph the police use for their own routing leaves it off. */
+  readonly flowEnabled: boolean;
+  /** The loaded tiles' rectangles, for telling a seam from the edge of the loaded area. */
+  private readonly rects = new Map<string, Rect>();
   private readonly edgeAlloc = new RangeAlloc();
   private readonly junctionAlloc = new RangeAlloc();
   readonly tiles = new Map<string, LaneTileRange>();
@@ -163,9 +222,11 @@ export class LaneGraph {
   constructor(
     readonly data: LanesData,
     stream = false,
+    opts: { flow?: boolean; bounds?: Rect } = {},
   ) {
+    this.flowEnabled = stream || !!opts.flow;
     if (stream) return;
-    this.addTile('', data, '');
+    this.addTile('', data, '', opts.bounds);
     this.markMainComponent();
   }
 
@@ -201,6 +262,11 @@ export class LaneGraph {
     this.tight = g(this.tight);
     this.oneWay = g(this.oneWay);
     this.main = g(this.main);
+    this.flow = g(this.flow);
+    this.drive = g(this.drive);
+    this.edgeKind = g(this.edgeKind);
+    this.fwClass = g(this.fwClass);
+    this.spotKind = g(this.spotKind);
     this.alive = g(this.alive);
     this.ldir = g(this.ldir);
     this.lk = g(this.lk);
@@ -217,9 +283,13 @@ export class LaneGraph {
     this.count = Math.max(this.count, n);
   }
 
-  /** Adds a tile's lanes; its edges take ids `base .. base + n - 1`, its junction ids are `<ns>/<id>` (or `<id>` with no ns). */
-  addTile(key: string, data: LanesData, ns: string): LaneTileRange {
+  /**
+   * Adds a tile's lanes; its edges take ids `base .. base + n - 1`, its junction ids are `<ns>/<id>` (or `<id>` with no ns). `rect` is the
+   * tile's area (the lanes' own bounding box when it is left out): where the loaded area ends is told from it.
+   */
+  addTile(key: string, data: LanesData, ns: string, rect?: Rect): LaneTileRange {
     if (this.tiles.has(key)) throw new Error(`lane graph: tile ${key} is already loaded`);
+    this.rects.set(key, rect ?? lanesBounds(data));
     const edges = data.edges;
     const n = edges.length;
     const base = this.edgeAlloc.alloc(n);
@@ -250,6 +320,10 @@ export class LaneGraph {
       this.junction[gi] = e.j !== undefined ? (local.get(e.j) ?? -1) : -1;
       this.alive[gi] = 1;
       this.main[gi] = 0;
+      this.flow[gi] = 0;
+      this.drive[gi] = 0;
+      this.edgeKind[gi] = 0;
+      this.fwClass[gi] = e.t === 0 ? freewayClassOf(e.cls) : 0;
       this.tight[gi] = 0;
       this.oneWay[gi] = 0;
       if (e.t === 0) {
@@ -287,6 +361,16 @@ export class LaneGraph {
         this.yields[gi] = Int32Array.from(e.y, off);
         this.mutual[gi] = Int32Array.from(e.m, off);
       }
+    }
+    // A straight run along a freeway: the connector across a node of the road is as fast as the lanes it joins. (The bake gives a connector
+    // the speed its own curve allows, and a kink of a metre in the mapped line, or a ramp that peels off, would make the cars brake to
+    // 10 m/s at every node of a motorway.)
+    for (let i = base; i < base + n; i++) {
+      if (!this.isConnector[i] || this.turn[i] !== 0) continue;
+      const a = this.from[i];
+      const b = this.to[i];
+      if (a < 0 || b < 0 || !this.fwClass[a] || !this.fwClass[b]) continue;
+      this.speed[i] = Math.max(this.speed[i], 0.85 * Math.min(this.speed[a], this.speed[b]));
     }
     // one-way: no lane of the same road runs the other way (within the tile: a road cut by a seam is in both, both ways)
     const ways = new Set<string>();
@@ -328,9 +412,13 @@ export class LaneGraph {
       if (inRange(out)) this.stitched.delete(out);
       else if (Array.from(this.next[out]).some(inRange)) this.unstitch(out);
     }
+    this.rects.delete(key);
     for (let e = r.base; e < r.base + r.n; e++) {
       this.alive[e] = 0;
       this.main[e] = 0;
+      this.flow[e] = 0;
+      this.drive[e] = 0;
+      this.edgeKind[e] = 0;
       this.next[e] = EMPTY;
       this.conflicts[e] = EMPTY;
       this.yields[e] = EMPTY;
@@ -465,55 +553,162 @@ export class LaneGraph {
 
   private applyMain(comp: Int32Array, nc: number, n: number) {
     const size = new Float64Array(Math.max(1, nc));
-    for (let i = 0; i < n; i++) if (this.alive[i] && !this.isConnector[i] && comp[i] >= 0) size[comp[i]] += this.len[i];
+    const members = new Int32Array(Math.max(1, nc));
+    for (let i = 0; i < n; i++) {
+      if (!this.alive[i] || comp[i] < 0) continue;
+      members[comp[i]]++;
+      if (!this.isConnector[i]) size[comp[i]] += this.len[i];
+    }
+    // (a component of one edge that does not lead back to itself is no loop: a motorway lane that leaves the tile is not "main")
+    for (let i = 0; i < n; i++) if (this.alive[i] && comp[i] >= 0 && members[comp[i]] === 1 && !Array.from(this.next[i]).includes(i)) size[comp[i]] = -1;
     let best = 0;
     for (let c = 1; c < nc; c++) if (size[c] > size[best]) best = c;
+    const looped = nc > 0 && size[best] >= 0;
+    for (let i = 0; i < this.count; i++) this.main[i] = looped && i < n && this.alive[i] && comp[i] === best ? 1 : 0;
+    this.computeFlow();
+    if (!looped && !this.flow.subarray(0, this.count).some((f) => f)) {
+      // nothing loops and nothing runs through (a street that stops inside the tile at both ends): the longest lane stands for the graph, as it always has
+      const alt = new Float64Array(Math.max(1, nc));
+      for (let i = 0; i < n; i++) if (this.alive[i] && !this.isConnector[i] && comp[i] >= 0) alt[comp[i]] += this.len[i];
+      let b2 = 0;
+      for (let c = 1; c < nc; c++) if (alt[c] > alt[b2]) b2 = c;
+      for (let i = 0; i < this.count; i++) this.main[i] = nc > 0 && i < n && this.alive[i] && comp[i] === b2 ? 1 : 0;
+      this.computeFlow();
+    }
     for (let i = 0; i < this.count; i++) {
-      const m = i < n && this.alive[i] && comp[i] === best && nc > 0 ? 1 : 0;
-      if (m !== this.main[i]) {
-        this.main[i] = m;
+      const kind = this.alive[i] && !this.isConnector[i] && this.drive[i] && this.len[i] >= 24 ? (this.main[i] ? 1 : 2) : 0;
+      if (kind !== this.spotKind[i]) {
         this.removeSpotsOf(i);
-        if (m) this.addSpotsOf(i);
-      } else if (m && !this.spotsOfEdge.has(i)) this.addSpotsOf(i);
+        if (kind) this.addSpotsOf(i, kind === 2);
+      } else if (kind && !this.spotsOfEdge.has(i)) this.addSpotsOf(i, kind === 2);
     }
     this.mainVersion++;
   }
 
-  private addSpotsOf(e: number) {
-    if (this.isConnector[e] || !this.main[e] || this.len[e] < 24) return;
+  /** Whether (x, z) is outside every loaded tile: the loaded area ended before it. */
+  outsideLoaded(x: number, z: number): boolean {
+    for (const r of this.rects.values()) if (x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) return false;
+    return true;
+  }
+
+  /**
+   * The through routes: the lanes that start at the edge of the loaded area (sources: no lane leads into them, and the point a little
+   * behind their start is outside every loaded tile) and the lanes that end at it (sinks: nothing follows them, and the point a little
+   * past their end is outside), and every edge on a path from a source or the main component to a sink or the main component. A
+   * freeway does not loop inside a tile, so it is not in the strongly connected main component; cars enter it at the sources, drive
+   * its lanes, and leave at the sinks (or by a ramp into the main component). A lane that merely ends at a seam is neither: the
+   * neighbouring tile is loaded there, or it is about to be.
+   */
+  private computeFlow() {
+    const n = this.count;
+    this.sources = [];
+    const drive = this.drive;
+    if (!this.flowEnabled) {
+      for (let i = 0; i < n; i++) {
+        this.flow[i] = 0;
+        this.edgeKind[i] = 0;
+        drive[i] = this.main[i];
+      }
+      return;
+    }
+    // who leads into whom
+    const preds = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) if (this.alive[i]) for (const w of this.next[i]) if (w < n && this.alive[w]) preds[w + 1]++;
+    for (let i = 0; i < n; i++) preds[i + 1] += preds[i];
+    const fill = preds.slice(0, n);
+    const from = new Int32Array(preds[n]);
+    for (let i = 0; i < n; i++) if (this.alive[i]) for (const w of this.next[i]) if (w < n && this.alive[w]) from[fill[w]++] = i;
+    const fwd = new Uint8Array(n);
+    const bwd = new Uint8Array(n);
+    const fq: number[] = [];
+    const bq: number[] = [];
+    const out = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
+    for (let i = 0; i < n; i++) {
+      this.edgeKind[i] = 0;
+      if (!this.alive[i]) continue;
+      if (this.main[i]) {
+        fwd[i] = bwd[i] = 1;
+        fq.push(i);
+        bq.push(i);
+        continue;
+      }
+      if (this.isConnector[i]) continue;
+      if (preds[i + 1] === preds[i]) {
+        this.posAt(i, 0, out);
+        if (this.outsideLoaded(out.x - out.tx * EDGE_PROBE, out.z - out.tz * EDGE_PROBE)) {
+          this.edgeKind[i] = 1;
+          fwd[i] = 1;
+          fq.push(i);
+        }
+      }
+      let live = false;
+      for (const w of this.next[i]) if (w < n && this.alive[w]) live = true;
+      if (!live) {
+        this.posAt(i, this.len[i], out);
+        if (this.outsideLoaded(out.x + out.tx * EDGE_PROBE, out.z + out.tz * EDGE_PROBE)) {
+          this.edgeKind[i] = this.edgeKind[i] === 1 ? 3 : 2;
+          bwd[i] = 1;
+          bq.push(i);
+        }
+      }
+    }
+    for (let k = 0; k < fq.length; k++) for (const w of this.next[fq[k]]) if (w < n && this.alive[w] && !fwd[w]) { fwd[w] = 1; fq.push(w); }
+    for (let k = 0; k < bq.length; k++) {
+      const v = bq[k];
+      for (let j = preds[v]; j < preds[v + 1]; j++) if (!bwd[from[j]]) { bwd[from[j]] = 1; bq.push(from[j]); }
+    }
+    for (let i = 0; i < n; i++) {
+      const f = this.alive[i] && !this.main[i] && fwd[i] && bwd[i] ? 1 : 0;
+      this.flow[i] = f;
+      drive[i] = this.main[i] | f;
+      if (f && this.edgeKind[i] & 1) this.sources.push(i);
+    }
+  }
+
+  private addSpotsOf(e: number, flow: boolean) {
+    if (this.isConnector[e] || this.len[e] < 24) return;
     const cls = this.cls[e];
-    const weight = ROAD_WEIGHT[cls.replace(/_link$/, '')] ?? 1;
-    const w = /^(motorway|trunk)$/.test(cls) ? weight : /_link$/.test(cls) ? weight * 0.6 : weight;
+    const fw = this.fwClass[e];
+    const base = cls.replace(/_link$/, '');
+    const weight = fw ? FREEWAY_WEIGHT[fw] : (ROAD_WEIGHT[base] ?? 1) * (/_link$/.test(cls) ? 0.6 : 1);
     const out = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
     const ids: number[] = [];
+    const cells = flow ? this.flowCells : this.spotCells;
     for (let s = 10; s < this.len[e] - 10; s += SPOT_STEP) {
       this.posAt(e, s, out);
-      const spot = { x: out.x, z: out.z, edge: e, s, weight: w };
+      const spot: SpawnSpot = { x: out.x, z: out.z, edge: e, s, weight, fw: fw as FreewayClass };
       const id = this.freeSpots.length ? this.freeSpots.pop()! : this.spots.length;
       this.spots[id] = spot;
       ids.push(id);
       const k = this.cellKey(out.x, out.z);
-      const a = this.spotCells.get(k);
+      const a = cells.get(k);
       if (a) a.push(id);
-      else this.spotCells.set(k, [id]);
+      else cells.set(k, [id]);
     }
-    if (ids.length) this.spotsOfEdge.set(e, ids);
+    if (ids.length) {
+      this.spotsOfEdge.set(e, ids);
+      this.spotKind[e] = flow ? 2 : 1;
+    }
   }
 
   private removeSpotsOf(e: number) {
     const ids = this.spotsOfEdge.get(e);
+    this.spotKind[e] = 0;
     if (!ids) return;
     this.spotsOfEdge.delete(e);
     for (const id of ids) {
       const sp = this.spots[id];
       const k = this.cellKey(sp.x, sp.z);
-      const a = this.spotCells.get(k);
-      if (a) {
-        const i = a.indexOf(id);
-        if (i >= 0) a.splice(i, 1);
-        if (a.length === 0) this.spotCells.delete(k);
+      for (const cells of [this.spotCells, this.flowCells]) {
+        const a = cells.get(k);
+        const i = a ? a.indexOf(id) : -1;
+        if (a && i >= 0) {
+          a.splice(i, 1);
+          if (a.length === 0) cells.delete(k);
+          break;
+        }
       }
-      this.spots[id] = { x: NaN, z: NaN, edge: -1, s: 0, weight: 0 };
+      this.spots[id] = { x: NaN, z: NaN, edge: -1, s: 0, weight: 0, fw: 0 };
       this.freeSpots.push(id);
     }
   }
@@ -522,8 +717,11 @@ export class LaneGraph {
     return (Math.floor(x / this.cell) + 512) * 1024 + (Math.floor(z / this.cell) + 512);
   }
 
-  /** Spawn spots whose distance to (x, z) lies in [min, max]. */
-  spotsAround(x: number, z: number, min: number, max: number, out: SpawnSpot[]): SpawnSpot[] {
+  /**
+   * Spawn spots whose distance to (x, z) lies in [min, max]: those of the main component, and with `withFlow` those of the through
+   * routes that are not in it (the freeway lanes) as well.
+   */
+  spotsAround(x: number, z: number, min: number, max: number, out: SpawnSpot[], withFlow = false): SpawnSpot[] {
     out.length = 0;
     const r = Math.ceil(max / this.cell);
     const cx = Math.floor(x / this.cell);
@@ -532,12 +730,15 @@ export class LaneGraph {
     const hi = max * max;
     for (let i = -r; i <= r; i++) {
       for (let j = -r; j <= r; j++) {
-        const a = this.spotCells.get((cx + i + 512) * 1024 + (cz + j + 512));
-        if (!a) continue;
-        for (const id of a) {
-          const sp = this.spots[id];
-          const d = (sp.x - x) ** 2 + (sp.z - z) ** 2;
-          if (d >= lo && d <= hi) out.push(sp);
+        const key = (cx + i + 512) * 1024 + (cz + j + 512);
+        for (const cells of withFlow ? [this.spotCells, this.flowCells] : [this.spotCells]) {
+          const a = cells.get(key);
+          if (!a) continue;
+          for (const id of a) {
+            const sp = this.spots[id];
+            const d = (sp.x - x) ** 2 + (sp.z - z) ** 2;
+            if (d >= lo && d <= hi) out.push(sp);
+          }
         }
       }
     }
@@ -605,8 +806,8 @@ export class LaneGraph {
     return out;
   }
 
-  /** The nearest lane edge (in the main component) to a position, for putting a car back on the graph. */
-  nearestLane(x: number, z: number, maxDist: number): { edge: number; s: number; dist: number } | null {
+  /** The nearest lane edge (in the main component, or with `withFlow` on a through route) to a position, for putting a car back on the graph. */
+  nearestLane(x: number, z: number, maxDist: number, withFlow = false): { edge: number; s: number; dist: number } | null {
     let best: { edge: number; s: number; dist: number } | null = null;
     const tmp = { s: 0, dist: 0 };
     const r = Math.ceil(maxDist / this.cell);
@@ -615,14 +816,17 @@ export class LaneGraph {
     const seen = new Set<number>();
     for (let i = -r; i <= r; i++) {
       for (let j = -r; j <= r; j++) {
-        const a = this.spotCells.get((cx + i + 512) * 1024 + (cz + j + 512));
-        if (!a) continue;
-        for (const id of a) {
-          const e = this.spots[id].edge;
-          if (seen.has(e)) continue;
-          seen.add(e);
-          this.project(e, x, z, this.spots[id].s, 40, 40, tmp);
-          if (tmp.dist < (best?.dist ?? maxDist)) best = { edge: e, s: tmp.s, dist: tmp.dist };
+        const key = (cx + i + 512) * 1024 + (cz + j + 512);
+        for (const cells of withFlow ? [this.spotCells, this.flowCells] : [this.spotCells]) {
+          const a = cells.get(key);
+          if (!a) continue;
+          for (const id of a) {
+            const e = this.spots[id].edge;
+            if (seen.has(e)) continue;
+            seen.add(e);
+            this.project(e, x, z, this.spots[id].s, 40, 40, tmp);
+            if (tmp.dist < (best?.dist ?? maxDist)) best = { edge: e, s: tmp.s, dist: tmp.dist };
+          }
         }
       }
     }
@@ -631,7 +835,7 @@ export class LaneGraph {
 
   /** Whether any edge of the graph is usable (a tile with a lane graph but no component is not). */
   get usable(): boolean {
-    return this.spotCells.size > 0;
+    return this.spotCells.size > 0 || this.flowCells.size > 0;
   }
 
   /** The tile range an edge belongs to, or null (a dead edge). */

@@ -357,8 +357,8 @@ export class WalkGraph {
     return SPAWN_KINDS.has(this.attrs[this.eattr[edge]].kind);
   }
 
-  /** The nearest node within `maxR` metres (or -1). */
-  nearestNode(x: number, z: number, maxR = 60): number {
+  /** The nearest node within `maxR` metres (or -1), among those `accept` allows when it is given. */
+  nearestNode(x: number, z: number, maxR = 60, accept?: (node: number) => boolean): number {
     let best = -1;
     let bd = maxR * maxR;
     const r = Math.ceil(maxR / CELL);
@@ -368,7 +368,7 @@ export class WalkGraph {
         for (const e of this.touch.get(cellKey(ix, iz)) ?? []) {
           for (const n of [this.ea[e], this.eb[e]]) {
             const d = (this.x[n] - x) ** 2 + (this.z[n] - z) ** 2;
-            if (d < bd) { bd = d; best = n; }
+            if (d < bd && (!accept || accept(n))) { bd = d; best = n; }
           }
         }
       }

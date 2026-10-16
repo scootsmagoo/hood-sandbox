@@ -59,6 +59,11 @@ const VIEWS = {
   'corey-tower': { mid: V(200, 150, 40, 45, 55) },
   'hilton-atlanta': { mid: V(200, 260, 80, 60, 55) },
   'candler-building': { near: V(180, 160, 80, 40, 55) },
+  'peachtree-center-harris-tower': { mid: V(110, 330, 190, 70, 55) },
+  'peachtree-center-international-tower': { mid: V(250, 330, 190, 70, 55) },
+  'peachtree-center-north-tower': { mid: V(170, 330, 190, 70, 55) },
+  'peachtree-center-south-tower': { mid: V(110, 330, 190, 70, 55) },
+  'rialto-center-for-the-arts': { mid: V(110, 100, 25, 12, 55), front: V(135, 55, 6, 8, 62) },
 };
 const SKYLINE = { eye: [20, 70, -100], look: [200, 100, -800], fov: 52 };
 const SKYLINE_LOW = { eye: [380, 110, 430], look: [150, 95, -650], fov: 48 };

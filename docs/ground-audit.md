@@ -7,6 +7,8 @@ baked tile, with the real sim code (`PhysicsWorld`, `RaycastCar`, the traffic AI
 npm run audit:ground                      # the whole tile at 15, 25 and 35 m/s: about 80 s on 30 threads
 npm run audit:ground -- --quick           # every 12th edge at 25 m/s
 npm run audit:ground -- --tile <dir> --out <dir> --speeds 25 --workers 8 --gate --no-edge-fix
+npm run audit:ground -- --trace           # also every launch's last 45 ticks, wheel by wheel, in ground-traces.json
+npm run audit:ground -- --no-guard        # the cars' physics before the crash guard (round four), for a before-and-after
 npx vitest run tests/ground.test.ts       # the quick version in `npm test` (a sample of lanes, plus a synthetic regression)
 ```
 
@@ -54,10 +56,31 @@ it; the bundle is also the worker script (one region of the tile per thread and 
 
 ## The gate
 
-`GATES` in `run.ts`: no lane, junction curve or main road into a building, and a ratchet on the rest at what the tile measures
-(a few percent over it): launches 260, steps 135, jolts and kicks 13.5 per 10 km, contacts 3.2 per 10 km, given-up routes 8%
-(round two left 270, 195, 17.5, 3.8 and 9%; round one 820, 490, 38, 10.5 and 12%). The quick sample in `tests/ground.test.ts`
-allows 1 launch and 15 jolts per 10 km. The goal is zero launches: lower the numbers as the residuals below go.
+`GATES` in `run.ts`: no lane, junction curve or main road into a building, **no launch on smooth road** (below), and a ratchet on
+the rest at what the tile measures (a few percent over it): launches 145, steps 135, jolts and kicks 12.5 per 10 km, contacts 2.2
+per 10 km, given-up routes 7.5% (round three left 260, 135, 13.5, 3.2 and 8%; round two 270, 195, 17.5, 3.8 and 9%; round one 820,
+490, 38, 10.5 and 12%). The quick sample in `tests/ground.test.ts` allows 1 launch, none on smooth road, and 15 jolts per 10 km.
+The goal is zero launches: lower the numbers as the residuals below go.
+
+**What made a launch** (`classifyLaunch` in `core.ts`; every launch and airborne episode has an `origin` and a `ground`). The car
+keeps a trace of its last 45 ticks: each wheel's ray (hit distance, normal, feature, contact height, suspension length, compression
+rate, spring and tyre force) and the body's vertical dv split exactly into the springs, the tyres, gravity and the solver, with
+Rapier's contact force events naming what pushed the hull and the hull's exact distance to the ground and the decks before the step.
+The largest kick (an upward dv over 0.25 m/s in a tick beyond the weight) in the last 30 ticks names the **origin**:
+`hull-ghost:<kind>` (the hull pushed while more than 3 cm clear of what pushed it), `hull-protrusion:<kind>` (the hull on a surface
+that stands up between wheels at their ride height), `hull-bottomed:<kind>` (on the road with a wheel on its bump stop), `crash:<kind>`
+(a prop, a wall), `wheel-step` (a spring kick where a wheel's contact jumped more than 4 cm beyond the grade between two ticks),
+`wheel-rebound` (a spring kick on a continuous surface), `wheel-tyre`, or `airtime` (no kick: the road fell away). The **ground** is
+`seam` (a step under a wheel, a protrusion, a bottoming, or the diagnosis a step or a slab's edge: the map's business), `crest-real`
+(a crest or sag in the diagnosis that the designed road, the lane's own profile, also has: v^2 k over 0.8 g on a 3 m chord, so a real
+car would go light there too), `crest-bake` (a crest the physics surface has and the design does not), `crash`, or `smooth`
+(everything continuous and the hull clear: a launch there is a physics bug). Where the hull touched, the top surface under the car's
+footprint rises a median 0.22 m above the plane of its four wheel contacts (round four, 92 events; a 180 m design sag is 1.3 cm over
+a car's length), so `seam` is the ground's shape, not the car's.
+
+Note for anyone reading contacts in this Rapier: `numSolverContacts()` reads 0 for a moving car even in a step whose solver pushes
+it, and the manifolds listed before a step are not the ones it solves. The contact force events (`ActiveEvents.CONTACT_FORCE_EVENTS`
+on the hulls, an `EventQueue` passed to `world.step`) are what is reliable; the dv budget agrees with them to a few percent.
 
 ## Round one: before and after (Five Points tile, 2026-10-16)
 
@@ -256,6 +279,71 @@ Measured and dropped:
   worse. Most "ghost" contacts on smooth roads come with no solver contact on the hull in the tick after (traced at (838, -788) on
   the Connector at 29 m/s: the push is not the hull on the ground), which the audit cannot yet tell apart; worth a look by the
   vehicles lane.
+
+## Round four: deck barriers (2026-10-16)
+
+Every car deck now has a solid concrete barrier along its carriageway's edges (`addBarriers` in `roads.ts`; the contract has the
+rules): 15.2 km of it on the M1 tile, 0.95 m tall, vertical inner face, drawn exactly as it is solid. Before, nothing stopped a car
+at a deck's edge (what read as a guardrail beside the stadium overpasses was the sidewalk deck's concrete skirt, beyond the
+sidewalk): a car that left a lane went over. The same audit on the same terrain: launches 247 to 225, jolts 12.2 to 11.8 per 10 km,
+hull pushes 2.92 to 2.67 per 10 km, 1 barrier contact (`hull-on-slab-edge`) in 1281 km. A car driven into the Mitchell Street
+barrier at 25 degrees and 25 m/s, 45 degrees and 35 m/s, and -25 degrees and 35 m/s is turned along it, stays on the deck and
+rises less than 3 m/s (`tests/ground.test.ts`). `npm run verify` checks the decks against their lanes: no lane on a deck past its
+barriers, no deck more than 2.5 m a side wider than its lanes (54 deck pieces long enough to measure: 0 and 0).
+`collision.bin` 1.76 to 2.21 MB (the barriers' runs are simplified where straight and level to 2 cm).
+
+## Round four: the crash guard (the vehicles lane, 2026-10-16)
+
+**The cause.** The "ghost" pushes on smooth roads were not the wheels. Instrumented tick by tick, the wheels' rays were continuous
+(hit distances steady, normals flat, compression rates under 0.1 m/s) when a car on a flat road was thrown up by 1 to 4 m/s in one
+tick and spun; the contact force events put the push on the cars-only ground or deck, along a facet's normal (about 14 degrees off
+vertical), while the hull was 0.10 to 0.20 m clear of it (exact distance). Taking the hull out of contact with the static world
+removed the kick (the wheels unchanged); soft CCD off moved it one tick later; hull restitution 0 took launches from 247 to 205, soft
+CCD off to 169, both to 139, and soft CCD at 0.3 with restitution 0 to 206 (so round three's 1.2 to 0.6 and 0.3 changed nothing:
+any prediction is enough). Soft CCD makes predictive contacts within 1.2 m; the solver treats a facet ahead of the bumper that the
+hull approaches as an approach to stop, and with the crash restitution (0.32, the max rule) as one to bounce off, while the hull would
+never have reached it. `FIX_INTERNAL_EDGES` only damped this.
+
+**The fix** (`GUARD` in `src/sim/vehicles/RaycastCar.ts`, docs/physics.md): soft CCD and the crash restitution are on only in a
+tick when the body's box, lifted 0.25 m clear of the road and cast along the car's motion for two steps, meets something the hull
+collides with that is not a fixed face looking up (a wall, a barrier, a pole, a car, a body), and for 6 ticks after; otherwise the
+hull meets the world without prediction and without bounce. The handling envelopes, the wall restitution (0.1 to 0.3), the pole at
+30 m/s, the deck barrier test and the T-bone all pass unchanged.
+
+**Before and after** (this audit; the classification above; the guard's `--no-guard` is the before):
+
+| | Round three physics | Crash guard |
+|---|---|---|
+| Launches and airborne, round three's bake | 247 (39 on smooth road) | 138 (0 on smooth road) |
+| Launches and airborne, the barrier bake | 225 (39 on smooth road); 37 / 85 / 103 at 15 / 25 / 35 m/s | 131 (0 on smooth road); 26 / 50 / 55 |
+| ... hull pushed while clear (ghosts) | 135 | 1 (at (947, 137) on 9246950, beside a bank) |
+| ... hull on a protrusion; bottomed | 14; 27 | 36; 47 |
+| ... wheel kicks at a step; on a crest; airtime | 13; 4; 24 | 15; 6; 20 |
+| ... by ground: seam; crest-bake; crest-real; crash | 162; 7; 9; 8 | 115; 7; 3; 6 |
+| Jolts and kicks; hull pushes, per 10 km | 11.8; 2.67 | 11.1; 1.85 |
+| Routes given up | 7.1% | 6.5% |
+
+Measured on the wheel side and dropped (the wheels are not the cause): the damper's velocity capped at 3 m/s (147 launches against
+138, 2 on smooth road: less damping, more bottoming); the sedan sitting higher in its travel (`restRatio` 0.95, `mountY` raised to
+keep the ride height: 5 cm more bump travel, 5 cm less droop): 173, 5 on smooth road (more hull contacts on banks). The wheel kicks
+left are all at steps the bake has (compression rates of 4 to 24 m/s, 10 to 40 cm in a tick) or on crests, so shape casts, normal
+smoothing and sub-stepped wheel queries were not needed; the tyre's vertical push was never the kick (`wheel-tyre` 0).
+
+**Real crests** (the design has them at the speed): Capitol Avenue's deck 563545714 at (189, 829), at 20 m/s on a 35 m/s run (the
+24% climb over 6 m round three lists), and Memorial Drive's connector 547005484 at (344, 824), at 34 m/s. A real car goes light on
+both. **Crests the bake makes** (7): (-742, -405) on 54032245 at 23 to 24 m/s, (392, 658) on the I-20 ramp 119686426 at 14.5 m/s,
+(347, 628) on 44698161 at 18 m/s.
+
+**Seams left** (115 events in 27 places; the map's: the ground standing up through a deck's end or beside a wide carriageway,
+deck-to-ground steps): (385, 655) 18 (MLK Drive and the I-20 ramps), (704, -844) 16 and (719, -836) 5 (Pryor Street over the rail
+gulch), (925, 288) 9 (the Connector's fork), (347, 629) 7, (932, 164) 7 and (944, 145) 4 (the ground rising 0.3 to 0.4 m within
+the car's footprint at a wide carriageway's edge), (-562, 195) 6 (Northside Drive), (202, 811) 6 (Memorial Drive over I-20),
+(-873, -263) 4, (-812, -173) 4, (-846, -163) 3, (901, -729) 3, (375, 640) 3. At (-165, -79) on 54032757 the ground stands up to
+0.15 m over the deck it meets along a diagonal (round three's 15 m/s "ghost" there).
+
+**Cost.** One box cast per moving physics car per tick (about 10 us; the car's own hull cast was 25 us, mostly the heightfield).
+The sim step on the real tile with 40 traffic cars and 40 people (Node, 1800 ticks, seeds 7, 11 and 23, twice): 1.40 ms mean with the
+guard, 1.37 without.
 
 ## Residuals
 

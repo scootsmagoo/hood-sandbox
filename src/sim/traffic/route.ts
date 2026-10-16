@@ -1,7 +1,8 @@
 /**
  * Routes over the lane graph: A* from a lane to a destination lane, and a random walk for cars that
- * just wander. Only edges of the main strongly connected component are used, so a route can always
- * be extended. Pure.
+ * just wander. Only edges cars may drive (`LaneGraph.drive`) are used: those of the main strongly connected component, so a route can
+ * always be extended, and the through routes (the freeway lanes), which run from where cars enter the loaded area to where they leave
+ * it (a route over them ends at a sink, the car is then removed). Pure.
  */
 import type { Rng } from '../../shared/rng';
 import type { LaneGraph } from './LaneGraph';
@@ -88,7 +89,7 @@ export function planRoute(g: LaneGraph, start: number, goal: number, maxExpand =
     }
     const d0 = dist.get(cur)!;
     for (const nx of g.next[cur]) {
-      if (!g.main[nx] || closed.has(nx)) continue;
+      if (!g.drive[nx] || closed.has(nx)) continue;
       const d = d0 + cost(g, nx) + (extra ? extra(nx) : 0);
       if (d < (dist.get(nx) ?? Infinity)) {
         dist.set(nx, d);
@@ -106,13 +107,16 @@ export function planRoute(g: LaneGraph, start: number, goal: number, maxExpand =
  */
 export function pickNext(g: LaneGraph, edge: number, rng: Rng, away?: { x: number; z: number } | null): number {
   const opts: number[] = [];
-  for (const n of g.next[edge]) if (g.main[n]) opts.push(n);
+  for (const n of g.next[edge]) if (g.drive[n]) opts.push(n);
   if (opts.length === 0) return -1;
   if (opts.length === 1) return opts[0];
   let total = 0;
   const w: number[] = [];
+  const here = g.fwClass[edge];
   for (const n of opts) {
     let x = g.isConnector[n] ? (g.turn[n] === 0 ? 0.6 : 0.2) : 1;
+    // most of the cars on a freeway stay on it past an exit, and the avenues' cars mostly keep off the ramps
+    if (g.isConnector[n] && g.fwClass[g.to[n]] === 2 && g.fwClass[g.from[n]] !== 2) x *= here === 1 ? 0.35 : 0.5;
     if (away) {
       const p = g.pts[n];
       const m = p.length / 3;

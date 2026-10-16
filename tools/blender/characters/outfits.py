@@ -15,7 +15,7 @@ from mathutils import Vector
 from hoodlib.frame import from_bl
 
 from . import body as B
-from .head import HeadSpec, hat_shell, hair_curtain
+from .head import HeadSpec, hair_curtain, hat_shell, strand
 from .shapes import Curve, Layer, Tube, Weighter, add_weighted, lathe_ring, lerp, mkvert, quad, sstep
 
 
@@ -67,13 +67,30 @@ def boots(ctx, top=0.70, mat='shoe'):
         sleeve(ctx, side, top, 0.93, mat, 0.0075, 'boot')
 
 
+def skirt_weights(y0, drop):
+    """Skin weights of a skirt: the waist follows the pelvis and spine; lower down the front and the sides follow the thighs
+    (so a seated or crouching figure's knees lift the cloth instead of poking through it) while the back hangs from the pelvis."""
+    from .shapes import BONE_INDEX
+    ip, isp, il, ir = BONE_INDEX['pelvis'], BONE_INDEX['spine'], BONE_INDEX['thigh_L'], BONE_INDEX['thigh_R']
+
+    def f(p):
+        x, y, z = p[0], p[1], p[2]
+        v = min(1.0, max(0.0, (y0 - y) / drop))
+        front = 0.2 + 0.8 * sstep(-0.15, 0.04, z)
+        k = sstep(0.02, 0.5, v) * front
+        side = sstep(-0.07, 0.07, x)
+        out = {ip: (1 - k) * (0.85 if v > 0.02 else 0.6), isp: (1 - k) * (0.15 if v > 0.02 else 0.4), il: k * side, ir: k * (1 - side)}
+        return {i: w for i, w in out.items() if w > 0.01}
+    return f
+
+
 def skirt(ctx, y0=1.09, t_hem=0.5, hip=0.0, hem_rx=0.2, hem_rz=0.17, mat='bottom', waist=0.0, knee_pinch=0.0, thick=0.0):
     """A skirt: a tube round both legs from the waist (y0) down to a hem `t_hem` below the hip line."""
     b = ctx['build']
     lod = ctx['lod']
     n = {0: 16, 1: 10, 2: 7}[lod]
-    w = Weighter(['pelvis', 'spine', 'thigh_L', 'thigh_R'], scale={'pelvis': 1.0, 'spine': 0.7, 'thigh_L': 0.38, 'thigh_R': 0.38})
     y1 = 0.98 - t_hem
+    w = skirt_weights(y0, y0 - y1)
     tc = B.torso_curve(b)
     # the top follows the body (waist, then hips), the hem flares from there
     rows = []
@@ -202,26 +219,45 @@ def long_hair(ctx, y_end=1.40, spread=1.0, sway=0.0):
     hair_curtain(ctx['mesh'], ctx['arch'].head, ctx['lod'], y_end, spread=spread, sway=sway)
 
 
-def ponytail(ctx, length=0.22, thick=0.034):
+def _tie(ctx, c, axis, r, w):
+    lathe_ring(ctx['mesh'], c, axis, [(-0.01, r, r, 0, 0), (0.01, r, r, 0, 0)], 7 if ctx['lod'] == 0 else 5, 'gear', w)
+
+
+def ponytail(ctx, length=0.25, thick=0.034, high=1.69, swing=0.06):
+    """A ponytail gathered at the back of the head, swinging out and down in a curve, with a tie."""
+    from .fingers import polytube
     if ctx['lod'] == 2:
         return
-    w = Weighter(['head', 'neck'], soft=0.03)
-    O = Vector((0, 1.675, -0.088))
-    A = Vector((0, -0.45, -0.89))
-    rows = [(0.0, thick * 0.8, thick * 0.8, 0, 0), (0.03, thick, thick, 0, 0), (length * 0.5, thick * 0.9, thick * 0.9, 0, -0.01), (length * 0.9, thick * 0.55, thick * 0.55, 0, -0.03), (length, 0.004, 0.004, 0, -0.04)]
-    lathe_ring(ctx['mesh'], O, A, rows, 6 if ctx['lod'] else 8, 'hair', w)
+    w = Weighter(['head', 'neck', 'chest'], soft=0.03, scale={'chest': 0.4})
+    lod = ctx['lod']
+    root = Vector((0.0, high, -0.086))
+    pts = [root + Vector((0, 0.004, -0.004)), root + Vector((0, -0.012, -0.045)), root + Vector((0, -0.05 - length * 0.15, -0.075 - swing)),
+           root + Vector((0.0, -0.1 - length * 0.5, -0.082 - swing * 1.2)), root + Vector((0.006, -0.1 - length * 0.9, -0.07 - swing)), root + Vector((0.01, -0.1 - length, -0.062 - swing * 0.8))]
+    radii = [thick * 0.62, thick * 0.78, thick, thick * 0.9, thick * 0.62, thick * 0.2]
+    polytube(ctx['mesh'], pts, [(r, r) for r in radii], Vector((1, 0, 0)), 8 if lod == 0 else 5, 'hair', w)
+    _tie(ctx, root + Vector((0, -0.006, -0.02)), Vector((0, -0.25, -1.0)).normalized(), thick * 0.82, w)
 
 
 def bun(ctx, y=1.70, z=-0.075, r=0.045):
+    """A bun (a knot of hair) on the head, a ring round its base."""
     if ctx['lod'] == 2:
         return
     w = Weighter(['head', 'neck'], soft=0.03)
-    rows = [(-r, 0.004, 0.004, 0, 0), (-r * 0.7, r * 0.7, r * 0.7, 0, 0), (0.0, r, r, 0, 0), (r * 0.7, r * 0.7, r * 0.7, 0, 0), (r, 0.004, 0.004, 0, 0)]
-    lathe_ring(ctx['mesh'], Vector((0, y, z)), (0, 1, 0), rows, 8 if ctx['lod'] == 0 else 6, 'hair', w)
+    rows = [(-r, 0.004, 0.004, 0, 0), (-r * 0.8, r * 0.75, r * 0.7, 0, 0), (-r * 0.35, r * 1.0, r * 0.95, 0, 0), (r * 0.25, r * 0.98, r * 0.92, 0, 0), (r * 0.8, r * 0.7, r * 0.62, 0, 0), (r, 0.004, 0.004, 0, 0)]
+    lathe_ring(ctx['mesh'], Vector((0, y, z)), (0, 1, 0), rows, 9 if ctx['lod'] == 0 else 6, 'hair', w)
+
+
+def low_bun(ctx, r=0.05):
+    """A bun at the nape of the neck."""
+    if ctx['lod'] == 2:
+        return
+    w = Weighter(['head', 'neck'], soft=0.03)
+    rows = [(-r, 0.004, 0.004, 0, 0), (-r * 0.75, r * 0.8, r * 0.72, 0, 0), (-r * 0.2, r * 1.0, r * 0.95, 0, 0), (r * 0.45, r * 0.9, r * 0.8, 0, 0), (r, 0.004, 0.004, 0, 0)]
+    lathe_ring(ctx['mesh'], Vector((0, 1.585, -0.1)), Vector((0, 0.2, -1.0)).normalized(), rows, 9 if ctx['lod'] == 0 else 6, 'hair', w, fwd=(0, 1, 0))
 
 
 def locs_bundle(ctx):
-    """Kudzu's locs, tied back: a thick bundle from the crown down the back of the head to the nape."""
+    """Kudzu's locs, tied back: a thick bundle from the crown down the back of the head, and a few loose at the nape and the sides."""
     if ctx['lod'] == 2:
         return
     w = Weighter(['head', 'neck'], soft=0.03)
@@ -242,6 +278,35 @@ def locs_bundle(ctx):
     O = Vector((0, 1.69, -0.1))
     A = Vector((0, -0.55, -0.83)).normalized()
     lathe_ring(ctx['mesh'], O, A, rows, 8 if lod == 0 else 6, 'trim', w)
+    # loose locs below the tie and round the ears, of different lengths
+    spec = ctx['arch'].head
+    for th, y0, L, push in ((2.9, 1.64, 0.2, 0.034), (-2.9, 1.64, 0.17, 0.03), (2.45, 1.65, 0.15, 0.03), (-2.45, 1.65, 0.19, 0.034), (3.1416, 1.62, 0.15, 0.028), (1.95, 1.66, 0.09, 0.02), (-1.95, 1.66, 0.11, 0.02)):
+        if lod == 1 and abs(th) < 2.0:
+            continue
+        strand(ctx['mesh'], spec, lod, y0, th, L, 0.0105, push=push, taper=0.55, hold=0.5)
+
+
+def braids(ctx, count=9, length=0.3, radius=0.0085, y0=1.665, arc=(1.5, 3.0), push=0.036, sway=0.0):
+    """Box braids: ropes of hair from the crown's back half, hanging to the shoulders."""
+    if ctx['lod'] == 2:
+        return
+    spec = ctx['arch'].head
+    n = count if ctx['lod'] == 0 else 2
+    lo, hi = arc
+    for i in range(n):
+        f = 0.5 if n == 1 else i / (n - 1)
+        th = lo + (hi - lo) * f
+        for sgn in ((1, -1) if th < 3.1 else (1,)):
+            y = y0 + 0.02 * (1 - abs(f - 0.5) * 2)
+            L = length * (0.78 + 0.22 * (((i * 5) % 3) / 2.0))
+            strand(ctx['mesh'], spec, ctx['lod'], y, sgn * th, L, radius, push=push + 0.012 * (i % 2), taper=0.5, hold=0.5, wave=0.004 * (1 if i % 2 else -1), sway=sway * (1 if sgn > 0 else -1))
+
+
+def pigtail_braids(ctx, length=0.34, radius=0.017):
+    """Two thick plaits, one each side of the neck, tied at the ends."""
+    spec = ctx['arch'].head
+    for sgn in (1, -1):
+        strand(ctx['mesh'], spec, ctx['lod'], 1.672, sgn * 1.95, length, radius, push=0.062, taper=0.4, hold=0.3, wave=0.012 * sgn, sides=7 if ctx['lod'] == 0 else 5, sway=0.015 * sgn)
 
 
 # ================================================================ the archetypes
@@ -258,7 +323,7 @@ def _kudzu_extras(ctx):
 
 kudzu = reg(Arch(
     'kudzu', B.MALE_LEAN,
-    HeadSpec(hair='locs', hair_th=0.013, hair_fade=0.55, beard=0.006, beard_zone='full', jaw=1.02),
+    HeadSpec(hair='locs', hair_th=0.013, hair_fade=0.62, fade_cover=0.75, beard=0.006, beard_zone='full', jaw=1.02),
     torso_layers=_kudzu_torso, arm_layers=long_sleeves(0.012, 0.011), leg_layers=lambda b, s: jeans(b, s, 0.9, 0.012),
     shoe=dict(style='boot'), extras=(_kudzu_extras,),
     palette=dict(skin=0x5e3b27, hair=0x120d0a, top=0x7a5f3c, top2=0x3b2e22, bottom=0x2a3446, shoe=0x5a3d22, sole=0x2a2520, trim=0x888878, stubble=0x2a1e17),
@@ -271,7 +336,7 @@ def _suit_torso(b):
 
 
 suit_m = reg(Arch(
-    'suit_m', B.MALE_AVG, HeadSpec(hair='short', hair_th=0.011, hair_fade=0.6, beard=0.0),
+    'suit_m', B.MALE_AVG, HeadSpec(hair='short', hair_th=0.012, hair_fade=0.8, fade_cover=0.6, quiff=0.007, beard=0.0),
     torso_layers=_suit_torso, arm_layers=long_sleeves(0.014, 0.010), leg_layers=lambda b, s: jeans(b, s, 0.915, 0.004, 0.009),
     torso_masks=(v_neck('top2', 1.495, 1.27, 2.0, 0.22), tie), shoe=dict(style='dress', upper='shoe', sole='shoe'),
     extras=(lambda ctx: ctx.update(jacket=True),),
@@ -284,12 +349,12 @@ def _office_torso(b):
 
 
 def _office_extras(ctx):
-    skirt(ctx, 1.07, 0.52, hip=0.0, hem_rx=0.155, hem_rz=0.125, thick=0.008)
-    long_hair(ctx, 1.50, 0.95)
+    skirt(ctx, 1.07, 0.52, hip=0.0, hem_rx=0.2, hem_rz=0.165, thick=0.008)
+    low_bun(ctx)
 
 
 office_f = reg(Arch(
-    'office_f', B.FEM_AVG, HeadSpec(hair='short', hair_th=0.012, hair_fade=0.2, beard=0.0, brow=True),
+    'office_f', B.FEM_AVG, HeadSpec(hair='short', hair_th=0.011, hair_fade=0.5, beard=0.0, brow=True),
     torso_layers=_office_torso, arm_layers=long_sleeves(0.011, 0.007), leg_layers=lambda b, s: [],
     torso_masks=(v_neck('top2', 1.495, 1.30, 1.6, 0.2),), shoe=dict(style='dress', upper='shoe', sole='shoe'),
     extras=(_office_extras,),
@@ -310,7 +375,7 @@ def _casual_m_extras(cap=None):
 
 
 casual_m = reg(Arch(
-    'casual_m', B.MALE_AVG, HeadSpec(hair='short', hair_th=0.012, hair_fade=0.4, beard=0.006),
+    'casual_m', B.MALE_AVG, HeadSpec(hair='short', hair_th=0.014, hair_fade=0.82, fade_cover=0.55, beard=0.006, quiff=0.004),
     torso_layers=_tee_torso, arm_layers=tee_sleeves(0.17), leg_layers=lambda b, s: jeans(b, s, 0.915, 0.006, 0.010),
     shoe=dict(style='sneaker'), extras=(),
     palette=dict(skin=0x8a5d3e, hair=0x15110e, top=0x9c3b30, top2=0xe9e5dc, bottom=0x38414f, shoe=0xd8d4cc),
@@ -358,7 +423,7 @@ def _hoodie_extras(cap=None):
 
 
 hoodie_m = reg(Arch(
-    'hoodie_m', B.MALE_LEAN, HeadSpec(hair='short', hair_th=0.011, hair_fade=0.5, beard=0.0, jaw=1.0),
+    'hoodie_m', B.MALE_LEAN, HeadSpec(hair='short', hair_th=0.03, hair_fade=0.86, fade_cover=0.7, flat=1.79, crown=0.012, beard=0.0, jaw=1.0),
     torso_layers=_hoodie_torso, arm_layers=long_sleeves(0.020, 0.012), leg_layers=lambda b, s: jeans(b, s, 0.915, 0.004, 0.012),
     shoe=dict(style='sneaker'), extras=(_hoodie_extras(None),),
     palette=dict(skin=0x6f4630, hair=0x15110e, top=0x555b66, top2=0x3c4048, bottom=0x2c3140, shoe=0xe8e6e0),
@@ -378,7 +443,6 @@ def _dress_torso(b):
 
 def _dress_extras(ctx):
     skirt(ctx, 1.06, 0.40, hip=0.0, hem_rx=0.235, hem_rz=0.20, thick=0.005)
-    long_hair(ctx, 1.34, 1.02, 0.0)
     # straps
     if ctx['lod'] <= 1:
         for sx in (-1, 1):
@@ -386,7 +450,7 @@ def _dress_extras(ctx):
 
 
 dress_f = reg(Arch(
-    'dress_f', B.FEM_SLIM, HeadSpec(hair='short', hair_th=0.012, hair_fade=0.3),
+    'dress_f', B.FEM_SLIM, HeadSpec(hair='afro', hair_th=0.03, crown=0.034, back=0.012),
     torso_layers=_dress_torso, arm_layers=lambda b, s: [], leg_layers=lambda b, s: [],
     shoe=dict(style='dress', upper='shoe', sole='shoe'), extras=(_dress_extras,),
     palette=dict(skin=0x6f4630, hair=0x15110e, top=0x7b1f3c, top2=0xd9c5a8, bottom=0x7b1f3c, shoe=0x17120f),
@@ -400,7 +464,7 @@ def _student_torso(b):
 student_f = reg(Arch(
     'student_f', B.FEM_SLIM, HeadSpec(hair='short', hair_th=0.014, hair_fade=0.2),
     torso_layers=_student_torso, arm_layers=long_sleeves(0.016, 0.009), leg_layers=lambda b, s: jeans(b, s, 0.915, 0.0, 0.004),
-    shoe=dict(style='sneaker', size=0.93), extras=(lambda ctx: (backpack(ctx, (0.27, 0.34, 0.13), 1.28), ponytail(ctx, 0.25, 0.033)),),
+    shoe=dict(style='sneaker', size=0.93), extras=(lambda ctx: (backpack(ctx, (0.27, 0.34, 0.13), 1.28), pigtail_braids(ctx, 0.3, 0.016)),),
     palette=dict(skin=0x84583a, hair=0x15110e, top=0x8a3b4d, top2=0xe6d9cc, bottom=0x2d3646, shoe=0xf0eee8, gear=0x2f5d6a),
 ))
 
@@ -460,7 +524,7 @@ def _layers_f_extras(ctx):
 layers_f = reg(Arch(
     'layers_f', B.FEM_AVG, HeadSpec(hair='short', hair_th=0.011, hair_fade=0.3),
     torso_layers=_coat_torso, arm_layers=long_sleeves(0.020, 0.012), leg_layers=lambda b, s: jeans(b, s, 0.915, 0.0, 0.008),
-    shoe=dict(style='boot'), extras=(_layers_f_extras, lambda ctx: boots(ctx, 0.74)),
+    shoe=dict(style='boot'), extras=(_layers_f_extras, lambda ctx: boots(ctx, 0.74), lambda ctx: braids(ctx, 4, 0.26, 0.009, 1.62, (1.9, 3.0), 0.04)),
     palette=dict(skin=0xb98560, hair=0x4a3020, top=0x6a5a4a, top2=0x8a7d70, bottom=0x2f333a, shoe=0x3a342e, hat=0x5a4a6a, gear=0x6a4a3a),
 ))
 

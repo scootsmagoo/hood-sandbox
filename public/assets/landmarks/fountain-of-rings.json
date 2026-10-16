@@ -7,7 +7,7 @@
   "lon": -84.3928817
  },
  "yaw": 0,
- "height": 1.8,
+ "height": 3,
  "bounds": {
   "min": [
    -18.1,
@@ -16,14 +16,14 @@
   ],
   "max": [
    18.1,
-   1.8,
+   3,
    13.8
   ]
  },
  "radius": 18.1,
  "lods": [
   {
-   "tris": 1733,
+   "tris": 1823,
    "from": 0
   },
   {
@@ -85,6 +85,6 @@
  ],
  "datum": "max",
  "model": "assets/landmarks/fountain-of-rings.glb",
- "hash": "9b2ab61c3aca",
- "bytes": 35060
+ "hash": "0bdc491d3560",
+ "bytes": 26256
 }

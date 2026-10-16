@@ -33,6 +33,11 @@
     { "name": "basilica-of-the-sacred-heart", "module": "landmarks.basilica" },
     { "name": "corey-tower", "module": "landmarks.corey" },
     { "name": "hilton-atlanta", "module": "landmarks.hilton" },
-    { "name": "westin-peachtree-plaza", "module": "landmarks.westin" }
+    { "name": "westin-peachtree-plaza", "module": "landmarks.westin" },
+    { "name": "peachtree-center-harris-tower", "module": "landmarks.peachtree_center" },
+    { "name": "peachtree-center-international-tower", "module": "landmarks.peachtree_center" },
+    { "name": "peachtree-center-north-tower", "module": "landmarks.peachtree_center" },
+    { "name": "peachtree-center-south-tower", "module": "landmarks.peachtree_center" },
+    { "name": "rialto-center-for-the-arts", "module": "landmarks.rialto" }
   ]
 }

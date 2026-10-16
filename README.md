@@ -8,7 +8,22 @@ The engine is city-agnostic. Everything that makes the game *Atlanta* (the map d
 
 There is no story yet, and that's deliberate. The game is the city: real streets and highways, real neighborhoods, pedestrians and traffic going about their day, side hustles on every corner, and a police response that feels like Atlanta's. A minor offense on a city street won't start a chase. Do the same on I-285 and the State Patrol will PIT you at 110 mph.
 
-> **Status: M1 spike playable (14 October 2026).** You can walk and drive a real 2 × 2 km tile of Downtown around Five Points, carjack the car at the curb, and steal the parked ones. `npm install && npm run dev`, then open http://127.0.0.1:5180. M1 is done once it has been checked on a real Mac and iPhone ([docs/perf.md](docs/perf.md)).
+> **Status: playable in the browser (16 October 2026).** Play it at https://hood-sandbox.adam-021.workers.dev, or run `npm install && npm run dev` and open http://127.0.0.1:5180. How to play is in [docs/PLAYING.md](docs/PLAYING.md).
+>
+> What works now:
+>
+> - One 2 × 2 km tile of Downtown, with real streets and buildings.
+> - The GTA IV look and lighting, with a day and night cycle.
+> - GTA IV car physics and ragdolls.
+> - Cars and people built in Blender.
+> - Traffic, pedestrians and police. The police escalate on a heat ladder.
+> - Weapons and cover.
+> - Trees and street furniture.
+> - 22 hero landmarks, hand-built.
+> - A minimap and street names.
+> - Deployed on Cloudflare.
+>
+> M1 is partly checked. The owner measured 120 fps on a Mac in Chrome. The iPhone is still to check ([docs/perf.md](docs/perf.md)). Multi-tile streaming is built, and the M2 bake is in progress.
 >
 > This README is the plan: what we're building, what it's built with, and the order we'll build it in. The research behind it is in [`docs/research/`](docs/research/). The cast (the protagonist, the crews and the police agencies) is drafted in [`docs/CAST.md`](docs/CAST.md) and waiting for review.
 
@@ -224,7 +239,7 @@ The design draws on GTA V (line-of-sight search and the last known position), GT
 - **Pursuit AI** drives toward the predicted intercept point. Units take roles (chaser, flanker, blocker) and PIT from the rear quarter. Roadblocks spawn on the lanes you're likely to take. **Built:** see "Built (the escalation ladder)" under [Crime, heat and the police](#crime-heat-and-the-police).
 
 **Built (first pass):**
-- The pipeline writes `lanes.json` (`tools/pipeline/src/world/lanes.ts`, documented in the tile contract): lanes per direction from `lanes` and `oneway`, trimmed at junctions, a connector for every straight, left and right movement with its conflicts and who gives way, speeds from `maxspeed` or the road class. The sim routes only over the largest strongly connected part of it (81% of surface-street length on the Downtown tile; freeways run off the clipped tile).
+- The pipeline writes `lanes.json` (`tools/pipeline/src/world/lanes.ts`, documented in the tile contract): lanes per direction from `lanes` and `oneway`, trimmed at junctions, a connector for every straight, left and right movement with its conflicts and who gives way, speeds from `maxspeed` or the road class. The sim routes over the largest strongly connected part of it (81% of surface-street length on the Downtown tile) and over the freeways' through routes: lanes that run from where traffic enters the loaded area to where it leaves it are sources and sinks, so the Downtown Connector carries flow at the density and speed of the hour (`freeway` in `population.json`) though it does not loop inside the tile.
 - Signals are a pure function of the junction and the time (`src/shared/signals.ts`: two approach groups, fixed cycle tables, offsets from the junction id), so the sim, the client's lamps and the pedestrians' walk lights agree for free. Heads on poles are three instanced meshes.
 - `src/sim/traffic/`: IDM, a MOBIL lane change, signals, stop signs (stop, then arrival order) and yielding from the conflict data, random turns or A* to a destination. Cars within about 80 m of the player (or of any other moving car, or after any contact) are full raycast cars with a driver ped, steered along the lane by pure pursuit; farther out they are kinematic followers on the lane spline, still entities in the snapshot. The switch keeps pose and speed. Cars spawn 120 to 230 m out and out of view, as many as the city's `population.json` asks for at that spot, slot and day, up to 40 on High (30 Medium, 20 Low; `?traffic=0..1` scales it, `?traffic=0` turns it off).
 - Drivers stop for pedestrians and for the player in the lane, honk at the player who blocks them (`traffic:honk`), edge round parked cars, brake hard and swerve for a car coming at them, drive faster and wilder after an explosion or a nearby crime (`traffic:react`), and pull over for a police car with its lights on. A car at a red light can be carjacked through the usual flow. Far traffic is drawn from instanced meshes, near traffic from the full model; brake lights and headlamps (bright at night) follow the car and the clock.
@@ -424,6 +439,7 @@ Reference projects: Streets GL (MIT, a browser OSM renderer), OSM2World, TerraDr
 - **Targets**: 60 fps on an M-series MacBook in Chrome and Safari, playable (30+ fps) on an iPhone 15 Pro, about 1,500 draw calls and about 3M visible triangles at most on High.
 - **Graphics tiers** (Low, Medium, High, picked from the GPU, with a governor that steps down when the frame rate drops) also scale crowd and traffic density and LOD distances.
 - **The look is GTA IV's, in Atlanta** (`src/client/render/look/`, [docs/graphics-plan.md](docs/graphics-plan.md) section 9): muted, hazy and grimy by day, a smoggy dusk, sodium-orange street lamps and lit windows at night, over procedural facades and worn roads, with a post pass for the grade and the bloom. Each tier has `fx` fields saying how much of it to spend (the table is in [docs/perf.md](docs/perf.md)). `?gfx=classic` is the old flat renderer; `&gfxoff=post,facade,surface,haze,lamps,bloom` turns parts off for an A/B test.
+- **The edge of the single tile** (`src/world/edgeSkirt.ts`): the M1 tile stops at its bounds, and Mangum St SW is only 60 m from the west one. Until the M2 multi-tile bake covers the ground beyond, the tile gets a ground skirt (its own edge heights carried outward, sinking toward the horizon, in the colour of the edge) and a far skyline of plain hazy blocks, out of the footprints of hero landmarks, so the stadium stands on ground and the world does not end in a void. `?edge=off` draws the tile bare. A streamed city does not use it.
 - **Draw calls**: BatchedMesh per material for tiles, InstancedMesh for props, peds and traffic, and impostors for far buildings.
 - **Memory**: free CPU copies after GPU upload and stream tiles in and out. Phones get a lighter build (fewer pool lights, smaller tile radius, lower texture resolution). The iPhone's memory ceiling is the hard limit.
 - **Perf and leak gates in CI** from the first playable build, ported from Skyrome's scripts (`perf-budget`, `soak`, `leaks`, `check:controls`).
@@ -490,8 +506,8 @@ The account already has **Workers Paid** and **R2 Paid** (both renew on 24 Oct).
 | Milestone | Goal | Done when |
 |---|---|---|
 | **M0: Research** | This README and the research notes | ✅ 14 Oct 2026 |
-| **M1: Spike: drive a real block** | The pipeline bakes one 2 × 2 km tile of **Downtown centered on Five Points** (OSM + 3DEP + Overture; it takes in a stretch of the Connector and Centennial Park), with one drivable raycast car, the protagonist on foot, a chase camera, the sim in a worker and a loopback transport | 60 fps on the Mac, runs on the iPhone, controls check passes |
-| **M2: Vertical slice: Intown and the river** | **Downtown, Midtown, the Connector, Old Fourth Ward and Inman Park on the way to Little Five Points and Candler Park, Buckhead, and west over the Chattahoochee to Vinings** (via West Paces Ferry and I-75). Streaming tiles, lane-graph traffic with signals, pedestrians with scenario points, carjacking, **driving and gunplay at equal polish** (cover, two or three weapons), heat 1–3 with the city police (and State Patrol on I-75/85), the first two fictional crews and their turf, one side activity (rideshare) | A 10-minute session of "steal a car, shoot your way out, lose them on the Connector" is fun |
+| **M1: Spike: drive a real block** | The pipeline bakes one 2 × 2 km tile of **Downtown centered on Five Points** (OSM + 3DEP + Overture; it takes in a stretch of the Connector and Centennial Park), with one drivable raycast car, the protagonist on foot, a chase camera, the sim in a worker and a loopback transport | 60 fps on the Mac, runs on the iPhone, controls check passes. **Progress:** the owner measured 120 fps on a Mac in Chrome; the iPhone check is still to do |
+| **M2: Vertical slice: Intown and the river** | **Downtown, Midtown, the Connector, Old Fourth Ward and Inman Park on the way to Little Five Points and Candler Park, Buckhead, and west over the Chattahoochee to Vinings** (via West Paces Ferry and I-75). Streaming tiles, lane-graph traffic with signals, pedestrians with scenario points, carjacking, **driving and gunplay at equal polish** (cover, two or three weapons), heat 1–3 with the city police (and State Patrol on I-75/85), the first two fictional crews and their turf, one side activity (rideshare). **Progress:** multi-tile streaming is built; the M2 bake is in progress | A 10-minute session of "steal a car, shoot your way out, lose them on the Connector" is fun |
 | **M3: The metro** | The compression warp across the whole area, the interstates and hand-built interchanges, Cobb and Gwinnett districts, the airport, Stone Mountain and the lakes, jurisdictions (State Patrol PITs on interstates), time of day and weather | Drive Marietta Square → Downtown → Duluth with no seams |
 | **M4: Sandbox depth** | Weapons and cover, the full dispatch ladder to 6 stars, side-activity backlog, economy, safehouses, garages, car mods, radio, random events | A player has reasons to stay for hours |
 | **M5: Multiplayer alpha** | Headless server, accounts, 8–16 player sessions, interest management, server-owned police | Friends can cause trouble together from a link |

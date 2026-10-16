@@ -3279,5 +3279,203 @@
         }
       ]
     }
-  ]
+  ],
+  "freeway": {
+    "weekday": [
+      {
+        "cars": 4,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 2.5,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 6,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 26,
+        "speed": 0.8,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 32,
+        "speed": 0.6,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 20,
+        "speed": 0.97,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 20,
+        "speed": 0.97,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 26,
+        "speed": 0.82,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 36,
+        "speed": 0.5,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 26,
+        "speed": 0.75,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 13,
+        "speed": 0.97,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 7,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      }
+    ],
+    "weekend": [
+      {
+        "cars": 6,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 4,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 3,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 5,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 10,
+        "speed": 0.95,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 15,
+        "speed": 0.9,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 17,
+        "speed": 0.85,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 17,
+        "speed": 0.85,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 16,
+        "speed": 0.85,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 15,
+        "speed": 0.9,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 13,
+        "speed": 0.95,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      },
+      {
+        "cars": 9,
+        "speed": 1,
+        "vehicleGroups": {
+          "city": 0.75,
+          "commercial": 0.25
+        }
+      }
+    ]
+  }
 }

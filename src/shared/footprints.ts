@@ -27,15 +27,28 @@ export class FootprintIndex {
 
   constructor(positions: Float32Array, indices: Uint32Array, buildingTriangles: number) {
     const n = Math.min(buildingTriangles, Math.floor(indices.length / 3));
-    // the lowest the walls go at each corner (a roof's corners are the walls' corners): where a building stands on the ground, or hangs over a cut
+    // the lowest the walls go at each corner *of each roof height* (a roof's corners are the walls' corners): where a building stands on the
+    // ground, or hangs over a cut, or floats (a skybridge drawn on the very corners of the tower it joins keeps its own base: the tower's
+    // walls have another top). A wall triangle has two heights: its top is the roof's, its bottom the base.
     const low = new Map<string, number>();
-    for (let t = 0; t < n * 3; t++) {
-      const v = indices[t];
-      const k = cornerKey(positions, v);
-      const y = positions[v * 3 + 1];
-      const prev = low.get(k);
-      if (prev === undefined || y < prev) low.set(k, y);
+    for (let t = 0; t < n * 3; t += 3) {
+      let lo = Infinity, hi = -Infinity;
+      for (let k = 0; k < 3; k++) {
+        const y = positions[indices[t + k] * 3 + 1];
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
+      if (hi - lo < 1e-3) continue; // a roof triangle
+      for (let k = 0; k < 3; k++) {
+        const v = indices[t + k];
+        if (positions[v * 3 + 1] - lo > 1e-3) continue;
+        const key = cornerKey(positions, v, hi);
+        const prev = low.get(key);
+        if (prev === undefined || lo < prev) low.set(key, lo);
+      }
     }
+    // (a roof corner with no wall under it, which a bake does not write, is its own height)
+    const lowAt = (v: number, top: number) => low.get(cornerKey(positions, v, top)) ?? top;
     const tris: number[] = [];
     const ys: number[] = [];
     const bases: number[] = [];
@@ -50,7 +63,7 @@ export class FootprintIndex {
       if (Math.abs((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) < 1e-6) continue;
       tris.push(ax, az, bx, bz, cx, cz);
       ys.push(ya);
-      bases.push(Math.min(low.get(cornerKey(positions, a))!, low.get(cornerKey(positions, b))!, low.get(cornerKey(positions, c))!));
+      bases.push(Math.min(lowAt(a, ya), lowAt(b, ya), lowAt(c, ya)));
       for (const [p, q] of [[a, b], [b, c], [c, a]]) {
         // an edge is identified by where its ends are: the vertices of a roof are copies, not shared with the walls
         const k = positionKey(positions, p, q);
@@ -68,7 +81,7 @@ export class FootprintIndex {
     for (const e of edges.values()) {
       if (e.count !== 1) continue;
       segs.push(positions[e.a * 3], positions[e.a * 3 + 2], positions[e.b * 3], positions[e.b * 3 + 2]);
-      segBases.push(Math.min(low.get(cornerKey(positions, e.a))!, low.get(cornerKey(positions, e.b))!));
+      segBases.push(Math.min(lowAt(e.a, positions[e.a * 3 + 1]), lowAt(e.b, positions[e.b * 3 + 1])));
     }
     this.seg = Float32Array.from(segs);
     this.segBase = Float32Array.from(segBases);
@@ -175,8 +188,8 @@ export class FootprintIndex {
 }
 
 /** A building corner by where it is on the ground plan (0.5 cm). */
-function cornerKey(p: Float32Array, v: number): string {
-  return `${Math.round(p[v * 3] * 200)},${Math.round(p[v * 3 + 2] * 200)}`;
+function cornerKey(p: Float32Array, v: number, top: number): string {
+  return `${Math.round(p[v * 3] * 200)},${Math.round(p[v * 3 + 2] * 200)},${Math.round(top * 20)}`;
 }
 
 function cellKey(cx: number, cz: number): number {

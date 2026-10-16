@@ -1,3 +1,4 @@
+import { checkDeckWidths } from './world/deckWidths.js';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -190,6 +191,10 @@ check(jn.junctions.filter((j) => j.control === 'signals').every((j) => j.legs.so
   const signalised = lanes.junctions.filter((j) => j.control === 'signals');
   check(signalised.length > 40 && signalised.every((j) => (j.heads?.length ?? 0) > 0), `signalised junctions have signal heads (${signalised.length})`);
   check(lanes.edges.filter((e) => e.t === 1).every((c) => c.t === 1 && c.c.every((o) => lanes.edges[o].t === 1)), 'conflicts point at connectors');
+  // decks against their lanes: the barriers stand at the drivable edge, clear of every lane, and no deck is far wider than its lanes
+  const dw = checkDeckWidths(roads as unknown as Parameters<typeof checkDeckWidths>[0], lanes.edges as unknown as Parameters<typeof checkDeckWidths>[1]);
+  console.log(`     decks: ${dw.decks} deck pieces, ${dw.points} lane points on them; ${dw.lanesPastBarrier} past a barrier, ${dw.decksTooWide} decks more than 2.5 m a side wider than their lanes (a motorway shoulder is 1.5 to 2 m)${dw.worst.length ? `; worst ${dw.worst.slice(0, 5).map((w) => `${w.id} (${w.x.toFixed(0)}, ${w.z.toFixed(0)}) ${w.what} by ${w.by.toFixed(2)} m`).join(', ')}` : ''}`);
+  check(dw.lanesPastBarrier === 0 && dw.decksTooWide === 0, 'every lane on a deck is clear of its barriers, and no deck is far wider than its lanes');
 }
 
 // mesh attributes (meshFormat 2 and 3) and the anchors file

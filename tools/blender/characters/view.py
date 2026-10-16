@@ -24,6 +24,13 @@ cb.build_scene([arch], lods=[lod], armature=True)
 if pose:
     from characters import anim
     anim.apply_test_pose(pose)
+    if opts.get('hands'):
+        from characters import clips as _c
+        _l, _, _r = opts['hands'].partition(',')
+        _p = anim.CLIPS[pose.partition(':')[0]].pose_at(float(pose.partition(':')[2] or 0))
+        _c.hands(_p, _l, _r or _l)
+        anim.apply_pose(bpy.data.objects['rig'], _p)
+        bpy.context.view_layer.update()
     if opts.get('shift'):
         for o in bpy.data.objects: pass
 def srgb(h):
@@ -58,10 +65,21 @@ views = {
     'head': ((0.7, 1.7, 1.1), (0, 1.6, 0), 50),
     'hip': ((0.9, 1.0, 1.5), (0, 0.95, 0), 50),
     'feet': ((1.1, 0.45, 1.3), (0, 0.15, 0.05), 50),
+    'shoe': ((0.55, 0.22, 0.62), (0.09, 0.04, 0.08), 42),
+    'shoeb': ((-0.5, 0.2, -0.45), (0.09, 0.05, 0.05), 42),
+    'shoes': ((0.75, 0.18, 0.2), (0.09, 0.05, 0.08), 42),
     'hand': ((0.9, 0.9, 0.9), (0.28, 0.85, 0.05), 50),
+    'handf': ((0.35, 0.95, 0.75), (0.26, 0.8, 0.07), 45),
+    'handi': ((-0.2, 0.9, 0.3), (0.24, 0.8, 0.07), 45),
+    'handb': ((0.45, 0.9, -0.5), (0.26, 0.8, 0.07), 45),
+    'handup': ((0.75, 1.6, 0.9), (0.25, 1.35, 0.4), 45),
     'upper': ((0.9, 1.5, 1.7), (0, 1.3, 0), 50),
     'upperb': ((-0.9, 1.5, -1.7), (0, 1.3, 0), 50),
+    'sidelow': ((2.8, 0.85, 0.3), (0, 0.72, 0.15), 40),
+    'frontlow': ((1.0, 0.95, 2.4), (0, 0.7, 0.2), 40),
     'headq': ((0.35, 1.68, 0.7), (0, 1.62, 0), 50),
+    'headback': ((-0.35, 1.7, -0.75), (0, 1.62, 0), 50),
+    'headf': ((0.0, 1.66, 0.8), (0, 1.62, 0), 50),
     'headside': ((0.85, 1.64, 0.1), (0, 1.62, 0), 50),
 }
 out = opts.get('out', '/tmp/char')

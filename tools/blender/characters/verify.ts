@@ -7,7 +7,7 @@
  *     face cover), joints, weights and a region byte
  *   - triangles per level of detail within budget
  *   - bounds: a person 1.7 to 1.8 m tall standing on y = 0, arms within half a metre of the middle
- *   - the skeleton: 22 bones named as skeleton.py names them, at the places it puts them, with the
+ *   - the skeleton: 34 bones (22 of the body, 12 of the fingers) named as skeleton.py names them, at the places it puts them, with the
  *     parents it gives them (and the ragdoll's eleven bodies mapped onto bones that exist)
  *   - weights: at most four joints a vertex, summing to one, all joints in range
  *   - the clips: every clip the game plays is there, with tracks that move, unit quaternions, no NaN
@@ -20,7 +20,7 @@ import { MeshoptDecoder } from 'meshoptimizer';
 
 /** Triangles per level of detail: [min, max]. */
 export const TRI_BUDGET: [number, number][] = [
-  [3000, 5000],
+  [3000, 5700],
   [800, 1600],
   [250, 650],
 ];
@@ -29,6 +29,8 @@ export const BONES = [
   'root', 'pelvis', 'spine', 'chest', 'neck', 'head',
   'clavicle_L', 'upperarm_L', 'forearm_L', 'hand_L', 'clavicle_R', 'upperarm_R', 'forearm_R', 'hand_R',
   'thigh_L', 'shin_L', 'foot_L', 'toe_L', 'thigh_R', 'shin_R', 'foot_R', 'toe_R',
+  'thumb_a_L', 'thumb_b_L', 'index_a_L', 'index_b_L', 'fingers_a_L', 'fingers_b_L',
+  'thumb_a_R', 'thumb_b_R', 'index_a_R', 'index_b_R', 'fingers_a_R', 'fingers_b_R',
 ];
 /** The bones the ragdoll's eleven bodies drive (src/client/render/chars/ragBones.ts). */
 export const RAG_BONES = ['pelvis', 'spine', 'head', 'upperarm_L', 'forearm_L', 'upperarm_R', 'forearm_R', 'thigh_L', 'shin_L', 'thigh_R', 'shin_R'];

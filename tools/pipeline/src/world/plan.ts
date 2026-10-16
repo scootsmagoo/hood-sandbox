@@ -35,6 +35,11 @@ export interface PlannedBuilding {
   pieces: PieceInput[];
   /** the highest point of any piece above the datum (what the collision prism is as tall as) */
   maxTopH: number;
+  /**
+   * How far above the datum the solid part of the building begins: 0 for anything that stands on the ground; for a building that
+   * is only floating pieces (a skybridge, a raised hall) the lowest underside, so the collision prism leaves the way under it open.
+   */
+  solidBaseH: number;
   stats: { parts: number; podium: boolean; pitched: number };
 }
 
@@ -222,7 +227,7 @@ export function planBuilding(bd: Building, ctx?: BuildingContext): PlannedBuildi
       const wallTop = r.topH - (roof ? roof.rise : 0);
       const parapet = roof ? 0 : parapetFor(kind, r.topH - r.baseH);
       const band = floating ? 0 : Math.min(bandFor(kind, r.topH, cls.era), (wallTop - r.baseH) * 0.45);
-      const dataFloors = piece?.numFloors ?? (multi ? null : (bd.facadeFloors ?? bd.look?.floors ?? bd.numFloors));
+      const dataFloors = bd.skybridge ? 1 : (piece?.numFloors ?? (multi ? null : (bd.facadeFloors ?? bd.look?.floors ?? bd.numFloors)));
       const fl = floorsFor(kind, wallTop - r.baseH - crown, band, dataFloors, cls.era, bd.look?.heightKnown && !multi ? 7 : 5.6);
       const wallSrgb = partColour ?? (podiumOfGlass || material !== cls.material ? paletteColour(material, kind, hash01(bd.id + 'c')) : cls.colour);
       const st = styleOf(cls, bd.id, { kind, wall: wallSrgb });
@@ -259,5 +264,8 @@ export function planBuilding(bd: Building, ctx?: BuildingContext): PlannedBuildi
     }
   }
   void rng;
-  return { cls, pieces, maxTopH: maxTop, stats: { parts: multi ? raws.length : 0, podium, pitched } };
+  // a building with nothing on the ground is solid only from its lowest underside up
+  const lowest = Math.min(...raws.map((r) => r.baseH));
+  const solidBaseH = lowest > 2 ? lowest : 0;
+  return { cls, pieces, maxTopH: maxTop, solidBaseH, stats: { parts: multi ? raws.length : 0, podium, pitched } };
 }

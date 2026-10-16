@@ -71,6 +71,20 @@ export const BODY = {
  */
 export const TRIP = { minSpeed: 2.2, height: 0.09, share: 0.75 } as const;
 
+/**
+ * The crash guard. Soft CCD (contacts predicted a step ahead) and the crash restitution are what a car needs against a wall, a
+ * barrier, a pole, another car or a body, but against the road they were the launches: a predictive contact with a facet of the
+ * ground or a deck a little ahead of the bumper, 0.1 to 0.2 m clear of it, was solved as an approach to stop, and with the
+ * restitution as one to bounce off, so the solver threw a car on a smooth road up by 1 to 4 m/s in one tick (the ground
+ * audit's "ghost" pushes; docs/ground-audit.md, round four). So both are on only in a tick when the body hull's box, lifted `lift`
+ * clear of the road and cast along the car's motion for `ticks` steps, meets something the hull collides with (within
+ * `margin`), and for `hold` ticks after; otherwise the hull meets the world without prediction and without bounce (it slides
+ * on the road it scrapes, as a belly does). The road itself is not what the lifted cast meets (it rises less than `lift`
+ * in a step even on a 25% ramp at 50 m/s), and a fixed face that looks up (`roadNy`: a bank, ground rising beside the road)
+ * does not count either: the guard is for walls, barriers, poles, cars and bodies.
+ */
+export const GUARD = { lift: 0.25, ticks: 2, margin: 0.05, hold: 6, ccd: 1.2, minSpeed: 1.5, roadNy: 0.6 } as const;
+
 export interface WheelState {
   /** Steering angle, positive turns left. */
   steer: number;
@@ -108,6 +122,16 @@ interface Wheel extends WheelState {
   ox: number;
   oy: number;
   oz: number;
+  // diagnostics (read by the ground audit; written every step, never read by the car)
+  /** Spring and damper acceleration before the anti-roll bars, m/s^2; the suspension's compression rate, m/s (positive compressing). */
+  spring: number;
+  rate: number;
+  /** What the wheel's query hit: the collider's handle, the feature type and id (-1 when none). */
+  hitCollider: number;
+  fty: number;
+  fid: number;
+  /** Vertical (world y) impulse the tyre's lateral and longitudinal forces gave the body this step, N s. */
+  tireJy: number;
 }
 
 export interface CarSpawn {
@@ -163,6 +187,12 @@ function cabinHull(half: readonly number[], off: readonly number[]): Float32Arra
   return new Float32Array(pts);
 }
 
+/** A shape-cast hit on a fixed collider's face that looks up (`GUARD.roadNy`): what the crash guard does not count. */
+function isRoadFace(h: RAPIER.ColliderShapeCastHit): boolean {
+  const b = h.collider.parent();
+  return (!b || b.isFixed()) && h.normal1.y >= GUARD.roadNy;
+}
+
 export class RaycastCar {
   readonly body: RAPIER.RigidBody;
   readonly wheels: Wheel[] = [];
@@ -188,6 +218,16 @@ export class RaycastCar {
   impactSpeedLoss = 0;
   /** The velocity change of the last step in the world frame, m/s. */
   readonly impactDv = { x: 0, y: 0, z: 0 };
+  /** The crash guard is on (see `GUARD`), and the ticks it stays on for. */
+  guarded = true;
+  /** Keeps the crash guard on for good: the physics before it (only the ground audit's `--no-guard` sets it). */
+  guardPinned = false;
+  private guardT = 0;
+  private readonly hulls: RAPIER.Collider[] = [];
+  /** The box the crash guard casts (the body hull's bounds), and its centre in the body's frame. */
+  private readonly guardBox: RAPIER.Cuboid;
+  private readonly guardOff: readonly number[];
+  private readonly guardPos = { x: 0, y: 0, z: 0 };
 
   constructor(
     private readonly R: typeof RAPIER,
@@ -203,7 +243,8 @@ export class RaycastCar {
         .setRotation(q)
         // Soft CCD (contacts predicted a step ahead) rather than hard CCD: hard CCD clamps the car's motion against anything it
         // would touch, a ragdoll included, which stops the car dead for a step and squeezes the body out like a pip.
-        .setSoftCcdPrediction(1.2)
+        // (on only while the crash guard is: see `GUARD`)
+        .setSoftCcdPrediction(GUARD.ccd)
         .setAngularDamping(0.08)
         .setLinearDamping(0)
         .setCanSleep(false),
@@ -219,8 +260,10 @@ export class RaycastCar {
         .setRestitution(BODY.restitution)
         .setRestitutionCombineRule(R.CoefficientCombineRule.Max)
         .setCollisionGroups(GROUPS.vehicle);
-    world.createCollider(mk(bodyHull(c.halfExtents, c.offset), c.halfExtents, c.offset), body);
-    world.createCollider(mk(cabinHull(c.cabin.halfExtents, c.cabin.offset), c.cabin.halfExtents, c.cabin.offset), body);
+    this.hulls.push(world.createCollider(mk(bodyHull(c.halfExtents, c.offset), c.halfExtents, c.offset), body));
+    this.hulls.push(world.createCollider(mk(cabinHull(c.cabin.halfExtents, c.cabin.offset), c.cabin.halfExtents, c.cabin.offset), body));
+    this.guardBox = new R.Cuboid(c.halfExtents[0], c.halfExtents[1], c.halfExtents[2]);
+    this.guardOff = c.offset;
 
     const w = c.halfExtents[0] * 2;
     const hh = c.cabin.offset[1] + c.cabin.halfExtents[1] - (c.offset[1] - c.halfExtents[1]);
@@ -257,6 +300,7 @@ export class RaycastCar {
         nominal: nominalLoad(share),
         load: 0,
         accel: 0, hitDist: 0, nx: 0, ny: 1, nz: 0, ox: 0, oy: 0, oz: 0,
+        spring: 0, rate: 0, hitCollider: -1, fty: -1, fid: -1, tireJy: 0,
       });
     }
     this.ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
@@ -437,11 +481,17 @@ export class RaycastCar {
           w.nx = up.x; w.ny = up.y; w.nz = up.z;
         }
         w.accel = suspensionAccel(w.length, w.prevLength, dt, rest, omega, sus.bumpDamping, sus.reboundDamping, BODY.bumpStop);
+        w.hitCollider = hit.collider.handle;
+        w.fty = hit.featureType;
+        w.fid = hit.featureId ?? -1;
       } else {
         w.grounded = false;
         w.length = sus.travel;
         w.accel = 0;
+        w.hitCollider = w.fty = w.fid = -1;
       }
+      w.spring = w.accel;
+      w.rate = (w.prevLength - w.length) / dt;
     }
     this.airborne = grounded === 0;
 
@@ -470,6 +520,7 @@ export class RaycastCar {
       if (!w.grounded) {
         w.slip = 0;
         w.load = 0;
+        w.tireJy = 0;
         continue;
       }
       // Wheel axes on the ground plane.
@@ -552,6 +603,7 @@ export class RaycastCar {
       const fiy = tireOut.fLong * fy * dt;
       const fiz = tireOut.fLong * fz * dt;
       body.applyImpulseAtPoint({ x: fix, y: fiy, z: fiz }, { x: px, y: py, z: pz }, true);
+      w.tireJy = liy + fiy;
 
       // A wheel sliding sideways into a kerb trips the car.
       if (Math.abs(tmpTire.vLat) > TRIP.minSpeed) this.trip(w, px, py, pz, lx, ly, lz, tmpTire.vLat, dt);
@@ -567,6 +619,38 @@ export class RaycastCar {
     const dragK = d.drag * speed * dt * h.mass;
     const dfK = h.extras.downforce * speed * speed * dt * h.mass;
     body.applyImpulse({ x: -lv.x * dragK - up.x * dfK, y: -lv.y * dragK - up.y * dfK, z: -lv.z * dragK - up.z * dfK }, true);
+
+    this.guard(dt);
+  }
+
+  /** Turns the crash guard on or off for the coming step (see `GUARD`). */
+  private guard(dt: number) {
+    if (this.guardPinned) return;
+    const body = this.body;
+    const v = body.linvel();
+    let hit = false;
+    if (v.x * v.x + v.y * v.y + v.z * v.z > GUARD.minSpeed * GUARD.minSpeed) {
+      const t = body.translation();
+      const q = body.rotation();
+      const o = this.guardOff;
+      const m = rotateVec(q, o[0], o[1], o[2]);
+      this.guardPos.x = t.x + m.x;
+      this.guardPos.y = t.y + m.y + GUARD.lift;
+      this.guardPos.z = t.z + m.z;
+      const cast = (skip?: RAPIER.Collider) => this.world.castShape(this.guardPos, q, v, this.guardBox, GUARD.margin, dt * GUARD.ticks, true, undefined, GROUPS.vehicle, skip, body);
+      let h = cast();
+      // a fixed face that looks up (a bank, a ramp, the ground rising beside a wide carriageway) is road the wheels climb, not
+      // something to crash into: look past it once (a wall that stands behind it)
+      if (h && isRoadFace(h)) h = cast(h.collider);
+      hit = h !== null && !isRoadFace(h);
+    }
+    if (hit) this.guardT = GUARD.hold;
+    else if (this.guardT > 0) this.guardT--;
+    const on = this.guardT > 0;
+    if (on === this.guarded) return;
+    this.guarded = on;
+    body.setSoftCcdPrediction(on ? GUARD.ccd : 0);
+    for (const c of this.hulls) c.setRestitution(on ? BODY.restitution : 0);
   }
 
   /** See `TRIP`. (lx, ly, lz) is the wheel's left axis on the ground plane; `vLat` the contact's velocity along it. */

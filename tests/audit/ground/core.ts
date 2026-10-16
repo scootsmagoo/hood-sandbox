@@ -65,6 +65,61 @@ export interface GroundEvent {
   /** How bad: ticks in the air, m/s, m/s^2, rad/s, m (by kind). */
   value: number;
   detail?: string;
+  /** For a launch or an airborne episode with `trace` on: the ticks before it (see `TickTrace`). */
+  trace?: TickTrace[];
+  /** For a launch or an airborne episode: what made it and what the ground was like (see `classifyLaunch`). */
+  origin?: string;
+  ground?: LaunchClass['ground'];
+}
+
+/** One wheel in one tick, for the launch traces. */
+export interface WheelTrace {
+  /** grounded; what it hit (kind, Rapier feature type and id); ray hit distance, m; the hit normal's y; suspension length, m */
+  g: 0 | 1;
+  kind: SurfaceKind;
+  fty: number;
+  fid: number;
+  hit: number;
+  ny: number;
+  nx: number;
+  nz: number;
+  /** the height of the ray's contact, m */
+  cy: number;
+  len: number;
+  /** compression rate, m/s; spring and damper accel before the anti-roll bars and after, m/s^2; the tyre's vertical impulse as dv, m/s */
+  rate: number;
+  spring: number;
+  acc: number;
+  tireDv: number;
+}
+
+/** One tick of a car, for the launch traces: where it was, its vertical velocity budget, and what the solver did to the hull. */
+export interface TickTrace {
+  tick: number;
+  x: number;
+  y: number;
+  z: number;
+  vH: number;
+  vy: number;
+  /** the road's vertical speed from the lane's grade, m/s */
+  vyRoad: number;
+  /** the tick's vertical dv, and the shares of it: the springs, the tyres, gravity and the rest (the solver: the hull) */
+  dv: number;
+  dvSpring: number;
+  dvTire: number;
+  dvSolver: number;
+  pitchRate: number;
+  rollRate: number;
+  /** the car's crash guard was on for the step (soft CCD and the crash restitution) */
+  guarded: boolean;
+  wheels: WheelTrace[];
+  /** What the static world pushed the hull with in the step (Rapier's contact force events): the kind and the impulse as dv, m/s. */
+  pushes: { k: SurfaceKind; dv: number[] }[];
+  /** The hull's true distance before the step to the ground and to the decks (plain copies, exact query; 9 when over 0.5 m). */
+  clearGround: number;
+  clearDeck: number;
+  /** The hull's nearest static contacts after the step (what the next step's solver works with): kind, collision triangle, distance, normal (pushing the hull), point. */
+  contacts: { k: SurfaceKind; tri: number; d: number; n: number[]; p: number[] }[];
 }
 
 export interface DriveStats {
@@ -366,7 +421,48 @@ export interface DriveOptions {
   log?: (m: string) => void;
   /** Stop after this many routes (for a quick sample). */
   maxRoutes?: number;
+  /** Attach the last ticks' `TickTrace` to every launch and airborne episode (`--trace`). */
+  trace?: boolean;
+  /** A hook before and after each world step (for probing one spot by hand). */
+  onTick?: (phase: 'pre' | 'post', tick: number, car: RaycastCar, hulls: RAPIER.Collider[]) => void;
+  /** Keep every car's crash guard on (`--no-guard`: the physics before round four). */
+  noGuard?: boolean;
+  /** Steps the world instead of `world.step()` (for probing). */
+  step?: () => void;
 }
+
+/** Ticks of trace kept before a launch. */
+const TRACE_TICKS = 45;
+
+/** The hull's nearest contacts with static colliders after a step, with their normals (pushing the hull) and points. */
+function hullContacts(gw: GroundWorld, hulls: RAPIER.Collider[], body: RAPIER.RigidBody, max = 4): TickTrace['contacts'] {
+  const out: TickTrace['contacts'] = [];
+  const world = gw.world;
+  const c = body.translation();
+  for (const hc of hulls) {
+    world.contactPairsWith(hc, (other) => {
+      const ob = other.parent();
+      if (ob && ob.isDynamic()) return;
+      world.contactPair(hc, other, (m, flipped) => {
+        if (!m.numContacts()) return;
+        let bi = 0;
+        for (let i = 1; i < m.numContacts(); i++) if (m.contactDist(i) < m.contactDist(bi)) bi = i;
+        const lp = flipped ? m.localContactPoint1(bi) : m.localContactPoint2(bi);
+        if (!lp) return;
+        const ot = other.translation(), oq = other.rotation();
+        const wp = rotateVec(oq, lp.x, lp.y, lp.z);
+        const p = [wp.x + ot.x, wp.y + ot.y, wp.z + ot.z];
+        const nw = m.normal();
+        // the push on the hull points from the static surface toward the body
+        const sgn = (c.x - p[0]) * nw.x + (c.y - p[1]) * nw.y + (c.z - p[2]) * nw.z >= 0 ? 1 : -1;
+        const local = flipped ? m.subshape1() : m.subshape2();
+        out.push({ k: gw.kindOf(other, local), tri: gw.globalTri(other, local), d: r3(m.contactDist(bi)), n: [r3(nw.x * sgn), r3(nw.y * sgn), r3(nw.z * sgn)], p: p.map(r3) });
+      });
+    });
+  }
+  return out.sort((a, b) => a.d - b.d).slice(0, max);
+}
+
 
 /** What a wheel stood on in a tick: the kind, the height, and at a change of kind the step between the two surfaces there. */
 interface WheelLog { kind: SurfaceKind; y: number; step?: number }
@@ -455,6 +551,7 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
   const ped = { throttle: 0, brake: 0 };
   const coveredEdges = new Set<number>();
   const dbg = globalThis as { __DBG?: boolean; __DBGN?: number };
+  const traceQueue = new R.EventQueue(true);
   const bounds = gw.tile.manifest.bounds;
 
   // an edge a route meant to measure but never reached (the car gave up before it) is tried again, twice at most
@@ -484,8 +581,14 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
     car.adopt();
     const hulls: RAPIER.Collider[] = [];
     for (let i = 0; i < car.body.numColliders(); i++) hulls.push(car.body.collider(i));
+    // the physics before the crash guard (`--no-guard`): soft CCD and the crash restitution always on, as the car is made
+    if (o.noGuard) car.guardPinned = true;
     const wheelLog: WheelLog[][] = [[], [], [], []];
     const pushLog: (HullPush | null)[] = [];
+    const traceLog: TickTrace[] = [];
+    const tickPushes: TickTrace['pushes'] = [];
+    let clearG = 9, clearD = 9;
+    for (const hc of hulls) { hc.setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS); hc.setContactForceEventThreshold(0); }
     let air = 0;
     let prevVy = 0, prevPitch = 0, prevRoll = 0;
     // one open episode per kind: the same kind again within half a second is the same event
@@ -511,9 +614,33 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
       car.step(SIM_DT, input);
       // the vertical push the wheels gave this tick (the loads act along the body's up axis)
       const upB = rotateVec(car.body.rotation(), 0, 1, 0);
-      let wheelDv = 0;
-      for (const w of car.wheels) wheelDv += (w.load * upB.y * SIM_DT) / h.mass;
-      world.step();
+      let wheelDv = 0, tireDv = 0;
+      for (const w of car.wheels) { wheelDv += (w.load * upB.y * SIM_DT) / h.mass; tireDv += w.tireJy / h.mass; }
+      o.onTick?.('pre', tick, car, hulls);
+      const guardedNow = car.guarded;
+      {
+        clearG = clearD = 9;
+        // (every tick: the contacts the step will solve are not in the narrow phase's lists before it)
+        for (const hc of hulls) {
+          if (gw.physics.terrain) { const c = hc.contactCollider(gw.physics.terrain, 0.5); if (c) clearG = Math.min(clearG, c.distance); }
+          for (const m of gw.physics.staticMeshes) {
+            if (m.forCars || m.firstTriangle === 0) continue;
+            const c = hc.contactCollider(m.collider, 0.5);
+            if (c) clearD = Math.min(clearD, c.distance);
+          }
+        }
+        tickPushes.length = 0;
+        if (o.step) o.step(); else world.step(traceQueue);
+        traceQueue.drainContactForceEvents((ev) => {
+          const c1 = world.getCollider(ev.collider1()), c2 = world.getCollider(ev.collider2());
+          const st = c1.parent()?.isDynamic() ? c2 : c1;
+          if (st.parent()?.isDynamic()) return;
+          const f = ev.totalForce();
+          const sgn = c1.parent()?.isDynamic() ? -1 : 1;
+          tickPushes.push({ k: gw.kindOf(st), dv: [f.x, f.y, f.z].map((v) => r3((sgn * v * SIM_DT) / h.mass)) });
+        });
+      }
+      o.onTick?.('post', tick, car, hulls);
       stats.ticks++;
 
       // ---- what happened this tick
@@ -569,6 +696,22 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
       }
       pushLog.push(push);
       if (pushLog.length > 40) pushLog.shift();
+      {
+        const a0 = route[Math.max(0, f.i - 4)], b0 = route[Math.min(route.length - 1, f.i + 4)];
+        const run0 = Math.hypot(b0.x - a0.x, b0.z - a0.z);
+        traceLog.push({
+          tick, x: r3(t.x), y: r3(t.y), z: r3(t.z), vH: r3(Math.hypot(lv.x, lv.z)), vy: r3(lv.y), vyRoad: r3(run0 > 0.5 ? (Math.hypot(lv.x, lv.z) * (b0.y - a0.y)) / run0 : 0),
+          dv: r3(dvy), dvSpring: r3(wheelDv), dvTire: r3(tireDv), dvSolver: r3(tick > 0 ? dvy - wheelDv - tireDv + 9.81 * SIM_DT : 0),
+          pitchRate: r3(av.x * left.x + av.y * left.y + av.z * left.z), rollRate: r3(av.x * fwd.x + av.y * fwd.y + av.z * fwd.z),
+          guarded: guardedNow, pushes: tickPushes.slice(), clearGround: r3(clearG), clearDeck: r3(clearD),
+          contacts: o.trace ? hullContacts(gw, hulls, car.body) : [],
+          wheels: car.wheels.map((w, k) => ({
+            g: w.grounded ? 1 : 0, kind: wheelLog[k][wheelLog[k].length - 1]?.kind ?? 'none', fty: w.fty, fid: w.fid, hit: r3(w.hitDist), ny: r3(w.ny), nx: r3(w.nx), nz: r3(w.nz),
+            cy: r3(w.oy - upB.y * w.hitDist), len: r3(w.length), rate: r3(w.rate), spring: r3(w.spring), acc: r3(w.accel), tireDv: r3(w.tireJy / h.mass),
+          })),
+        });
+        if (traceLog.length > TRACE_TICKS) traceLog.shift();
+      }
       if (dbg.__DBG && tick % (dbg.__DBGN ?? 30) === 0) {
         console.log(`t ${(tick / 60).toFixed(2)} edge ${rp.edge} i ${f.i}/${route.length} pos ${t.x.toFixed(1)},${t.y.toFixed(2)},${t.z.toFixed(1)} path ${rp.x.toFixed(1)},${rp.y.toFixed(2)},${rp.z.toFixed(1)} v ${speed.toFixed(1)} thr ${input.throttle.toFixed(2)} br ${input.brake.toFixed(2)} st ${input.steer.toFixed(2)} wheels ${car.wheels.map((w) => (w.grounded ? 1 : 0)).join('')} vy ${lv.y.toFixed(2)} resid ${residual.toFixed(2)}${push ? ` PUSH ${JSON.stringify(push)}` : ''}`);
       }
@@ -599,6 +742,12 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
           }
           const cause = diagnose(gw, wheelLog, pushLog, route, f.i, vH, kind, car.body);
           const e: GroundEvent = { kind, cause, x: t.x, y: t.y, z: t.z, speed: o.speed, v: vH, edge: rp.edge, road: g.roadOf(rp.edge), cls: g.clsOf(rp.edge), value, detail: detail ?? `lateral ${lateral.toFixed(1)} m` };
+          if (kind === 'air' || kind === 'launch') {
+            const lc = classifyLaunch(traceLog, cause, designCrest(route, f.i, vH));
+            e.origin = lc.origin;
+            e.ground = lc.ground;
+            if (o.trace) e.trace = traceLog.slice();
+          }
           open.set(kind, { e, tick });
           events.push(e);
         };
@@ -644,6 +793,116 @@ export function driveLanes(gw: GroundWorld, g: Graph, o: DriveOptions): { events
   stats.vMean = vTicks ? vSum / vTicks : 0;
   stats.ms = performance.now() - t0;
   return { events, stats };
+}
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** The launch classification's thresholds (docs/ground-audit.md, round four). */
+export const ORIGIN = {
+  /** Ticks before a launch looked at for its kick. */
+  window: 30,
+  /** An upward dv in one tick beyond the car's weight (m/s; 15 m/s^2, 1.5 g) that counts as a kick. */
+  kick: 0.25,
+  /** The hull's exact distance to what pushed it above which the push was a ghost (m). */
+  ghostClear: 0.03,
+  /** A step in a wheel's contact height between two ticks beyond the road's grade (m). */
+  step: 0.04,
+  /** A wheel this short (m) is on its bump stop. */
+  bottomed: 0.05,
+  /** The designed road's crest (over a 3 m chord) lifts a car when v^2 k exceeds this share of g. */
+  crest: 0.8,
+} as const;
+
+/** What made a launch and what the ground was like where it happened (see `classifyLaunch`). */
+export interface LaunchClass {
+  /**
+   * The kick: `hull-ghost:<kind>` (the hull pushed while clear of what pushed it), `hull-protrusion:<kind>` (the hull on a surface
+   * that stands up between wheels at their ride height), `hull-bottomed:<kind>` (the hull on the road with a wheel on its bump stop),
+   * `crash:<kind>` (a prop, a wall, a car), `wheel-step` (a spring kick where a wheel's contact jumped), `wheel-rebound` (a spring
+   * kick on a continuous surface: a compression let go), `wheel-tyre`, `airtime` (no kick: the road fell away from the car).
+   */
+  origin: string;
+  /**
+   * The ground: `smooth` (continuous under every wheel, the hull clear of it, no crest or step in the diagnosis: a launch here is a
+   * physics bug), `crest-real` (a crest the designed road itself has at that speed: a real car goes light there too), `crest-bake`
+   * (a crest in the physics surface the design does not have), `seam` (a step, a protrusion or a sag the suspension cannot take:
+   * the map), `crash` (not the ground).
+   */
+  ground: 'smooth' | 'crest-real' | 'crest-bake' | 'seam' | 'crash';
+}
+
+/**
+ * What made a launch, from the ticks before it. Each tick's vertical dv is split exactly into the springs, the tyres, gravity and
+ * the solver (the hull: Rapier's contact force events say what pushed it); the largest kick in the window names the origin.
+ * `designCrest` is v^2 k / g of the designed road (the lane's profile) over the same window.
+ */
+export function classifyLaunch(trace: TickTrace[], cause: string, designCrest: number): LaunchClass {
+  const W = trace.slice(-ORIGIN.window);
+  const G1 = 9.81 * SIM_DT;
+  let best = 0, at = -1, src = '';
+  for (let i = 1; i < W.length; i++) {
+    const t = W[i];
+    let ground = 0, other = 0, otherKind = '';
+    for (const p of t.pushes) {
+      if (p.k === 'ground' || p.k === 'deck') ground += p.dv[1];
+      else if (p.dv[1] > other || Math.hypot(p.dv[0], p.dv[2]) > ORIGIN.kick) { other = Math.max(other, p.dv[1], Math.hypot(p.dv[0], p.dv[2])); otherKind = p.k; }
+    }
+    const cand: [number, string][] = [[ground, 'hull'], [other, `crash:${otherKind}`], [t.dvSpring - G1, 'spring'], [t.dvTire, 'tyre']];
+    for (const [v, k] of cand) if (v > best) { best = v; at = i; src = k; }
+  }
+  // a wheel whose contact jumped between two grounded ticks beyond the road's grade
+  const stepped = (from: number, to: number) => {
+    for (let i = Math.max(1, from); i <= to && i < W.length; i++) {
+      for (let w = 0; w < 4; w++) {
+        const a = W[i - 1].wheels[w], b = W[i].wheels[w];
+        if (!a.g || !b.g) continue;
+        if (Math.abs(b.cy - a.cy - W[i].vyRoad * SIM_DT) > ORIGIN.step) return true;
+      }
+    }
+    return false;
+  };
+  const bottomedNear = (i: number) => W.slice(Math.max(0, i - 3), i + 1).some((t) => t.wheels.some((w) => w.g && w.len <= ORIGIN.bottomed));
+  let origin: string;
+  if (best < ORIGIN.kick) origin = 'airtime';
+  else if (src.startsWith('crash')) origin = src;
+  else if (src === 'hull') {
+    const t = W[at];
+    const top = t.pushes.filter((p) => p.k === 'ground' || p.k === 'deck').sort((a, b) => b.dv[1] - a.dv[1])[0];
+    const kind = top?.k ?? 'ground';
+    const clear = kind === 'deck' ? t.clearDeck : t.clearGround;
+    origin = clear > ORIGIN.ghostClear ? `hull-ghost:${kind}` : bottomedNear(at) ? `hull-bottomed:${kind}` : `hull-protrusion:${kind}`;
+  } else if (src === 'spring') origin = stepped(at - 6, at) ? 'wheel-step' : 'wheel-rebound';
+  else origin = 'wheel-tyre';
+
+  let ground: LaunchClass['ground'];
+  const crestCause = /^(crest|sag)/.test(cause);
+  const seamCause = /^(surface-step|wheel-on-|hull-on-slab-edge|hull-on-pier|hull-on-wall)/.test(cause);
+  if (origin.startsWith('crash')) ground = 'crash';
+  else if (crestCause && designCrest > ORIGIN.crest) ground = 'crest-real';
+  else if (origin.startsWith('hull-protrusion') || origin.startsWith('hull-bottomed') || origin === 'wheel-step' || seamCause || stepped(1, W.length - 1)) ground = 'seam';
+  else if (crestCause) ground = 'crest-bake';
+  else ground = 'smooth';
+  return { origin, ground };
+}
+
+/** v^2 k / g of the route's own profile (the designed road) over 3 m chords from `back` m behind point i to `ahead` m in front. */
+function designCrest(route: { x: number; y: number; z: number }[], i: number, v: number, back = 14, ahead = 2): number {
+  let s = 0, a = i, b = i;
+  while (a > 0 && s < back) { s += Math.hypot(route[a].x - route[a - 1].x, route[a].z - route[a - 1].z); a--; }
+  s = 0;
+  while (b < route.length - 1 && s < ahead) { s += Math.hypot(route[b + 1].x - route[b].x, route[b + 1].z - route[b].z); b++; }
+  let k = 0;
+  for (let m = a; m <= b; m++) {
+    // the points 1.5 m either side along the route
+    let p = m, q = m, sp = 0, sq = 0;
+    while (p > 0 && sp < 1.5) { sp += Math.hypot(route[p].x - route[p - 1].x, route[p].z - route[p - 1].z); p--; }
+    while (q < route.length - 1 && sq < 1.5) { sq += Math.hypot(route[q + 1].x - route[q].x, route[q + 1].z - route[q].z); q++; }
+    if (sp < 1.2 || sq < 1.2) continue;
+    // curvature of the profile through the three points (y against distance along the route)
+    const slope1 = (route[m].y - route[p].y) / sp, slope2 = (route[q].y - route[m].y) / sq;
+    k = Math.max(k, (slope1 - slope2) / ((sp + sq) / 2));
+  }
+  return (v * v * k) / 9.81;
 }
 
 /**
@@ -998,13 +1257,17 @@ export function countEvents(events: GroundEvent[]) {
   const byCause: Record<string, number> = {};
   const byKindCause: Record<string, Record<string, number>> = {};
   const bySpeed: Record<string, Record<string, number>> = {};
+  const launchGround: Record<string, number> = {};
+  const launchOrigin: Record<string, number> = {};
   for (const e of events) {
+    if (e.ground) launchGround[e.ground] = (launchGround[e.ground] ?? 0) + 1;
+    if (e.origin) launchOrigin[e.origin] = (launchOrigin[e.origin] ?? 0) + 1;
     byKind[e.kind] = (byKind[e.kind] ?? 0) + 1;
     byCause[e.cause] = (byCause[e.cause] ?? 0) + 1;
     (byKindCause[e.kind] ??= {})[e.cause] = (byKindCause[e.kind][e.cause] ?? 0) + 1;
     if (e.speed) (bySpeed[e.speed] ??= {})[e.kind] = (bySpeed[e.speed][e.kind] ?? 0) + 1;
   }
-  return { byKind, byCause, byKindCause, bySpeed };
+  return { byKind, byCause, byKindCause, bySpeed, launchGround, launchOrigin };
 }
 
 /** Edges split into `n` groups by region (stripes along x of about equal edge counts), so a shard's routes stay near each other. */

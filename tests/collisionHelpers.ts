@@ -4,11 +4,11 @@ import type { TileData } from '../src/shared/tile';
 import { flatTile } from './helpers';
 
 /** A closed box building from (x0, z0) to (x1, z1), `h` m tall: walls and a flat roof, in the order `collision.bin` has them. */
-export function boxMesh(boxes: { x0: number; z0: number; x1: number; z1: number; h: number }[]): { positions: Float32Array; indices: Uint32Array } {
+export function boxMesh(boxes: { x0: number; z0: number; x1: number; z1: number; h: number; y0?: number }[]): { positions: Float32Array; indices: Uint32Array } {
   const positions: number[] = [];
   const indices: number[] = [];
   for (const b of boxes) {
-    const y0 = -1, y1 = b.h;
+    const y0 = b.y0 ?? -1, y1 = b.h;
     const base = positions.length / 3;
     // corners: 0 sw, 1 se, 2 ne, 3 nw (bottom), 4 to 7 the same on top
     const c: [number, number][] = [[b.x0, b.z1], [b.x1, b.z1], [b.x1, b.z0], [b.x0, b.z0]];

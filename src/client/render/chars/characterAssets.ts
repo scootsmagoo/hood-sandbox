@@ -1,6 +1,6 @@
 /**
  * The character assets: public/assets/characters/characters.glb, built by `npm run assets` from
- * tools/blender/characters. One armature (22 bones), every archetype as three skinned meshes
+ * tools/blender/characters. One armature (34 bones: 22 of the body, 12 of the fingers), every archetype as three skinned meshes
  * (`<archetype>_lod0..2`, about 4k, 1k and 400 triangles, one primitive each with a per-vertex
  * `_region` and the baked occlusion in the vertex colour) and the animation clips.
  *
@@ -43,7 +43,7 @@ export const characterAssets = (): CharacterAssets | null => assets;
 export const characterAssetsFailed = () => failed;
 export const MANIFEST = manifest;
 
-const UPPER = /^(spine|chest|neck|head|clavicle_[LR]|upperarm_[LR]|forearm_[LR]|hand_[LR])\./;
+const UPPER = /^(spine|chest|neck|head|clavicle_[LR]|upperarm_[LR]|forearm_[LR]|hand_[LR]|(thumb|index|fingers)_[ab]_[LR])\./;
 const LOWER = /^(root|pelvis|thigh_[LR]|shin_[LR]|foot_[LR]|toe_[LR])\./;
 
 export function loadCharacterAssets(base: string = document.baseURI): Promise<void> {

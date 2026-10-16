@@ -21,6 +21,12 @@ Materials are named for what the game does with them (src/client/render/Landmark
   lm_glass    glazing that is not a facade: skylights, canopies, domes, the stadium's glass wings
   lm_glow     emissive at night, plain by day (rings, halos, lanterns, floodlit crowns): colour is the vertex colour
   lm_dark     black glazing, shadow gaps, tyres: unlit dark
+  lm_water    animated water jets (the fountain): COLOR_0 is data, not albedo: r = height along the jet (0 foot, 1 tip),
+              g = the jet's phase in its show; the shader moves the vertices (Landmarks.ts)
+
+A model may have moving parts: `Lod.child(name, pivot, props)` makes a sub-level whose geometry (written in the model frame
+like the rest) is exported as an empty `lod<N>_<name>` at `pivot` with the meshes under it, so the game can turn or scale it
+about that point. `props` go to the node's glTF extras (what the game reads to drive it: see Landmarks.ts, "animated parts").
 
 COLOR_0 is the albedo (linear) and its alpha the baked ambient occlusion (as the tile's).
 Everything here is deterministic: no sets, no randomness.
@@ -32,7 +38,7 @@ from mathutils import Vector
 
 from hoodlib.frame import to_bl
 
-MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark']
+MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark', 'lm_water']
 
 # building kind ids (tools/pipeline/src/world/classify.ts BUILDING_KINDS)
 K_GENERIC, K_OFFICE, K_GLASS, K_BRICK, K_PARKING, K_RETAIL, K_CIVIC, K_RELIGIOUS, K_INDUSTRIAL, K_RESID, K_HOUSE, K_SMALL, K_VENUE = range(13)
@@ -170,6 +176,15 @@ class Lod:
         self.index = index
         self.parts = {}
         self.floor_h = 4.0
+        self.children = {}   # name -> (Lod, pivot, props): a moving part
+
+    def child(self, name, pivot, props=None):
+        """A sub-level for a moving part: its geometry is in the model frame; the export puts it under an empty `lod<N>_<name>`
+        at `pivot` (vertices relative to it)."""
+        c = Lod(self.index)
+        c.floor_h = self.floor_h
+        self.children[name] = (c, tuple(pivot), dict(props or {}))
+        return c
 
     def part(self, mat):
         if mat not in self.parts:
@@ -177,7 +192,13 @@ class Lod:
         return self.parts[mat]
 
     def tris(self):
-        return sum(len(p.t) for p in self.parts.values())
+        return sum(len(p.t) for p in self.parts.values()) + sum(c.tris() for c, _, _ in self.children.values())
+
+    def all_parts(self):
+        """Every part of the level, the moving parts' included."""
+        yield from self.parts.values()
+        for c, _, _ in self.children.values():
+            yield from c.all_parts()
 
     def merge(self, other, a=0.0, ox=0.0, oz=0.0, dy=0.0):
         """Adds another Lod's geometry, turned by `a` (the frame of `to_world`) about the origin, then moved by (ox, dy, oz).
@@ -392,8 +413,8 @@ class Lod:
                 d = (P[min(n - 1, end + 1)] - P[max(0, end - 1)]).normalized() * sign
                 self.poly(mat, rings[end], col, hint=(d.x, d.y, d.z))
 
-    def beam(self, mat, a, b, w, d, col, up=(0, 1, 0)):
-        """A square beam (w across, d deep) from a to b."""
+    def beam(self, mat, a, b, w, d, col, up=(0, 1, 0), caps=True):
+        """A square beam (w across, d deep) from a to b; `caps=False` leaves the ends open (members that end inside another)."""
         A, B = Vector(a), Vector(b)
         t = (B - A)
         if t.length < 1e-6:
@@ -406,8 +427,9 @@ class Lod:
         ra = [tuple(A + s * x + h * y) for x, y in corners]
         rb = [tuple(B + s * x + h * y) for x, y in corners]
         self.skin(mat, [ra, rb], col, inside=tuple((A + B) / 2))
-        self.poly(mat, ra, col, hint=tuple(-t))
-        self.poly(mat, rb, col, hint=tuple(t))
+        if caps:
+            self.poly(mat, ra, col, hint=tuple(-t))
+            self.poly(mat, rb, col, hint=tuple(t))
 
 
 def _dist(a, b):
@@ -527,41 +549,51 @@ def _merged_parts(lod):
     return out
 
 
+def _emit_meshes(lod, mat_parts, parent, prefix, origin=(0.0, 0.0, 0.0)):
+    """The Blender objects of one level's (or one moving part's) parts, vertices taken relative to `origin`."""
+    ox, oy, oz = origin
+    for mat in MATERIALS:
+        part = mat_parts.get(mat)
+        if part is None or not part.t:
+            continue
+        me = bpy.data.meshes.new(f'{prefix}_{mat}')
+        me.from_pydata([tuple(to_bl(p[0] - ox, p[1] - oy, p[2] - oz)) for p in part.p], [], [tuple(t) for t in part.t])
+        me.update()
+        me.normals_split_custom_set_from_vertices([tuple(to_bl(*n)) for n in part.n])
+        ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'POINT')
+        for i, c in enumerate(part.c):
+            ca.data[i].color = c
+        uvl = me.uv_layers.new(name='UVMap')
+        for loop in me.loops:
+            # the glTF exporter flips v (v' = 1 - v): store 1 - y so the file has y, metres above the ground, as the tile's walls do
+            uvl.data[loop.index].uv = (part.uv[loop.vertex_index][0], 1.0 - part.uv[loop.vertex_index][1])
+        if mat in ('bld_wall', 'bld_glass'):
+            for name, vals in (('_WALL', part.w), ('_BLD', part.b)):
+                at = me.attributes.new(name, 'QUATERNION', 'POINT')
+                for i, v in enumerate(vals):
+                    at.data[i].value = tuple(v) if v else (0, 0, 0, 0)
+            at = me.attributes.new('_BID', 'QUATERNION', 'POINT')
+            for i, v in enumerate(part.d):
+                at.data[i].value = (v[0], v[1], 0, 0)
+        me.materials.append(_material(mat))
+        ob = bpy.data.objects.new(f'{prefix}_{mat}', me)
+        bpy.context.scene.collection.objects.link(ob)
+        ob.parent = parent
+
+
 def emit(lods, root_name='landmark'):
-    """Makes Blender objects from the levels of detail: `lod<N>` empties holding one mesh per material. Returns the triangle counts."""
+    """Makes Blender objects from the levels of detail: `lod<N>` empties holding one mesh per material (and one empty per
+    moving part, `lod<N>_<name>`, holding its own). Returns the triangle counts."""
     from hoodlib import scene
 
     root = scene.empty(root_name)
     counts = []
     for lod in lods:
         grp = scene.empty(f'lod{lod.index}', parent=root)
-        merged = _merged_parts(lod)
-        for mat in MATERIALS:
-            part = merged.get(mat)
-            if part is None or not part.t:
-                continue
-            me = bpy.data.meshes.new(f'lod{lod.index}_{mat}')
-            me.from_pydata([tuple(to_bl(*p)) for p in part.p], [], [tuple(t) for t in part.t])
-            me.update()
-            me.normals_split_custom_set_from_vertices([tuple(to_bl(*n)) for n in part.n])
-            ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'POINT')
-            for i, c in enumerate(part.c):
-                ca.data[i].color = c
-            uvl = me.uv_layers.new(name='UVMap')
-            for loop in me.loops:
-                # the glTF exporter flips v (v' = 1 - v): store 1 - y so the file has y, metres above the ground, as the tile's walls do
-                uvl.data[loop.index].uv = (part.uv[loop.vertex_index][0], 1.0 - part.uv[loop.vertex_index][1])
-            if mat in ('bld_wall', 'bld_glass'):
-                for name, vals in (('_WALL', part.w), ('_BLD', part.b)):
-                    at = me.attributes.new(name, 'QUATERNION', 'POINT')
-                    for i, v in enumerate(vals):
-                        at.data[i].value = tuple(v) if v else (0, 0, 0, 0)
-                at = me.attributes.new('_BID', 'QUATERNION', 'POINT')
-                for i, v in enumerate(part.d):
-                    at.data[i].value = (v[0], v[1], 0, 0)
-            me.materials.append(_material(mat))
-            ob = bpy.data.objects.new(f'lod{lod.index}_{mat}', me)
-            bpy.context.scene.collection.objects.link(ob)
-            ob.parent = grp
+        _emit_meshes(lod, _merged_parts(lod), grp, f'lod{lod.index}')
+        for name in sorted(lod.children):
+            sub, pivot, props = lod.children[name]
+            node = scene.empty(f'lod{lod.index}_{name}', pos=pivot, parent=grp, props=props)
+            _emit_meshes(sub, _merged_parts(sub), node, f'lod{lod.index}_{name}', origin=pivot)
         counts.append(lod.tris())
     return counts

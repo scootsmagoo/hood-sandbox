@@ -33,7 +33,7 @@ import type { StreamListener } from '../stream/TileStreamer';
 import type { StreamJob } from '../stream/StreamPhysics';
 import { DEFAULT_IDM, MAX_BRAKE, freeAccel, idmAccel, mobilChange, stoppingDistance, type IdmParams } from './idm';
 import { Arbiter, type Probe } from './junction';
-import { carSlot, carZoneAt, pickVehicle, type TrafficPopulation } from './population';
+import { carSlot, carZoneAt, freewayAt, pickVehicle, type FreewaySlot, type TrafficPopulation } from './population';
 import { pickNext, planRoute } from './route';
 
 export const TRAFFIC = {
@@ -60,6 +60,27 @@ export const TRAFFIC = {
   recoverS: 3.5,
   /** Entities the sim keeps free for everything else in the 256-entity snapshot. */
   entityReserve: 40,
+  /**
+   * The freeways (motorway and trunk lanes and their ramps; the through routes that do not loop inside a tile). Their cars are counted
+   * apart from the avenues': at most this many on the High tier at the busiest hour (the tier's density scales it, and the freeway
+   * table's `cars` against `freewayBusy` scales it through the day). They are spline followers except the few near the player, so
+   * they cost little.
+   */
+  freewayCap: 88,
+  /** The freeway row's `cars` (per lane-km) at which the freeway is at its cap. */
+  freewayBusy: 32,
+  /** Never fewer than this share of the cap (a freeway is not empty at 3 am). */
+  freewayFloor: 0.3,
+  /** Spawn ring on the freeways (m): the cars are fast, so it reaches farther out than the avenues'. */
+  freewaySpawnMin: 70,
+  freewaySpawnMax: 200,
+  /** A freeway car is removed beyond this (m) once the player cannot see it; beyond `freewayForceDespawn` always. */
+  freewayDespawn: 250,
+  freewayForceDespawn: 380,
+  /** The free-flow speed on a freeway carriageway as a multiple of its posted limit (the traffic runs about 65 mph on a 55 mph limit). */
+  freewayFlow: 1.25,
+  /** The room (m) a new freeway car needs to the car ahead and behind on its lane. */
+  freewayRoom: 38,
 } as const;
 
 export type CarMode = 'kin' | 'phys' | 'free';
@@ -233,6 +254,10 @@ export class TrafficManager implements Probe {
   readonly arbiter: Arbiter;
   /** Cars the density asks for right now (for tests and the debug overlay). */
   target = 0;
+  /** The same for the freeways. */
+  freewayTarget = 0;
+  /** The freeway row at the game clock (cars per lane-km, speed share), refreshed with the spawn step. */
+  readonly freewayNow: FreewaySlot = { cars: 0, speed: 1, groups: {} };
   /** Density factor 0..1 from the graphics tier. */
   density: number;
   private readonly rng: Rng;
@@ -319,6 +344,28 @@ export class TrafficManager implements Probe {
 
   get cap(): number {
     return Math.max(0, Math.round(TRAFFIC.cap * this.density));
+  }
+
+  /** The most freeway cars right now: the cap, the tier's density, and how busy the clock says the freeway is. */
+  get freewayCap(): number {
+    const busy = Math.max(TRAFFIC.freewayFloor, Math.min(1, this.freewayNow.cars / TRAFFIC.freewayBusy));
+    // (the tiers thin the freeway out faster than the avenues: Low has a quarter of it, a phone's budget cannot spend on cars far down the road)
+    return Math.max(0, Math.round(TRAFFIC.freewayCap * this.density * this.density * busy));
+  }
+
+  /** What a lane's free-flow speed is multiplied by: the freeway runs above its posted limit and slows at the busy hours. */
+  flowMul(edge: number): number {
+    const fw = this.graph.fwClass[edge];
+    if (fw === 1) {
+      // (a bend's limit is what the lane allows: only the straights run over the posted limit)
+      const lim = this.graph.speed[edge];
+      const straight = clamp((lim - 12) / 12.7, 0, 1);
+      // (and nobody runs past about 70 mph, whatever the posted limit)
+      const boost = Math.min(TRAFFIC.freewayFlow, Math.max(1, 30.5 / Math.max(lim, 1)));
+      return (1 + (boost - 1) * straight) * this.freewayNow.speed;
+    }
+    if (fw === 2) return 1.05 * Math.max(0.6, this.freewayNow.speed);
+    return 1;
   }
 
   /** Seconds until the nearest car bound for `conn` reaches the end of its lane. */
@@ -456,15 +503,30 @@ export class TrafficManager implements Probe {
   // -------------------------------------------------------------------------------------------
   // Spawn and despawn
 
-  /** The cars the zones around the player want, from the population table. */
-  private wantedCars(): number {
+  /**
+   * The cars the zones around the player want, from the population table: on the avenues (the zone rows) and on the freeways (the
+   * freeway row, `freewayCap` at most).
+   */
+  private wantedCars(): { street: number; freeway: number } {
     const sim = this.sim;
     const slot = sim.clock.slot;
     const weekend = sim.clock.weekend;
-    const spots = this.graph.spotsAround(this.px, this.pz, 0, TRAFFIC.spawnMax, this.spotBuf);
-    let total = 0;
-    for (const sp of spots) total += carSlot(carZoneAt(this.pop, sp.x, sp.z), slot, weekend).cars * sp.weight * 0.02;
-    return total * this.density;
+    freewayAt(this.pop, sim.clock.minutes, weekend, this.freewayNow);
+    const spots = this.graph.spotsAround(this.px, this.pz, 0, TRAFFIC.freewaySpawnMax, this.spotBuf, true);
+    let street = 0;
+    let freeway = 0;
+    for (const sp of spots) {
+      if (sp.fw) {
+        // (a spot stands for 20 m of lane: 0.02 km)
+        if (Math.hypot(sp.x - this.px, sp.z - this.pz) <= TRAFFIC.freewaySpawnMax) freeway += this.freewayNow.cars * sp.weight * 0.02;
+      } else if ((sp.x - this.px) ** 2 + (sp.z - this.pz) ** 2 <= TRAFFIC.spawnMax ** 2) street += carSlot(carZoneAt(this.pop, sp.x, sp.z), slot, weekend).cars * sp.weight * 0.02;
+    }
+    return { street: street * this.density, freeway: freeway * this.density * this.density };
+  }
+
+  /** Whether the edge a car is on is a freeway lane (a carriageway or a ramp). */
+  private onFreeway(c: TrafficCar): boolean {
+    return this.graph.fwClass[c.edge] !== 0;
   }
 
   private spawnAndDespawn() {
@@ -481,7 +543,9 @@ export class TrafficManager implements Probe {
         } else if ((d > 45 && !this.inView(p.x, p.z, 25)) || d > 180) this.remove(c);
         continue;
       }
-      if (d > TRAFFIC.forceDespawnDist || (d > TRAFFIC.despawnDist && !this.inView(p.x, p.z, 40))) this.remove(c);
+      const fw = this.onFreeway(c);
+      const far = fw ? TRAFFIC.freewayDespawn : TRAFFIC.despawnDist;
+      if (d > (fw ? TRAFFIC.freewayForceDespawn : TRAFFIC.forceDespawnDist) || (d > far && !this.inView(p.x, p.z, 40))) this.remove(c);
     }
     while (this.count('free') > TRAFFIC.maxFree) {
       const old = this.cars.find((c) => c.mode === 'free' && !this.inView(c.veh.car.body.translation().x, c.veh.car.body.translation().z, 60));
@@ -489,13 +553,73 @@ export class TrafficManager implements Probe {
       this.remove(old);
     }
 
-    const target = Math.min(this.cap, Math.round(this.wantedCars()));
+    const want = this.wantedCars();
+    const target = Math.min(this.cap, Math.round(want.street));
+    const fwTarget = Math.min(this.freewayCap, Math.round(want.freeway));
     this.target = target;
-    const live = this.cars.filter((c) => c.mode !== 'free').length;
-    if (live >= target) return;
+    this.freewayTarget = fwTarget;
+    let fwLive = 0;
+    let live = 0;
+    for (const c of this.cars) {
+      if (c.mode === 'free') continue;
+      if (this.onFreeway(c)) fwLive++;
+      else live++;
+    }
     if (sim.registry.size > 256 - TRAFFIC.entityReserve) return;
-    const budget = this.firstFill ? target - live : Math.min(2, target - live);
-    for (let i = 0; i < budget; i++) this.trySpawn(this.firstFill ? 60 : TRAFFIC.spawnMin);
+    if (live < target) {
+      const budget = this.firstFill ? target - live : Math.min(2, target - live);
+      for (let i = 0; i < budget; i++) this.trySpawn(this.firstFill ? 60 : TRAFFIC.spawnMin, false);
+    }
+    if (fwLive < fwTarget) {
+      // the freeway's cars leave the ring quickly: the first fill is all at once, and after it up to four a step
+      const budget = this.firstFill ? fwTarget - fwLive : Math.min(4, fwTarget - fwLive);
+      for (let i = 0; i < budget; i++) this.trySpawn(this.firstFill ? 70 : TRAFFIC.freewaySpawnMin, true);
+    }
+    this.feedSources(fwLive < fwTarget);
+  }
+
+  /**
+   * Cars enter the loaded area on the lanes that start at its edge (a freeway comes in from outside the tile): while the player is within
+   * reach of one, a car is put at its start now and then, as often as the freeway row says cars pass a point (cars per lane-km times the
+   * speed). Out of the player's sight or far off, like every spawn; only while the freeway has room under its cap.
+   */
+  private feedSources(room: boolean) {
+    const g = this.graph;
+    if (!room || g.sources.length === 0 || this.sim.registry.size > 256 - TRAFFIC.entityReserve) return;
+    const reach = TRAFFIC.freewaySpawnMax + 90;
+    for (const e of g.sources) {
+      if (!g.alive[e] || !g.flow[e] || g.fwClass[e] === 0) continue;
+      g.posAt(e, 3, tmpPt);
+      const d = Math.hypot(tmpPt.x - this.px, tmpPt.z - this.pz);
+      if (d > reach || d < TRAFFIC.freewaySpawnMin * 0.6) continue;
+      if (d < 200 && this.inView(tmpPt.x, tmpPt.z, 12)) continue;
+      // cars per second past a point: per km times the speed over a thousand, for the 0.4 s between steps
+      const rate = ((this.freewayNow.cars * (g.speed[e] * this.flowMul(e))) / 1000) * (24 / 60) * this.density * this.density * (g.fwClass[e] === 1 ? 1 : 0.7);
+      if (this.rng.next() >= rate) continue;
+      if (!this.roomOnLane(e, 3)) continue;
+      const zone = carZoneAt(this.pop, tmpPt.x, tmpPt.z);
+      this.spawnAt(e, 3, pickVehicle(this.pop, this.fwGroups(zone), this.rng));
+    }
+  }
+
+  /** The vehicle groups on a freeway: the freeway row's, or the zone's. */
+  private fwGroups(zone: ReturnType<typeof carZoneAt>): { groups: Record<string, number> } {
+    if (Object.keys(this.freewayNow.groups).length) return this.freewayNow;
+    return carSlot(zone, this.sim.clock.slot, this.sim.clock.weekend);
+  }
+
+  /** Whether a car fits on a lane at distance `s`: no vehicle near it on the lane, none near its place in the world. */
+  private roomOnLane(edge: number, s: number, freeway = true): boolean {
+    const list = this.edgeCars.get(edge);
+    const need = freeway ? TRAFFIC.freewayRoom : 16;
+    if (list && list.some((e) => Math.abs(e.s - s) < need)) return false;
+    this.graph.posAt(edge, s, tmpPt3);
+    const box = freeway ? 14 : 9;
+    for (const v of this.sim.vehicles()) {
+      const b = v.car.body.translation();
+      if (Math.abs(b.x - tmpPt3.x) < box && Math.abs(b.z - tmpPt3.z) < box) return false;
+    }
+    return true;
   }
 
   /** Whether a point is in front of the camera (a loose cone), within `slack` degrees of its edge. */
@@ -507,35 +631,31 @@ export class TrafficManager implements Probe {
     return ang < ((62 + slackDeg) * Math.PI) / 180;
   }
 
-  private trySpawn(minDist: number): boolean {
+  private trySpawn(minDist: number, freeway: boolean): boolean {
     const sim = this.sim;
-    const spots = this.graph.spotsAround(this.px, this.pz, minDist, TRAFFIC.spawnMax, this.spotBuf);
+    const maxDist = freeway ? TRAFFIC.freewaySpawnMax : TRAFFIC.spawnMax;
+    const all = this.graph.spotsAround(this.px, this.pz, minDist, maxDist, this.spotBuf, true);
+    // (the freeway and the avenues take turns: each only spawns on its own kind of lane)
+    const spots = all.filter((sp) => (sp.fw !== 0) === freeway);
     if (spots.length === 0) return false;
     const slotIdx = sim.clock.slot;
     const weekend = sim.clock.weekend;
+    const ringMin = freeway ? TRAFFIC.freewaySpawnMin : TRAFFIC.spawnMin;
     for (let attempt = 0; attempt < 14; attempt++) {
       const sp = spots[this.rng.int(0, spots.length - 1)];
       const zone = carZoneAt(this.pop, sp.x, sp.z);
       const slot = carSlot(zone, slotIdx, weekend);
       const d = Math.hypot(sp.x - this.px, sp.z - this.pz);
-      // busier roads first, and nearer the player when the cap is what limits the count
-      const near = 1 - 0.45 * clamp((d - TRAFFIC.spawnMin) / (TRAFFIC.spawnMax - TRAFFIC.spawnMin), 0, 1);
-      if (this.rng.next() * TRAFFIC.densityRef * 1.7 >= slot.cars * sp.weight * near) continue;
+      if (!freeway) {
+        // busier roads first, and nearer the player when the cap is what limits the count
+        const near = 1 - 0.45 * clamp((d - TRAFFIC.spawnMin) / (TRAFFIC.spawnMax - TRAFFIC.spawnMin), 0, 1);
+        if (this.rng.next() * TRAFFIC.densityRef * 1.7 >= slot.cars * sp.weight * near) continue;
+      } else if (this.rng.next() >= sp.weight * (1 - 0.6 * clamp((d - ringMin) / (maxDist - ringMin), 0, 1))) continue;
       // out of view when close; far enough out, anywhere
       if (d < 200 && this.inView(sp.x, sp.z, 12)) continue;
       // room on the lane
-      const list = this.edgeCars.get(sp.edge);
-      if (list && list.some((e) => Math.abs(e.s - sp.s) < 16)) continue;
-      let crowded = false;
-      for (const v of sim.vehicles()) {
-        const b = v.car.body.translation();
-        if (Math.abs(b.x - sp.x) < 9 && Math.abs(b.z - sp.z) < 9) {
-          crowded = true;
-          break;
-        }
-      }
-      if (crowded) continue;
-      this.spawnAt(sp.edge, sp.s, pickVehicle(this.pop, slot, this.rng));
+      if (!this.roomOnLane(sp.edge, sp.s, freeway)) continue;
+      this.spawnAt(sp.edge, sp.s, pickVehicle(this.pop, freeway ? this.fwGroups(zone) : slot, this.rng));
       return true;
     }
     return false;
@@ -562,13 +682,16 @@ export class TrafficManager implements Probe {
     car.idm.a = rng.range(1.4, 2.0);
     car.idm.b = rng.range(1.9, 2.6);
     car.idm.s0 = rng.range(1.8, 2.8);
-    car.v = Math.min(g.speed[edge] * car.speedFactor, 12) * rng.range(0.6, 0.95);
+    // (a car that enters a freeway is already at speed; an avenue's start slowly)
+    const fw = g.fwClass[edge] !== 0;
+    car.v = fw ? g.speed[edge] * car.speedFactor * this.flowMul(edge) * rng.range(0.8, 1) : Math.min(g.speed[edge] * car.speedFactor, 12) * rng.range(0.6, 0.95);
     car.yaw = yaw;
     veh.trafficCar = car;
     veh.kinematic = true;
     veh.car.body.setBodyType(sim.physics.R.RigidBodyType.KinematicPositionBased, true);
     this.cars.push(car);
-    if (rng.chance(0.65)) this.pickDestination(car);
+    // (most of a freeway's cars drive on past the exits)
+    if (rng.chance(fw ? 0.15 : 0.65)) this.pickDestination(car);
     this.ensureRoute(car);
     this.stats.spawned++;
     init?.(car);
@@ -627,6 +750,12 @@ export class TrafficManager implements Probe {
     c.lc = null;
   }
 
+  /** On a lane that ends at the edge of the loaded area with nothing planned after it: the car leaves the world at its end. */
+  private leavingMap(c: TrafficCar): boolean {
+    const g = this.graph;
+    return c.route.length === 0 && (g.edgeKind[c.edge] & 2) !== 0 && !g.isConnector[c.edge];
+  }
+
   // -------------------------------------------------------------------------------------------
   // Level of detail
 
@@ -648,7 +777,7 @@ export class TrafficManager implements Probe {
       const b = c.veh.car.body.translation();
       const dp = Math.hypot(b.x - this.px, b.z - this.pz);
       if (c.mode === 'kin') {
-        if (c.pinned) continue;
+        if (c.pinned || this.leavingMap(c)) continue;
         const d = near(b.x, b.z, 32) ? Math.min(dp, TRAFFIC.promoteDist - 1) : dp;
         if (d < TRAFFIC.promoteDist) wantPhys.push({ c, d });
       } else if (!c.touched && c.recoverT <= 0 && dp > TRAFFIC.demoteDist && !near(b.x, b.z, 48) && !this.arbiter.holders(c.edge).length) {
@@ -824,7 +953,7 @@ export class TrafficManager implements Probe {
     if (c.dest >= 0 && c.route.length === 0) {
       // arrived (or the plan ran out): a new destination, or wander
       c.dest = -1;
-      if (c.rng.chance(0.65)) this.pickDestination(c);
+      if (c.rng.chance(this.onFreeway(c) ? 0.15 : 0.65)) this.pickDestination(c);
     }
     let last = c.route.length ? c.route[c.route.length - 1] : c.edge;
     for (let guard = 0; c.route.length < 4 && guard < 8; guard++) {
@@ -1032,6 +1161,12 @@ export class TrafficManager implements Probe {
       }
     }
 
+    // the lane runs off the edge of the loaded area (a sink): a physics car near its end becomes a spline follower and drives off the
+    // end, where it is removed (it would otherwise run off the road there)
+    if (c.mode === 'phys' && !c.touched && this.leavingMap(c) && g.len[c.edge] - c.s < 50) {
+      this.demote(c);
+      c.pinned = false;
+    }
     // a turn too tight to drive is taken as a spline follower, then the car is a physics car again
     if (c.mode === 'phys') {
       const ahead = c.route[0];
@@ -1046,7 +1181,7 @@ export class TrafficManager implements Probe {
     }
 
     // --- what limits speed
-    const limit = g.speed[c.edge] * c.speedFactor * (1 + 0.45 * c.panic);
+    const limit = g.speed[c.edge] * c.speedFactor * this.flowMul(c.edge) * (1 + 0.45 * c.panic);
     let v0 = limit;
     // slow before bends and turns ahead
     {
@@ -1054,7 +1189,7 @@ export class TrafficManager implements Probe {
       let k = 0;
       while (d < 70 && k < c.route.length) {
         const e = c.route[k++];
-        const vmax = g.isConnector[e] ? g.speed[e] : g.speed[e] * c.speedFactor;
+        const vmax = g.isConnector[e] ? g.speed[e] : g.speed[e] * c.speedFactor * this.flowMul(e);
         v0 = Math.min(v0, Math.sqrt(vmax * vmax + 2 * 2.6 * Math.max(0, d)));
         d += g.len[e];
       }
@@ -1567,10 +1702,10 @@ export class TrafficManager implements Probe {
     const connNow = c.route[0];
     if (connNow === undefined || !g.isConnector[connNow]) return;
     const dummy: IdmParams = { ...c.idm };
-    dummy.v0 = Math.max(1.5, g.speed[c.edge] * c.speedFactor);
+    dummy.v0 = Math.max(1.5, g.speed[c.edge] * c.speedFactor * this.flowMul(c.edge));
     const accOld = lead ? idmAccel(dummy, c.v, lead.gap, lead.v) : freeAccel(dummy, c.v);
     for (const side of [g.right[c.edge], g.left[c.edge]]) {
-      if (side < 0 || !g.main[side]) continue;
+      if (side < 0 || !g.drive[side]) continue;
       const isRight = side === g.right[c.edge];
       // the new lane must still lead where the route goes
       const keep = this.matchingConnector(side, connNow);

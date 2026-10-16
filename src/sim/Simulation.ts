@@ -191,7 +191,7 @@ export class Simulation {
       if (st) st.listen(this.ambient.streamListener());
     }
     if ((opts.traffic ?? 0) > 0 && (st || opts.tile.lanes)) {
-      const graph = st ? st.lanes : new LaneGraph(opts.tile.lanes!);
+      const graph = st ? st.lanes : new LaneGraph(opts.tile.lanes!, false, { flow: true, bounds: opts.tile.manifest.bounds });
       if (st || graph.usable) {
         this.traffic = new TrafficManager(this, graph, opts.trafficPopulation ?? GENERIC_TRAFFIC_POPULATION, Math.min(1, opts.traffic!), walk);
         this.eventTaps.push((e) => this.traffic?.onEvent(e));

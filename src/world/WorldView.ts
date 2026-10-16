@@ -9,6 +9,7 @@ import { generateProceduralTile, propsToMesh, type PropSpec } from '../shared/pr
 import type { SimReady } from '../shared/protocol';
 import type { TileManifest } from '../shared/tile';
 import { freezeStatic } from '../client/render/freeze';
+import { buildEdge, EdgeSampler } from './edgeSkirt';
 import { mergeable, mergeMeshes } from './mergeChunks';
 
 export interface WorldView {
@@ -83,7 +84,7 @@ function styleMaterial(mat: THREE.Material) {
   m.needsUpdate = true;
 }
 
-async function loadBaked(base: string, manifest: TileManifest, root: THREE.Group, chunks: GroundChunk[], markings: MarkingsChunk[], mergeBlock: number): Promise<string[]> {
+async function loadBaked(base: string, manifest: TileManifest, root: THREE.Group, chunks: GroundChunk[], markings: MarkingsChunk[], mergeBlock: number, edge: EdgeSampler | null): Promise<string[]> {
   const grid = manifest.chunks;
   const byKey = new Map<number, GroundChunk>();
   const loader = new GLTFLoader();
@@ -137,7 +138,10 @@ async function loadBaked(base: string, manifest: TileManifest, root: THREE.Group
               c.coarse = o;
               o.visible = false;
               o.receiveShadow = false;
-            } else c.fine = o;
+            } else {
+              c.fine = o;
+              if (edge) sampleEdge(o, manifest.bounds, edge);
+            }
           }
         });
         root.add(gltf.scene);
@@ -148,6 +152,36 @@ async function loadBaked(base: string, manifest: TileManifest, root: THREE.Group
   );
   if (blocks.size > 0) mergeBlocks(root, blocks);
   return errors;
+}
+
+/** Feeds the vertices of a ground chunk that lies on the tile's edge to the sampler of the edge's skirt. */
+function sampleEdge(o: THREE.Mesh, b: TileManifest['bounds'], edge: EdgeSampler) {
+  const g = o.geometry;
+  // (the baked positions are quantised: the node's matrix puts them in the world)
+  g.computeBoundingBox();
+  const bb = g.boundingBox!.clone().applyMatrix4(o.matrix);
+  const band = 41;
+  if (bb.min.x > b.minX + band && bb.max.x < b.maxX - band && bb.min.z > b.minZ + band && bb.max.z < b.maxZ - band) return;
+  const pos = g.getAttribute('position');
+  const col = g.getAttribute('color');
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(o.matrix);
+    if (v.x > b.minX + band && v.x < b.maxX - band && v.z > b.minZ + band && v.z < b.maxZ - band) continue;
+    edge.add(v.x, v.y, v.z, col ? col.getX(i) : 0.4, col ? col.getY(i) : 0.4, col ? col.getZ(i) : 0.38);
+  }
+}
+
+/** The footprints of the tile's hero landmarks, for the far skyline to keep out of (none when the file is missing). */
+async function heroRings(base: string): Promise<[number, number][][]> {
+  try {
+    const r = await fetch(new URL('landmarks.json', base).href);
+    if (!r.ok) return [];
+    const j = (await r.json()) as { landmarks?: { hero?: unknown; ring?: [number, number][] }[] };
+    return (j.landmarks ?? []).filter((l) => l.hero && Array.isArray(l.ring)).map((l) => l.ring!);
+  } catch {
+    return [];
+  }
 }
 
 /** Replaces each list of chunk meshes by one mesh (see `mergeChunks.ts`). A list that cannot be merged stays as it was. */
@@ -249,8 +283,15 @@ async function createView(baked: { manifest: TileManifest; base: string } | null
   const markings: MarkingsChunk[] = [];
   if (baked) {
     const asked = typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('mergeblock')) : NaN;
-    const errors = await loadBaked(baked.base, baked.manifest, root, chunks, markings, Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : MERGE_BLOCK);
+    // A tile on its own gets a skirt of ground and a far skyline past its edges (`edgeSkirt.ts`); a streamed city's tiles do not.
+    const wantEdge = name === 'world' && typeof location !== 'undefined' && new URLSearchParams(location.search).get('edge') !== 'off';
+    const sampler = wantEdge ? new EdgeSampler(baked.manifest.bounds) : null;
+    const errors = await loadBaked(baked.base, baked.manifest, root, chunks, markings, Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : MERGE_BLOCK, sampler);
     for (const e of errors) console.warn('[world]', e);
+    if (sampler) {
+      const edge = buildEdge(sampler, baked.manifest.bounds, await heroRings(baked.base));
+      if (edge) root.add(edge);
+    }
   } else {
     buildProcedural(seed, root);
   }

@@ -223,7 +223,20 @@ export function paletteColour(material: Material, kind: BuildingKind, hash: numb
   return c;
 }
 
+/** A skybridge: a glazed, flat-roofed tube (one floor of curtain wall, no ground band), whatever its neighbours are. */
+function classifySkybridge(b: Building): Classification {
+  const hashC = hash01(b.id + 'c');
+  const colour = paletteColour('glass', 'glass', hashC);
+  return {
+    kind: 'glass', kindFromData: true, era: 4, eraFromData: false, floors: 1, band: 0, floorHeight: Math.max(2.6, b.height - (b.minHeight ?? 0)),
+    material: 'glass', materialFromData: false, bandMaterial: 'glass', style: 'contemporary', styleFromData: false,
+    colour, colourFromData: false, roofColour: roofColourOf('membrane', 'glass', hashC), roofColourFromData: false, roofMaterial: 'membrane',
+    crown: 0, floorsFromData: false, fromContext: false,
+  };
+}
+
 export function classifyBuilding(b: Building, ctx?: BuildingContext): Classification {
+  if (b.skybridge) return classifySkybridge(b);
   const use = (b.use || 'yes').toLowerCase();
   const name = b.name ?? '';
   const tags = b.tags ?? {};

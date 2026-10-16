@@ -144,3 +144,60 @@ describe('scenario points', () => {
     expect(none.points.every((p) => p.cap >= 1)).toBe(true);
   });
 });
+
+
+describe('the walk network and freeways', () => {
+  // an eastbound motorway carriageway 25 m wide along z = 0 in a cutting (its surface at -8), with a street on a bridge over it at x = 0
+  // (deck at 0) and a sidewalk of the bridge the bake put at the trench floor's height
+  const motorway: V2[] = [[-190, 0], [190, 0]];
+  const mw = (): RoadJson => ({ id: 'osm:way/900', class: 'motorway', name: '', lanes: 6, oneway: true, bridge: false, layer: 0, width: 25, points: motorway.map((p) => [p[0], -8, p[1]] as [number, number, number]) });
+  const bridgeStreet = (): RoadJson => ({ id: 'osm:way/901', class: 'secondary', name: '', lanes: 2, oneway: false, bridge: true, layer: 1, width: 12, points: [[0, 0, -150], [0, 0, 150]] });
+  const ground = (x: number, z: number) => (Math.abs(z) < 14 ? -8 : Math.max(-8, Math.min(0, -8 + (Math.abs(z) - 14) * 0.6)));
+  const ways = (): RoadWay[] => [
+    { ...car(10, motorway), highway: 'motorway', width: 25 },
+    { ...car(11, [[0, -150], [0, 150]]), bridge: true, layer: 1, width: 12 },
+    // a footway that runs along the carriageway, a footway across it at its level, and the bridge's sidewalk (tagged as a bridge, at ground height)
+    ped(20, undefined, [[-150, 3], [-60, 3]]),
+    ped(21, undefined, [[-100, -30], [-100, 30]]),
+    { ...ped(22, 'sidewalk', [[7, -100], [7, 100]]), bridge: true },
+    ped(23, 'sidewalk', [[-150, 30], [150, 30]]),
+  ];
+  const input = () => ({
+    ways: ways(),
+    roads: [mw(), bridgeStreet()],
+    junctions: noJunctions,
+    crossingSignals: new Map<number, boolean>(),
+    footprints: [] as V2[][][],
+    bounds,
+    ground,
+  });
+
+  it('has no walk edge on a motorway carriageway at its level, and keeps the bridge sidewalk on the bridge', () => {
+    const { file } = buildPaths(input());
+    let onMotorway = 0;
+    let onDeck = 0;
+    for (let i = 0; i < file.edges.length; i += 3) {
+      const a = file.nodes[file.edges[i]], b = file.nodes[file.edges[i + 1]];
+      for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+        const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, z = a[2] + (b[2] - a[2]) * t;
+        if (Math.abs(z) < 12.5 && Math.abs(y + 8) < 3.2) onMotorway++;
+        if (Math.abs(x - 7) < 0.5 && Math.abs(z) < 12 && y > -1) onDeck++;
+      }
+    }
+    expect(onMotorway).toBe(0);
+    // the bridge's sidewalk crosses the freeway at the deck's height
+    expect(onDeck).toBeGreaterThan(3);
+    expect(file.stats.droppedByFreewayM).toBeGreaterThan(40);
+    expect(file.stats.liftedToDeckM).toBeGreaterThan(10);
+    // what runs beside the freeway on the cutting's rim is still there
+    expect(lengthOf(file, 'sidewalk')).toBeGreaterThan(250);
+  });
+
+  it('puts no ramp or crossing logic in the way of an ordinary street', () => {
+    const w = input();
+    w.ways = w.ways.filter((x) => x.highway !== 'motorway');
+    w.roads = [bridgeStreet()];
+    const { file } = buildPaths(w);
+    expect(file.stats.droppedByFreewayM).toBe(0);
+  });
+});

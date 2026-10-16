@@ -11,6 +11,7 @@ import { SEATED_SCALE } from '../../../shared/doors';
 import type { WeaponKind } from '../../../shared/weapons';
 import { gunMesh } from '../models';
 import { PlanBuffer, planInto, type AnimInput, type Plan } from './animSelect';
+import { doorOpenAmount, entryStep, type EntryStep } from './carEntry';
 import { makeSkeleton, type CharacterAssets } from './characterAssets';
 import { actorMaterial } from './pedMaterial';
 import type { Appearance } from './outfits';
@@ -50,8 +51,17 @@ export class PedActor {
   private gunKind: WeaponKind | null = null;
   private ragdolled = false;
   private lastMode = '';
-  /** A one-shot clip over the plan: getting in or out of a car. */
-  private shot: { clip: string; t: number } | null = null;
+  /** A one-shot clip over the plan: getting in or out of a car. `from` is where the body was when it began (the door, or the seat): the sim moves it to the other in one step, the view walks it across. */
+  private shot: { clip: string; t: number; enter: boolean; from: THREE.Vector3; fromQ: THREE.Quaternion; moves: boolean; door: THREE.Vector3 } | null = null;
+  /** Where the door is being worked and how far it should stand open (0 to 1), while this person gets in or out. */
+  doorAmount = 0;
+  doorX = 0;
+  doorZ = 0;
+  private readonly lastPos = new THREE.Vector3();
+  private readonly lastQuat = new THREE.Quaternion();
+  private haveLast = false;
+  private readonly toQ = new THREE.Quaternion();
+  private readonly step: EntryStep = { move: 0, turn: 0, hop: 0 };
   private seatScale = 1;
   /** Animation level of detail: a far figure is posed every second or fourth frame. */
   private frame = 0;
@@ -61,6 +71,9 @@ export class PedActor {
   private readonly axis = new THREE.Vector3();
   private readonly restInv: THREE.Quaternion[] = [];
   private readonly mount = new THREE.Quaternion();
+  /** Where the gun's origin (the middle of its grip) sits in the hand bone's frame: in the palm's fist, thumb side up. */
+  private readonly grip = new THREE.Vector3();
+  private readonly gripUp = new THREE.Vector3();
   private readonly idx: { spine: number; chest: number; hand: number };
   /** Set by the owner: the scale the person is drawn at (height, width). */
   height = 1;
@@ -75,7 +88,7 @@ export class PedActor {
     this.height = appearance.height;
     this.width = appearance.width;
     this.palette = new Float32Array(appearance.palette);
-    this.material = actorMaterial(this.palette);
+    this.material = actorMaterial(this.palette, this.seed);
     this.root.add(sk.root);
     this.root.name = `ped-${appearance.arch}`;
     for (let lod = 0; lod < 3; lod++) {
@@ -106,6 +119,8 @@ export class PedActor {
     const xx = new THREE.Vector3().crossVectors(y, z);
     this.mount.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xx, y, z));
     this.mount.premultiply(rh.clone().invert());
+    // along the hand 8 cm, 5 cm toward the thumb (the slide rides above the web of the hand), 3.4 cm into the curl of the fingers
+    this.grip.set(0, 0, 0).addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(this.mount), 0.082).addScaledVector(this.gripUp.set(0, 1, 0).applyQuaternion(this.mount), 0.028).addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(this.mount), 0.034);
   }
 
   /** Makes a parked actor of the same body someone else (their colours, size and clock). */
@@ -115,11 +130,13 @@ export class PedActor {
     this.height = a.height;
     this.width = a.width;
     this.seed = Math.floor(seed);
+    (this.material.userData.pedSeed as { value: number }).value = this.seed * 0.6180339 + 0.31;
     this.phase = 0;
     this.clock = 0;
     this.frame = 0;
     this.owed = 0;
     this.shot = null;
+    this.haveLast = false;
     this.lastMode = '';
     this.seatScale = 1;
     this.setGun(null);
@@ -172,7 +189,9 @@ export class PedActor {
     if (!kind) return;
     const g = gunMesh(kind);
     g.quaternion.copy(this.mount);
-    g.position.set(0, 0.075, 0.0);
+    g.position.copy(this.grip);
+    // a long gun's receiver is taller: the hand sits under it, not on the web beside a slide
+    if (kind !== 'pistol') g.position.addScaledVector(this.gripUp, 0.028);
     g.scale.setScalar(1.12);
     this.bones[this.idx.hand].add(g);
     this.gun = g;
@@ -249,17 +268,28 @@ export class PedActor {
       this.rag.reset(this.bones);
       this.root.position.set(0, 0, 0);
     }
-    if (this.lastMode && this.lastMode !== input.mode) {
-      if (this.lastMode === 'seated') this.shot = { clip: 'exit_car', t: 0 };
-      else if (input.mode === 'seated') this.shot = { clip: 'enter_car', t: 0 };
+    if (this.lastMode && this.lastMode !== input.mode && (this.lastMode === 'seated' || input.mode === 'seated')) {
+      // getting in or out: the sim puts the body at the seat (or beside the door) at once, so the view walks it there from where it was
+      const enter = input.mode === 'seated';
+      const near = this.haveLast && this.lastPos.distanceToSquared(this.root.position) < 3.5 * 3.5;
+      this.shot = { clip: enter ? 'enter_car' : 'exit_car', t: 0, enter, from: this.lastPos.clone(), fromQ: this.lastQuat.clone(), moves: near, door: (enter ? this.lastPos : this.root.position).clone() };
     }
     this.lastMode = input.mode;
     let plan: Plan = planInto(this.planBuf, input);
     if (this.shot) {
-      const dur = this.assets.clips.get(this.shot.clip)?.duration ?? 0.7;
+      const dur = this.assets.clips.get(this.shot.clip)?.duration ?? 0.8;
       this.shot.t += dt;
-      if (this.shot.t >= dur) this.shot = null;
-      else plan = { layers: [{ clip: this.shot.clip, weight: 1, time: 'fixed', u: this.shot.t / dur }], cadence: 0 };
+      if (this.shot.t >= dur) {
+        this.shot = null;
+        this.doorAmount = 0;
+      } else {
+        const k = this.shot.t / dur;
+        plan = { layers: [{ clip: this.shot.clip, weight: 1, time: 'fixed', u: k }], cadence: 0 };
+        if (this.shot.moves) this.walkThroughDoor(this.shot, k);
+        this.doorAmount = doorOpenAmount(k, this.shot.enter);
+        this.doorX = this.shot.door.x;
+        this.doorZ = this.shot.door.z;
+      }
     }
     this.play(dt, plan);
     this.mixer.update(0);
@@ -272,6 +302,25 @@ export class PedActor {
     this.seatScale += ((input.mode === 'seated' ? SEATED_SCALE : 1) - this.seatScale) * Math.min(1, dt * 12);
     const s = this.seatScale;
     this.root.scale.set(this.width * s, this.height * s, this.width * s);
+    this.lastPos.copy(this.root.position);
+    this.lastQuat.copy(this.root.quaternion);
+    this.haveLast = true;
+  }
+
+  /**
+   * Moves the body from where it was (`shot.from`) to where the sim put it, over the clip: in through the door, over the sill,
+   * onto the seat (or the reverse, the body stays in the seat while it leans out and leaves it late), turning from facing the door to
+   * facing the road. `root` already holds the sim's place for this frame; this pulls it back toward the start.
+   */
+  private walkThroughDoor(shot: { enter: boolean; from: THREE.Vector3; fromQ: THREE.Quaternion }, k: number) {
+    const st = entryStep(k, shot.enter, this.step);
+    const p = this.root.position;
+    p.x += (shot.from.x - p.x) * (1 - st.move);
+    p.z += (shot.from.z - p.z) * (1 - st.move);
+    // up and over the sill: the vertical goes straight (the seat is lower than the street), with a hop in the middle
+    p.y += (shot.from.y - p.y) * (1 - st.move) + st.hop;
+    this.toQ.copy(this.root.quaternion);
+    this.root.quaternion.copy(shot.fromQ).slerp(this.toQ, st.turn);
   }
 
   /** Draws a ragdoll: the bones follow the eleven bodies of the sim. `pos` 11 x 3, `rot` 11 x 4, world frame. */

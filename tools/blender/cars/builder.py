@@ -458,12 +458,12 @@ def interior(b, lod, car):
     dash_z = min(z1, sz + 0.75)
     if lod == 0:
         m.box((0, belt - 0.06, dash_z), (wi * 2, 0.2, 0.36), 'interior', bevel=0.05, segments=1)
-        # the steering wheel: a ring of eight short bars
+        # the steering wheel: a ring of six short bars, each along the rim (the hands of the driver clips sit at 3 and 9 o'clock)
         cx, cy, cz = sx, belt + 0.02, dash_z - 0.24
         r = 0.18
         for i in range(6):
             a = 2 * math.pi * i / 6
-            m.box((cx + r * math.cos(a), cy + r * math.sin(a) * 0.9, cz - r * math.sin(a) * 0.35), (0.03, 0.19, 0.03), 'trim', rot=(0.35, 0, a + math.pi / 2))
+            m.box((cx + r * math.cos(a), cy + r * math.sin(a) * 0.9, cz - r * math.sin(a) * 0.35), (0.03, 0.19, 0.03), 'trim', rot=(0.35, 0, a))
         m.box((cx, cy - 0.06, cz + 0.12), (0.06, 0.06, 0.25), 'trim', rot=(0.35, 0, 0))
     else:
         m.box((0, belt - 0.06, dash_z), (wi * 2, 0.2, 0.3), 'interior')

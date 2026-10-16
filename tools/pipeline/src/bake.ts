@@ -19,6 +19,7 @@ import { MATERIALS, ROOF_MATERIALS, STYLES } from './world/appearance.js';
 import { buildContexts } from './world/context.js';
 import { loadFacts } from './world/facts.js';
 import { planBuilding } from './world/plan.js';
+import { addRaisedToField, insetForCollision, skybridgeDatum } from './world/skybridge.js';
 import { buildProps, type PropsRoad } from './world/props.js';
 import { RoadMask } from './world/markings.js';
 import { clipBuildingsToRoads } from './world/clip.js';
@@ -34,6 +35,8 @@ import { pickSpawns } from './world/spawns.js';
 import { buildGroundMesh, heightmapFromDem, LAND_CLASSES, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
 import { DEFAULT_DECK_OPTIONS } from './world/decks.js';
 
+/** A grid tile builds no junction polygon this close (m) to its edges (see buildRoads). */
+const SEAM_CLEAR = 30;
 const linear = (v: number) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
 const gray = (v: number): [number, number, number, number] => [linear(v), linear(v), linear(v), 1];
 
@@ -172,8 +175,19 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const mm = minMax(hm);
   log(`heightmap ${hm.cols}x${hm.rows}, base ${baseElevation} m, relief ${mm.min.toFixed(1)}..${mm.max.toFixed(1)} m`);
 
-  // the roads' vertical profiles first: they cut and fill the heightmap, which everything else stands on
-  const plan = planRoads(world.roads, hm);
+  // the roads' vertical profiles first: they cut and fill the heightmap, which everything else stands on. A tile of a grid designs
+  // them over its cell and `planMarginM` beyond (its neighbours' roads, as they will design them too), so the two designs agree
+  // where a road crosses the seam; the cell's part of the carved ground is then the tile's.
+  const pm = Math.round((cfg.planMarginM ?? 0) / cfg.cellSize);
+  let planHm = hm;
+  if (pm > 0) {
+    planHm = heightmapFromDem(dem, cfg.projector, cfg.origin, cfg.cols + 2 * pm, cfg.rows + 2 * pm, cfg.cellSize, b.minX - pm * cfg.cellSize, b.minZ - pm * cfg.cellSize).hm;
+  }
+  const plan = planRoads(world.roads, planHm);
+  if (pm > 0) {
+    for (let r = 0; r < hm.rows; r++) for (let c = 0; c < hm.cols; c++) hm.data[r * hm.cols + c] = planHm.data[(r + pm) * planHm.cols + c + pm];
+    log(`road design over the cell and ${pm * cfg.cellSize} m beyond it (${planHm.cols}x${planHm.rows} samples)`);
+  }
   log(`profiles: ${plan.stats.nodes} nodes, ${plan.stats.dipNodes} in dips, ${plan.stats.ties} side-by-side ties, ${plan.stats.clearances} clearances under car decks (short by up to ${plan.stats.clearanceShort.toFixed(2)} m), ${plan.stats.relaxedCurves} vertical curves eased and ${plan.stats.softTies} ties loosened to keep a grade or clearance, ${plan.stats.atGradeBridges} mapped bridges at grade built on the ground, ${plan.stats.deckSpans} bridged spans (${plan.stats.embankedSpans} more with nothing under them are embankments; ${Math.round(plan.stats.deckMetres)} m designed), terrain moved at ${plan.stats.carvedVertices} vertices (cut up to ${plan.stats.maxCut.toFixed(1)} m, fill up to ${plan.stats.maxFill.toFixed(1)} m; ground cut away under decks up to ${plan.stats.underDeckCut.toFixed(1)} m); corridor smoothed at ${plan.stats.smoothedVertices} vertices (up to ${plan.stats.smoothMaxChange.toFixed(2)} m); bridges grown by ${plan.stats.deckNodesExtended} nodes to land, ${plan.stats.deckEndsUnlanded} ends still off the ground`);
 
   const land = rasterizeAreas(world.areas, hm);
@@ -198,7 +212,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   }
   log(`ground: ${grid.cols}x${grid.rows} chunks, ${groundTris[0]} triangles at full resolution, ${groundTris[1]} at level 1`);
 
-  const roads = buildRoads(plan, hm, b, nodeTags);
+  const roads = buildRoads(plan, hm, b, nodeTags, { seamClear: (cfg.planMarginM ?? 0) > 0 ? SEAM_CLEAR : 0 });
   log(`markings: ${roads.markingStats.lines} lines, ${roads.markingStats.crosswalks} crosswalks (${roads.markingStats.bars} bars), ${roads.markingStats.stopBars} stop bars, ${roads.markings.triangleCount} triangles; ${roads.controls.signals.length} signals, ${roads.controls.stops.length} stop signs, ${roads.controls.junctions.filter((c) => c.control === "signals").length} signalised and ${roads.controls.junctions.filter((c) => c.control === "stop").length} stop-controlled junctions`);
   log(`junctions: ${roads.junctionStats.built} polygons from ${roads.junctionStats.candidates} junction nodes (${roads.junctionStats.clusters} clusters); not built: ${JSON.stringify(roads.junctionStats.rejected)}`);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
@@ -212,7 +226,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const bstats = built.stats;
   log(`building looks from the feeds (colour ${JSON.stringify(bstats.look.colour)}, roof colour ${JSON.stringify(bstats.look.roofColour)}, material ${JSON.stringify(bstats.look.material)}, style ${JSON.stringify(bstats.look.style)}, year ${JSON.stringify(bstats.look.year)}, floors ${JSON.stringify(bstats.look.floors)}; ${bstats.look.bare} of ${bstats.total} buildings have none of it); ${bstats.osmPartsAdded} OSM building parts added, ${bstats.osmHeightRefused} OSM heights refused for a piece inside a bigger outline; known heights: ${bstats.facts?.heights.applied ?? 0} fixed, ${bstats.facts?.heights.mismatched.length ?? 0} still below the known height; curated looks: ${bstats.facts?.looks.applied ?? 0}`);
   // the lane graph comes from the roads alone; its lanes and junction curves also cut the buildings they would run into
-  const lanes = buildLanes(roads.json, roads.exported);
+  const lanes = buildLanes(roads.json, roads.exported, (cfg.planMarginM ?? 0) > 0 ? { bounds: b } : {});
   const lanePaths: { pts: V2[]; half: number }[] = [];
   for (const e of lanes.edges) {
     // (a lane on a deck too: a building that stands up through a deck is a wall in it)
@@ -255,6 +269,8 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     const cx = outer.reduce((a, p) => a + p[0], 0) / outer.length;
     const cz = outer.reduce((a, p) => a + p[1], 0) / outer.length;
     minY = Math.min(minY, surfaceHeight(hm, cx, cz));
+    // a skybridge floats over the street: its clearance is measured from the highest ground under it (the ring, its edges' middles and a line along it)
+    if (bd.skybridge) minY = skybridgeDatum(outer, hm);
     if (bd.hero) minY = bd.hero.datum;
     const plan = planBuilding(bd, contexts.get(bd.id));
     planned.push({ bd, datum: minY, plan });
@@ -278,7 +294,9 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     if (plan.pieces.some((p) => p.kind === 'glass')) bstat.glass++;
     for (const pc of plan.pieces) {
       if (pc.baseH > 2) bstat.floating++;
-      field.addBuilding(pc.rings, minY + pc.topH);
+      // a raised piece shades the ground under it like a deck, not like a wall down to the ground
+      if (pc.baseH > 2) addRaisedToField(field, pc.rings, minY + pc.baseH);
+      else field.addBuilding(pc.rings, minY + pc.topH);
     }
   }
   // the undersides of the decks shade the ground below them
@@ -301,21 +319,25 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       roofTris += st.roofTris;
       for (const [k, v] of Object.entries(st.equipment)) equipment[k] = (equipment[k] ?? 0) + v;
     }
-    kept.push(bd.rings);
+    // (a floating building leaves the ground under it open: paths, spawns and props may use it)
+    if (plan.solidBaseH <= 0) kept.push(bd.rings);
     // The collision footprint is the drawn one, courtyards included (a hole left out would be an invisible solid in a
     // courtyard and leave its inner walls to walk through), simplified a little so the trimesh stays small. It stays one prism
     // as tall as the highest point of the drawn building (a ridge, the top of the tallest part).
-    const solid = collisionRings(bd.rings);
+    const solid = plan.solidBaseH > 0 ? insetForCollision(collisionRings(bd.rings)) : collisionRings(bd.rings);
     if (solid.length > 1) holed++;
     const scratchRoof = new MeshBuilder();
-    extrudeFootprint(solid, { baseY: minY - 0.3, topY: minY + plan.maxTopH, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
+    // the prism of a floating building (a skybridge) runs from its underside to its top: walls and a roof as any building's (the sim recovers the
+    // footprint from the roof triangles, so there is no floor; nothing can reach the open underside), and nothing below it, so the way under it is open
+    const floatY = plan.solidBaseH > 0 ? minY + plan.solidBaseH : null;
+    extrudeFootprint(solid, { baseY: floatY ?? minY - 0.3, topY: minY + plan.maxTopH, wall: collision, roof: scratchRoof, wallColor: [1, 1, 1], roofColor: [1, 1, 1] });
     const base = collision.vertexCount;
     for (let i = 0; i < scratchRoof.vertexCount; i++) collision.vertex(scratchRoof.positions[i * 3], scratchRoof.positions[i * 3 + 1], scratchRoof.positions[i * 3 + 2], 0, 1, 0);
     for (const i of scratchRoof.indices) collision.indices.push(base + i);
     if (bd.hero) heroHullTris.set(bd.hero.id, (heroHullTris.get(bd.hero.id) ?? 0) + collision.triangleCount - tris0);
   }
   const buildingCollisionTris = collision.triangleCount;
-  log(`buildings: ${kept.length} (${skipped} tiny skipped, ${holed} with courtyards), heights ${JSON.stringify(bstats.heightSources)}`);
+  log(`buildings: ${kept.length} on the ground (${skipped} tiny skipped, ${holed} with courtyards), ${planned.filter((p) => p.bd.skybridge).length} skybridges floating (${planned.filter((p) => p.plan.solidBaseH > 0).length} with the ground under them open), heights ${JSON.stringify(bstats.heightSources)}`);
   log(`building looks: material ${JSON.stringify(look.material)} (${look.materialData} from data), style ${JSON.stringify(look.style)} (${look.styleData} from data), era ${JSON.stringify(look.era)}, roof ${JSON.stringify(look.roof)}; wall colour from data ${look.colourData}, floors from data ${look.floorsData}, ${look.context} decided by the neighbours, ${look.crown} with a crown`);
   log(`building kinds: ${JSON.stringify(kindCounts)}; ${bstat.kindFromData} classified from data, ${bstat.eraFromData} dated; ${bstat.withParts} stepped (${bstat.pieces} pieces, ${bstat.podiums} podiums), ${bstat.pitchedBuildings} with pitched roofs; rooftop equipment ${JSON.stringify(equipment)}; ${wallTris} wall and ${roofTris} roof triangles`);
 

@@ -69,6 +69,8 @@ export interface TileConfig {
   rows: number;
   outDir: string;
   cacheDir: string;
+  /** The roads are designed (and the ground carved) this far beyond the bounds too (m; a grid's tiles: so neighbours agree at a seam). */
+  planMarginM?: number;
   /**
    * Optional (set only by the grid configs of src/city/grid.ts): snap the DEM request outward to a lon/lat pixel grid with
    * these steps, anchored at (lon0, lat0), so neighbouring tiles sample the same pixels at their seam.

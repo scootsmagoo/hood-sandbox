@@ -23,11 +23,11 @@
  "radius": 22.2,
  "lods": [
   {
-   "tris": 3674,
+   "tris": 2210,
    "from": 0
   },
   {
-   "tris": 914,
+   "tris": 422,
    "from": 420
   }
  ],
@@ -80,6 +80,6 @@
   "overlap": 0.4
  },
  "model": "assets/landmarks/skyview-atlanta.glb",
- "hash": "afc42d27a4fa",
- "bytes": 87132
+ "hash": "f1236430f660",
+ "bytes": 67016
 }

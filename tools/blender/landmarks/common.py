@@ -42,7 +42,7 @@ def report(asset, lid, lods, hull, lod_from, cutout=None, replaces=None, extra=N
     fp = footprint(lid)
     counts = lm.emit(lods, asset)
     lo, hi = [1e9] * 3, [-1e9] * 3
-    for part in lods[0].parts.values():
+    for part in lods[0].all_parts():
         for p in part.p:
             for k in range(3):
                 lo[k] = min(lo[k], p[k])

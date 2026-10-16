@@ -319,13 +319,15 @@ function gunGeometry(kind: WeaponKind): THREE.BufferGeometry {
   if (g) return g;
   const parts: [number, number, number, number, number, number][] =
     kind === 'pistol'
-      ? [[0.035, 0.045, 0.19, 0, 0.03, 0.07], [0.035, 0.1, 0.05, 0, -0.045, -0.01]]
+      ? [[0.027, 0.036, 0.19, 0, 0.034, 0.07], [0.022, 0.018, 0.15, 0, 0.007, 0.05], [0.007, 0.03, 0.045, 0, -0.012, 0.05], [0.012, 0.012, 0.03, 0, 0.034, 0.178]]
       : kind === 'smg'
         ? [[0.05, 0.075, 0.3, 0, 0.02, 0.12], [0.03, 0.15, 0.04, 0, -0.09, 0.08], [0.04, 0.05, 0.12, 0, 0.0, -0.1], [0.025, 0.025, 0.1, 0, 0.03, 0.3]]
         : kind === 'shotgun'
           ? [[0.04, 0.04, 0.72, 0, 0.03, 0.32], [0.045, 0.085, 0.3, 0, 0.0, -0.18], [0.06, 0.045, 0.2, 0, -0.035, 0.26]]
           : [[0.05, 0.09, 0.5, 0, 0.02, 0.2], [0.025, 0.025, 0.32, 0, 0.03, 0.62], [0.045, 0.1, 0.26, 0, -0.01, -0.2], [0.035, 0.15, 0.05, 0, -0.11, 0.15], [0.03, 0.03, 0.12, 0, 0.09, 0.2]];
   const geos = parts.map(([w, h, d, x, y, z]) => new THREE.BoxGeometry(w, h, d).translate(x, y, z));
+  // a pistol's grip leans back from the frame
+  if (kind === 'pistol') geos.push(new THREE.BoxGeometry(0.03, 0.1, 0.048).rotateX(-0.2).translate(0, -0.045, -0.012));
   g = mergeGeometries(geos, false)!;
   for (const b of geos) b.dispose();
   gunGeos.set(kind, g);
@@ -334,7 +336,7 @@ function gunGeometry(kind: WeaponKind): THREE.BufferGeometry {
 
 /** A gun's mesh (shared geometry and material), barrel along +Z, origin at the grip. */
 export function gunMesh(kind: WeaponKind): THREE.Mesh {
-  const m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.45, metalness: 0.6 })));
+  const m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.42, metalness: 0.25 })));
   m.castShadow = true;
   return m;
 }
@@ -404,7 +406,7 @@ export function buildPedModel(look: PedLook = OUTFITS[0]): PedModel {
       if (!kind) return;
       let m = guns.get(kind);
       if (!m) {
-        m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.45, metalness: 0.6 })));
+        m = new THREE.Mesh(gunGeometry(kind), (gunMaterial ??= new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.42, metalness: 0.25 })));
         m.castShadow = true;
         m.rotation.x = Math.PI / 2;
         // The grip is in the hand at the end of the arm and the barrel runs on past it; drawn a little oversize so it reads from behind.

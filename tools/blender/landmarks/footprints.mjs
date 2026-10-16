@@ -67,6 +67,11 @@ const HEROES = [
   { id: 'basilica-of-the-sacred-heart', ov: 'Basilica of the Sacred Heart of Jesus' },
   { id: 'corey-tower', ov: 'Corey Tower' },
   { id: 'hilton-atlanta', ov: 'Hilton Atlanta' },
+  { id: 'peachtree-center-harris-tower', ov: 'Peachtree Center Harris Tower' },
+  { id: 'peachtree-center-international-tower', ov: 'Peachtree Center International Tower' },
+  { id: 'peachtree-center-north-tower', ov: 'Peachtree Center North Tower' },
+  { id: 'peachtree-center-south-tower', ov: 'Peachtree Center South Tower' },
+  { id: 'rialto-center-for-the-arts', ov: 'Rialto Center for the Arts' },
 ];
 
 const out = { _comment: 'Written by tools/blender/landmarks/footprints.mjs from the pipeline cache. Do not edit.', origin: tile.origin, landmarks: {} };

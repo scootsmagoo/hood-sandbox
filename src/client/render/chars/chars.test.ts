@@ -8,6 +8,7 @@ import { CLIPS, checkCharacters, readCharacters } from '../../../../tools/blende
 import { GAIT, locoWeights, planFor, topTwo, type AnimInput } from './animSelect';
 import { makeRig, makeSkeleton, type CharRig } from './characterAssets';
 import { CHAR_OUTFITS, REGION_COUNT, appearanceOf, heightOf, officerOutfit } from './outfits';
+import { doorOpenAmount, entryStep } from './carEntry';
 import { ACTOR_LOD, actorLod } from './PedActor';
 import { ACTOR_BUDGET, pickNear } from './PedViews';
 import { BONE_PART, RagBones } from './ragBones';
@@ -110,6 +111,47 @@ describe('pose to clip', () => {
     const [a, b] = topTwo(planFor(inp({ speed: 2.5 })).layers);
     expect(a.clip).toMatch(/walk|jog/);
     expect(b?.clip).toMatch(/walk|jog/);
+  });
+});
+
+describe('getting into and out of a car', () => {
+  it('opens the door as the person reaches it, shuts it behind them going in, and holds it going out until they are clear', () => {
+    expect(doorOpenAmount(0, true)).toBe(0);
+    expect(doorOpenAmount(0.4, true)).toBe(1);
+    expect(doorOpenAmount(1, true)).toBe(0);
+    expect(doorOpenAmount(0, false)).toBe(0);
+    expect(doorOpenAmount(0.3, false)).toBe(1);
+    expect(doorOpenAmount(0.6, false)).toBe(1);
+    expect(doorOpenAmount(1, false)).toBe(0);
+    for (const enter of [true, false]) for (let k = 0; k <= 1; k += 0.01) {
+      const d = doorOpenAmount(k, enter);
+      expect(d).toBeGreaterThanOrEqual(0);
+      expect(d).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('walks the body from one spot to the other without going backwards, turning as it goes, and hops the sill once', () => {
+    for (const enter of [true, false]) {
+      let move = 0;
+      let turn = 0;
+      let hop = 0;
+      for (let k = 0; k <= 1.0001; k += 0.01) {
+        const s = entryStep(Math.min(1, k), enter);
+        expect(s.move).toBeGreaterThanOrEqual(move - 1e-9);
+        expect(s.turn).toBeGreaterThanOrEqual(turn - 1e-9);
+        move = s.move;
+        turn = s.turn;
+        hop = Math.max(hop, s.hop);
+      }
+      expect(move).toBeCloseTo(1, 5);
+      expect(turn).toBeCloseTo(1, 5);
+      expect(hop).toBeGreaterThan(0.05);
+      expect(hop).toBeLessThan(0.15);
+      expect(entryStep(0, enter).move).toBe(0);
+    }
+    // going out the body stays put while it leans, and leaves late
+    expect(entryStep(0.25, false).move).toBe(0);
+    expect(entryStep(0.25, true).move).toBeGreaterThan(0.1);
   });
 });
 

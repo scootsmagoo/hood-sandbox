@@ -46,6 +46,8 @@ export interface BuildingInfo {
   look?: DataLook;
   /** the floors the facade shows when they are not `numFloors` (a part that starts at an upper level shows fewer) */
   facadeFloors?: number | null;
+  /** an OSM `building=bridge` footprint that is a covered walkway between buildings (a skybridge): drawn and solid as a tube floating over the street, never as a wall down to the ground (see `skybridgeHeights`) */
+  skybridge?: boolean;
   /** a hero landmark's collision prism (world/landmarks.ts): in the collision mesh and the footprints, never drawn (its model is); `datum` is the model's ground height */
   hero?: { id: string; datum: number };
 }
@@ -69,6 +71,20 @@ export function hash01(s: string): number {
 }
 
 const FLOOR_M = 3.4;
+
+/** Skybridges (`building=bridge` ways, mapped without a height): the clearance under the tube, its height, and the tallest an Overture height can be and still be a walkway (above that the footprint is a building the tag was put on). */
+export const SKYBRIDGE = { clearance: 7, tube: 4, maxHeight: 30 } as const;
+
+/**
+ * The heights of a skybridge: it floats from `minHeight` over the street to `height`. The OSM/Overture `min_height` (or
+ * `building:min_level`) is used where it is mapped; otherwise the tube stands `SKYBRIDGE.clearance` over the ground (a second-floor
+ * link) and is `SKYBRIDGE.tube` tall, unless the data gives a height that fits a walkway (2.5 to 7 m above its base).
+ */
+export function skybridgeHeights(minHeight: number | null | undefined, height: number | null | undefined): { minHeight: number; height: number } {
+  const min = minHeight != null && minHeight > 3 ? minHeight : SKYBRIDGE.clearance;
+  const top = height != null && height >= min + 2.5 && height <= min + 7 ? height : min + SKYBRIDGE.tube;
+  return { minHeight: min, height: top };
+}
 
 const DEFAULT_HEIGHT: Record<string, number> = {
   house: 6, detached: 6, residential: 8, apartments: 16, dormitory: 18, terrace: 8,
@@ -151,6 +167,8 @@ export interface BuildingStats {
   heightsCapped: number;
   /** known towers that stand on a bigger, lower footprint, split from it */
   towersSplit: number;
+  /** `building=bridge` footprints drawn as floating tubes */
+  skybridges: number;
   facts?: FactsResult;
 }
 
@@ -264,7 +282,7 @@ export function buildBuildings(
   const out: Building[] = [];
   const stats: BuildingStats = {
     overture: 0, osmOnly: 0, total: 0, heightSources: { overture: 0, 'osm-height': 0, floors: 0, default: 0, known: 0 },
-    look: { colour: {}, roofColour: {}, material: {}, style: {}, year: {}, floors: {}, bare: 0 }, osmPartsAdded: 0, osmHeightRefused: 0, heightsCapped: 0, towersSplit: 0,
+    look: { colour: {}, roofColour: {}, material: {}, style: {}, year: {}, floors: {}, bare: 0 }, osmPartsAdded: 0, osmHeightRefused: 0, heightsCapped: 0, towersSplit: 0, skybridges: 0,
   };
   const inside = (rings: V2[][]) => {
     const c = ringCentroid(rings[0]);
@@ -313,6 +331,13 @@ export function buildBuildings(
       h = floors && floors >= 2 ? floors * 3.2 + 1 : 30;
       stats.heightsCapped++;
     }
+    if (info.skybridge) {
+      const sb = skybridgeHeights(info.minHeight, h);
+      out.push({ id, rings, height: sb.height, heightSource: 'known', use: 'bridge', ...info, minHeight: sb.minHeight, numFloors: null, facadeFloors: null, roofShape: null, roofHeight: null });
+      stats.heightSources.known++;
+      stats.skybridges++;
+      return;
+    }
     const r = resolveHeight({ id, height: h, numFloors: floors, use });
     const source: HeightSource = r.source === 'overture' && fromOsm ? 'osm-height' : r.source;
     out.push({ id, rings, height: r.height, heightSource: source, use: use ?? 'yes', ...info, numFloors: floors });
@@ -351,7 +376,9 @@ export function buildBuildings(
         }
         const id = `overture:${b.id}${b.polygons.length > 1 ? '/' + pi : ''}`;
         const look = lookFromFeeds(match?.tags, b, match?.tags.wikidata ? extras.wikidata?.get(match.tags.wikidata) : undefined, trusted);
+        const skybridge = match?.tags.building === 'bridge' && !b.hasParts && (h == null || h <= SKYBRIDGE.maxHeight) && ringArea(rings[0]) <= ringArea(match.rings[0]) * 1.6 + 20;
         push(id, rings, h, floors, use, fromOsm, {
+          skybridge,
           srcId: b.id,
           name: b.name ?? match?.tags.name ?? null,
           tags: match?.tags,
@@ -375,6 +402,7 @@ export function buildBuildings(
       if (!inside(b.rings)) continue;
       const a = appearanceFromTags(b.tags);
       push(b.id, b.rings, a.height, a.levels, b.tags.building === 'yes' ? null : b.tags.building, true, {
+        skybridge: b.tags.building === 'bridge' && (a.height == null || a.height <= SKYBRIDGE.maxHeight),
         name: b.tags.name ?? null,
         tags: b.tags,
         roofShape: b.tags['roof:shape'] || null,

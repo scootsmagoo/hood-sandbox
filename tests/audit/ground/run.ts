@@ -10,6 +10,8 @@
  *   --quick            a sample: every 12th edge, at 25 m/s
  *   --gate             exit 1 when a gate fails (see GATES)
  *   --no-edge-fix      build the ground and the trimesh without FIX_INTERNAL_EDGES (the physics before the fix)
+ *   --no-guard         keep the cars' crash guard on (soft CCD and the crash restitution always: the physics before round four)
+ *   --trace            write every launch's last 45 ticks (wheels, springs, tyres, the hull's pushes) to ground-traces.json
  */
 import { mkdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -22,24 +24,26 @@ import { clusterSpots, countEvents, driveLanes, Graph, GroundWorld, scanBuilding
 import { Raster } from './png';
 
 /**
- * What `--gate` (and `npm run verify` in tools/pipeline) fails on. No lane, junction curve or main road may run into a building.
- * The ground numbers are a ratchet at what the tile measures now (2026-10-16, round three, on the re-registered DEM: 247 launches
- * over 1273 km, 123 steps; the same code on the misregistered DEM measured 219 and 138, round two 255 and 181, round one 778 and
- * 467), a few percent over it so a new bake's spread passes and a regression does not; lower them as the residuals go
+ * What `--gate` (and `npm run verify` in tools/pipeline) fails on. No lane, junction curve or main road may run into a building,
+ * and no launch may happen on smooth road (`classifyLaunch`: a launch where the ground was continuous under every wheel and the
+ * hull clear of it is a physics bug). The rest is a ratchet at what the tile measures now (2026-10-16, round four, the crash guard:
+ * 131 launches over 1292 km, every one at a seam, a crest or a crash; round three 247 and 225 on this bake, round two 255, round
+ * one 778), a few percent over it so a new bake's spread passes and a regression does not; lower them as the residuals go
  * (docs/ground-audit.md lists them). The goal is zero launches.
  */
 export const GATES = {
-  launches: 260,
+  launches: 145,
+  smoothLaunches: 0,
   mainRoadsInBuildings: 0,
   lanesInBuildings: 0,
   /** lanes with a step in the surface under a wheel track over 4 cm */
   steps: 135,
   /** hard jolts and pitch or roll kicks per 10 km driven */
-  joltsPer10km: 13.5,
+  joltsPer10km: 12.5,
   /** pushes of the hull by static collision that is not a wall, per 10 km */
-  contactsPer10km: 3.2,
+  contactsPer10km: 2.2,
   /** routes given up (stuck, off the road, upside down) while measuring a lane, share */
-  abortShare: 0.08,
+  abortShare: 0.075,
 };
 
 export const fsFetch = async (url: string) => {
@@ -53,7 +57,7 @@ export async function loadTile(dir: string): Promise<TileData> {
   return loadBakedTile(dir, fsFetch as never);
 }
 
-interface Job { tile: string; speed: number; targets: number[]; maxRoutes?: number; fixInternalEdges?: boolean }
+interface Job { tile: string; speed: number; targets: number[]; maxRoutes?: number; fixInternalEdges?: boolean; trace?: boolean; noGuard?: boolean }
 interface JobResult { events: GroundEvent[]; stats: DriveStats }
 
 async function runJob(job: Job): Promise<JobResult> {
@@ -61,7 +65,7 @@ async function runJob(job: Job): Promise<JobResult> {
   const tile = await loadTile(job.tile);
   const gw = new GroundWorld(R, tile, { fixInternalEdges: job.fixInternalEdges });
   const g = new Graph(tile);
-  return driveLanes(gw, g, { speed: job.speed, targets: job.targets, maxRoutes: job.maxRoutes });
+  return driveLanes(gw, g, { speed: job.speed, targets: job.targets, maxRoutes: job.maxRoutes, trace: job.trace, noGuard: job.noGuard });
 }
 
 function arg(name: string, argv: string[]): string | undefined {
@@ -128,6 +132,8 @@ export function gateNumbers(events: GroundEvent[], drive: DriveStats[]): { gate:
   const n = (f: (e: GroundEvent) => boolean) => events.filter(f).length;
   const gate = {
     launches: n((e) => e.kind === 'air' || e.kind === 'launch'),
+    /** launches and airborne episodes where the ground was smooth (see `classifyLaunch`): physics bugs, none allowed */
+    smoothLaunches: n((e) => (e.kind === 'air' || e.kind === 'launch') && e.ground === 'smooth'),
     mainRoadsInBuildings: n((e) => e.kind === 'building' && (e.cause === 'main-road-in-building' || e.cause === 'main-road-dead-ends-at-building')),
     lanesInBuildings: n((e) => e.kind === 'building' && e.edge >= 0),
     steps: n((e) => e.kind === 'step'),
@@ -147,6 +153,10 @@ export async function main(argv: string[]): Promise<GroundReport> {
   const quick = argv.includes('--quick');
   // the physics as it was before the internal-edge fix (for a before-and-after on one tile)
   const noEdgeFix = argv.includes('--no-edge-fix');
+  // every launch's last ticks (each wheel's query, spring and tyre; the hull's solver contacts) into ground-traces.json
+  const trace = argv.includes('--trace');
+  // the physics before the crash guard (RaycastCar's GUARD), for a before-and-after
+  const noGuard = argv.includes('--no-guard');
   const speeds = (arg('speeds', argv) ?? (quick ? '25' : '15,25,35')).split(',').map(Number);
   const out = arg('out', argv) ?? '.shots/ground';
   const workers = Number(arg('workers', argv) ?? Math.max(1, Math.min(30, os.cpus().length - 2)));
@@ -164,7 +174,7 @@ export async function main(argv: string[]): Promise<GroundReport> {
     for (const targets of shards) {
       if (!targets.length) continue;
       jobs.push(new Promise<JobResult>((resolve, reject) => {
-        const w = new Worker(self, { workerData: { tile: tileDir, speed, targets, fixInternalEdges: !noEdgeFix } satisfies Job });
+        const w = new Worker(self, { workerData: { tile: tileDir, speed, targets, fixInternalEdges: !noEdgeFix, trace, noGuard } satisfies Job });
         w.once('message', (r: JobResult) => resolve(r));
         w.once('error', reject);
         w.once('exit', (code) => { if (code !== 0) reject(new Error(`worker exited ${code}`)); });
@@ -194,12 +204,17 @@ export async function main(argv: string[]): Promise<GroundReport> {
   const spots = clusterSpots(events.filter((e) => e.kind !== 'mismatch'));
   const report: GroundReport = { tile: tileDir, speeds, quick, drive, counts, gate, failed, spots: spots.slice(0, 200), events, seconds: (performance.now() - t0) / 1000 };
   mkdirSync(out, { recursive: true });
-  writeFileSync(path.join(out, 'ground-audit.json'), JSON.stringify(report, null, 1));
+  const traced = events.filter((e) => e.trace);
+  if (trace) writeFileSync(path.join(out, 'ground-traces.json'), JSON.stringify(traced));
+  writeFileSync(path.join(out, 'ground-audit.json'), JSON.stringify({ ...report, events: events.map(({ trace: _t, ...e }) => e) }, null, 1));
   writeFileSync(path.join(out, 'ground-heat.png'), heatMap(tile, events));
   for (const d of drive) log(`drive ${d.speed} m/s: ${d.covered}/${d.edges} edges, ${(d.metres / 1000).toFixed(1)} km, ${d.routes} routes (${d.aborted} given up), mean ${d.vMean.toFixed(1)} m/s, max ${d.vMax.toFixed(1)}`);
   log(`by kind ${JSON.stringify(counts.byKind)}`);
   for (const [k, c] of Object.entries(counts.byKindCause)) log(`  ${k}: ${JSON.stringify(Object.fromEntries(Object.entries(c).sort((a, b) => b[1] - a[1])))}`);
   log(`by speed ${JSON.stringify(counts.bySpeed)}`);
+  log(`launches by ground ${JSON.stringify(counts.launchGround)}`);
+  log(`launches by origin ${JSON.stringify(counts.launchOrigin)}`);
+  for (const e of events.filter((x) => x.ground === 'smooth')) log(`  on smooth road: ${e.kind} ${e.origin} at (${e.x.toFixed(0)}, ${e.z.toFixed(0)}) ${e.speed} m/s (${e.v.toFixed(1)}) ${e.road} ${e.cause}`);
   log(`worst spots:`);
   for (const s of spots.slice(0, 15)) log(`  (${s.x}, ${s.z}) n=${s.n} ${JSON.stringify(s.kinds)} ${JSON.stringify(s.causes)} ${s.roads.join(' ')}`);
   log(`gate ${JSON.stringify(Object.fromEntries(Object.entries(gate).map(([k, v]) => [k, Math.round(v * 1000) / 1000])))}`);

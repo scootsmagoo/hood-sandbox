@@ -53,7 +53,7 @@ export interface RoadMeshes {
   exported: JunctionsFile;
   /** OSM crossing ways: centreline with height, and what the nodes say about them */
   crossings: { id: number; points: V3[]; signals: boolean }[];
-  stats: { ways: number; drivableWays: number; deckWays: number; deckMetres: number; piers: number; maxDeckHeightAboveGround: number; deckCaps?: number; landedDeckEnds?: number; pedSlabSegmentsDropped?: number; deckJunctions?: number; deckLevels?: number; weldedTriangles?: number; weldFailedLevels?: number; deckClashes?: number };
+  stats: { ways: number; drivableWays: number; deckWays: number; deckMetres: number; piers: number; maxDeckHeightAboveGround: number; deckCaps?: number; landedDeckEnds?: number; pedSlabSegmentsDropped?: number; deckJunctions?: number; deckLevels?: number; weldedTriangles?: number; weldFailedLevels?: number; deckClashes?: number; barrierMetres?: number; rampQuadsDropped?: number };
 }
 
 const RANK: Record<string, number> = {
@@ -567,7 +567,7 @@ export function splitRuns(n: number, spans: DeckSpan[]): { from: number; to: num
   return runs;
 }
 
-export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: Rect, nodes: Map<number, NodeInfo> = new Map()): RoadMeshes {
+export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: Rect, nodes: Map<number, NodeInfo> = new Map(), opts: { seamClear?: number } = {}): RoadMeshes {
   const plan = Array.isArray(input) ? planRoads(input, hm) : input;
   const res: RoadMeshes = {
     asphalt: new MeshBuilder(), sidewalk: new MeshBuilder(), crosswalk: new MeshBuilder(), rail: new MeshBuilder(),
@@ -591,7 +591,17 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
   const deckNodeIds = new Set<number>();
   plan.profiled.forEach((di, pi) => { for (const sp of plan.spans[pi]) for (let i = sp.from; i <= sp.to; i++) deckNodeIds.add(dense[di].nodeIds[i]); });
   const jways = carIdx.map((di) => ({ way: dense[di].w, pts: dense[di].pts, nodeIds: dense[di].nodeIds }));
-  const jr = buildJunctions(jways, { liftOf: roadLift, skipNode: (id) => deckNodeIds.has(id) });
+  // A tile of a grid builds no junction polygon within `seamClear` of its edges (a seam: the polygon would straddle it, and the legs
+  // would not end at the seam where the neighbour's lanes do); the roads meet there as a junction without a polygon, their lanes
+  // running on to the seam.
+  const seamClear = opts.seamClear ?? 0;
+  const nodeXZ = new Map<number, V2>();
+  if (seamClear > 0) for (const d of dense) d.nodeIds.forEach((id, i) => { if (id > 0) nodeXZ.set(id, d.pts[i]); });
+  const nearSeam = (id: number) => {
+    const p = nodeXZ.get(id);
+    return !!p && (p[0] - bounds.minX < seamClear || bounds.maxX - p[0] < seamClear || p[1] - bounds.minZ < seamClear || bounds.maxZ - p[1] < seamClear);
+  };
+  const jr = buildJunctions(jways, { liftOf: roadLift, skipNode: (id) => deckNodeIds.has(id) || (seamClear > 0 && nearSeam(id)) });
   res.junctions = jr.junctions;
   res.junctionStats = jr.stats;
   const mask = res.mask;
@@ -780,13 +790,24 @@ export function buildRoads(input: RoadPlan | RoadWay[], hm: Heightmap, bounds: R
   // solid there (the profile could not lift it clear: its slab stood in the lane, a metre over the road)
   const carRoads = new DeckFootprints();
   cleaned.forEach((c) => { if (c && !c.deckY && c.way.kind === 'car') carRoads.add(c.pts, c.way.width / 2); });
+  // the walks that come off a bridge's sidewalk (a sidewalk on a bridge deck: a mapped ramp or the extension of one, sharing its end
+  // node): their surface is not drawn over a car carriageway below them (see emitPiece)
+  const bridgeWalkNodes = new Set<number>();
+  for (const g of dense) if (g.w.bridge && g.w.kind === 'ped') for (const id of g.nodeIds) if (id > 0) bridgeWalkNodes.add(id);
+  const rampWays = new Set<number>();
+  const bridgeWalkEnds: V2[] = [];
+  for (const g of dense) {
+    if (g.w.kind !== 'ped' || g.w.sub === 'crossing' || g.w.highway === 'steps') continue;
+    if (g.w.bridge) { rampWays.add(g.w.id); bridgeWalkEnds.push(g.pts[0], g.pts[g.pts.length - 1]); } else if (bridgeWalkNodes.has(g.nodeIds[0]) || bridgeWalkNodes.has(g.nodeIds[g.nodeIds.length - 1])) rampWays.add(g.w.id);
+  }
+  const nearBridgeWalk = (x: number, z: number) => bridgeWalkEnds.some((p) => Math.hypot(p[0] - x, p[1] - z) <= RAMP_REACH);
   const deckEnds: DeckEnd[] = [];
   const weld = { segs: [] as WeldSegment[], polys: [] as WeldPolygon[], piece: 0 };
   for (const c of cleaned) {
     if (!c) continue;
     if (c.way.sub === 'crossing') continue; // crossings are zebra markings now (below)
     weld.piece++;
-    emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { json: false, carDecks, carRoads, ends: deckEnds, blend, joints, weld });
+    emitPiece(res, c.way, c.pts, c.deckY, ground, thickness, below, !!c.derived, { json: false, carDecks, carRoads, rampRoads: rampWays.has(c.way.id) ? { roads: carRoads, near: nearBridgeWalk } : undefined, ends: deckEnds, blend, joints, weld });
     if (c.way.kind === 'car') res.runs.push({ way: c.way, pts: c.pts, deckY: c.deckY, startJ: c.startJ, endJ: c.endJ });
   }
   res.stats.deckCaps = addDeckCaps(res, deckEnds, thickness, weld.polys);
@@ -852,7 +873,7 @@ function emitPiece(
   thickness: number,
   below: { w: RoadWay; pts: V2[] }[],
   derived = false,
-  what: { json?: boolean; mesh?: boolean; carDecks?: DeckFootprints; carRoads?: DeckFootprints; ends?: DeckEnd[]; blend?: DeckBlend; joints?: Set<string>; weld?: { segs: WeldSegment[]; polys: WeldPolygon[]; piece: number } } = {},
+  what: { json?: boolean; mesh?: boolean; carDecks?: DeckFootprints; carRoads?: DeckFootprints; rampRoads?: { roads: DeckFootprints; near: (x: number, z: number) => boolean }; ends?: DeckEnd[]; blend?: DeckBlend; joints?: Set<string>; weld?: { segs: WeldSegment[]; polys: WeldPolygon[]; piece: number } } = {},
 ): void {
   const wantJson = what.json ?? true;
   const wantMesh = what.mesh ?? true;
@@ -921,6 +942,26 @@ function emitPiece(
     }
   }
 
+  // A bridge's sidewalk, or a walk that comes down off one within RAMP_REACH of its end, is not drawn over a car carriageway below it: a
+  // quad with a corner on the carriageway and within RAMP_OVER of the ground beneath it (or below it) is left out of the surface and of
+  // its underside and skirts. The walk still meets the ground on either side of it.
+  const dropQuad: boolean[] = [];
+  if (what.rampRoads && way.kind === 'ped') {
+    const rr = what.rampRoads;
+    // a walk off a bridge is a ramp only where it comes down from the deck: within RAMP_REACH of a quad its height changes by RAMP_RISE
+    const s: number[] = [0];
+    for (let i = 1; i < n; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const top = (i: number) => Math.max(lY[i], rY[i]), bottom = (i: number) => Math.min(lY[i], rY[i]);
+    for (let i = 0; i + 1 < n; i++) {
+      const corners: V2[] = [left[i], right[i], left[i + 1], right[i + 1]];
+      const over = corners.some((q) => rr.roads.contains(q[0], q[1], 0));
+      const cx = (pts[i][0] + pts[i + 1][0]) / 2, cz = (pts[i][1] + pts[i + 1][1]) / 2;
+      const low = Math.min(lY[i], rY[i], lY[i + 1], rY[i + 1]) <= ground(cx, cz) + RAMP_OVER;
+      let hi = -Infinity, lo = Infinity;
+      for (let j = 0; j < n; j++) if (Math.abs(s[j] - s[i]) <= RAMP_REACH) { hi = Math.max(hi, top(j)); lo = Math.min(lo, bottom(j)); }
+      dropQuad.push(over && low && (way.bridge || (rr.near(cx, cz) && hi - lo >= RAMP_RISE)));
+    }
+  }
   if (way.kind === 'car' && wantJson) {
     const pts3: V3[] = pts.map((p, i) => [p[0], topY[i], p[1]]);
     const simp = simplifyLine3(pts3, 0.25).map((p) => [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100, Math.round(p[2] * 100) / 100] as V3);
@@ -964,7 +1005,11 @@ function emitPiece(
     target.set('uv1', li, w / 2, kerb);
     target.set('uv1', ri, w / 2, kerb);
   }
-  target.indices.push(...ribbonIndices(n, base));
+  if (dropQuad.some((d) => d)) {
+    const idx = ribbonIndices(n, base);
+    for (let i = 0; i + 1 < n; i++) if (!dropQuad[i]) target.indices.push(...idx.slice(6 * i, 6 * i + 6));
+    res.stats.rampQuadsDropped = (res.stats.rampQuadsDropped ?? 0) + dropQuad.filter((d) => d).length;
+  } else target.indices.push(...ribbonIndices(n, base));
   res.stats.ways++;
 
   if (!deckY) return;
@@ -979,7 +1024,8 @@ function emitPiece(
     c.vertex(left[i][0], lY[i] - thickness, left[i][1], 0, -1, 0, ...colC);
     c.vertex(right[i][0], rY[i] - thickness, right[i][1], 0, -1, 0, ...colC);
   }
-  c.indices.push(...ribbonIndices(n, ub, true));
+  const under = ribbonIndices(n, ub, true);
+  for (let i = 0; i + 1 < n; i++) if (!dropQuad[i]) c.indices.push(...under.slice(6 * i, 6 * i + 6));
   for (const side of [0, 1] as const) {
     const edge = side === 0 ? left : right;
     const ys = side === 0 ? lY : rY;
@@ -992,6 +1038,7 @@ function emitPiece(
       c.vertex(edge[i][0], ys[i] - thickness, edge[i][1], nx, 0, nz, ...colC);
     }
     for (let i = 0; i + 1 < n; i++) {
+      if (dropQuad[i]) continue; // (no wall under a walk that is left out there)
       const a = sb + 2 * i; // top i
       const b = a + 1; // bottom i
       const a2 = a + 2;
@@ -1052,6 +1099,7 @@ function emitPiece(
     col.indices.push(topL(i), topL(i + 1), botL(i), botL(i), topL(i + 1), botL(i + 1));
     col.indices.push(topR(i), botR(i), topR(i + 1), topR(i + 1), botR(i), botR(i + 1));
   }
+  if (way.kind === 'car' && what.weld) res.stats.barrierMetres = (res.stats.barrierMetres ?? 0) + addBarriers(res, pts, left, right, lY, rY, colL, colR, ground, what.blend);
   if (what.ends && way.kind === 'car') {
     for (const i of [0, n - 1]) what.ends.push({ x: pts[i][0], z: pts[i][1], l: left[i], r: right[i], y: (lY[i] + rY[i]) / 2, cy: (colL[i] + colR[i]) / 2, gray: color[0], way, drop, blend: what.blend });
   }
@@ -1115,6 +1163,12 @@ const LANDED = 0.3;
 const JOINT_LAND = 0.6;
 /** A footbridge's or a rail deck's underside less than this over a carriageway below it leaves the slab out there, m. */
 const LOW_DECK = 4;
+/** A walk ramp off a bridge's sidewalk is not drawn over a car carriageway whose ground is within this (m) of it or below it. */
+const RAMP_OVER = 1;
+/** How far (m) from the end of a bridge's sidewalk a walk that comes off it still counts as its ramp (the extension is about 17 m). */
+const RAMP_REACH = 25;
+/** A walk that comes off a bridge's sidewalk and rises or falls this much (m) along its length is a ramp, not a walk at grade. */
+const RAMP_RISE = 2;
 /** How far under the ground a landed deck end's slab goes at each corner, m. */
 const BURY = 0.03;
 /** A landed end's corner is never taken further down than this (m) to meet the ground. */
@@ -1210,6 +1264,19 @@ export class DeckBlend {
     let n = 0;
     for (const set of at.values()) if (set.size > 1) n++;
     this.count = n;
+  }
+
+  /** Whether a car deck's carriageway at about height `y` (within `tol`) covers (x, z). */
+  covers(x: number, z: number, y: number, tol: number): boolean {
+    for (const j of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
+      const s = this.segs[j];
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / l2));
+      if (Math.hypot(x - (s.ax + t * dx), z - (s.az + t * dz)) > s.half) continue;
+      if (Math.abs(s.ha + (s.hb - s.ha) * t - y) < tol) return true;
+    }
+    return false;
   }
 
   /**
@@ -1340,6 +1407,113 @@ function trimDeckJoins(pieces: (Piece | null)[]): (Piece | null)[] {
 }
 /** How far inside a greater deck's kerb a lesser deck that joins it stops (m): enough overlap for one welded surface. */
 const TRIM_IN = 0.5;
+
+/** A car deck's barrier: its height over the deck (m), its thickness (outside the carriageway's edge), how far out beside the edge
+ * another deck or the ground has to be (and within how much of the deck's height) for the barrier to stop there. */
+export const BARRIER = { height: 0.95, thickness: 0.3, probe: 0.6, sameLevel: 0.6, atGrade: 0.6 } as const;
+
+/**
+ * Barriers along a car deck's two edges: a solid wall `BARRIER.height` tall and `BARRIER.thickness` thick, its inner face vertical at
+ * the carriageway's edge (the deck is the carriageway and its shoulders: the barrier stands where the drivable surface ends),
+ * drawn in concrete exactly as it is solid. Not where the deck carries on sideways into another car deck at its level (a fork, a
+ * merge, a road joining it: `blend` knows the decks), nor where the ground beside the edge is within `BARRIER.atGrade` of the deck
+ * (the ends where it lands, a deck at grade), so a car leaving the deck where it may goes on, and nowhere else does. A vertical
+ * inner face with no slope at its foot: a car that hits it is stopped or turned along it, never lifted. Returns the metres built.
+ */
+function addBarriers(res: RoadMeshes, pts: V2[], left: V2[], right: V2[], lY: number[], rY: number[], colL: number[], colR: number[], ground: (x: number, z: number) => number, blend?: DeckBlend): number {
+  const n = pts.length;
+  let metres = 0;
+  const cg = srgbToLinear(0.62);
+  for (const side of [0, 1] as const) {
+    const edge = side === 0 ? left : right;
+    const ys = side === 0 ? lY : rY;
+    const cys = side === 0 ? colL : colR;
+    // inward unit vector at each node (from the edge toward the centreline), and the probe beside the edge
+    const inward: V2[] = edge.map((q, i) => { const dx = pts[i][0] - q[0], dz = pts[i][1] - q[1]; const l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; });
+    const open = (i: number): boolean => {
+      const q = edge[i], w = inward[i];
+      const px = q[0] - w[0] * BARRIER.probe, pz = q[1] - w[1] * BARRIER.probe;
+      if (ground(px, pz) > cys[i] - BARRIER.atGrade) return true;
+      return !!blend && blend.covers(px, pz, cys[i], BARRIER.sameLevel);
+    };
+    const segOpen: boolean[] = [];
+    for (let i = 0; i + 1 < n; i++) {
+      const mx = (edge[i][0] + edge[i + 1][0]) / 2, mz = (edge[i][1] + edge[i + 1][1]) / 2;
+      const w = inward[i];
+      const midOpen = ground(mx - w[0] * BARRIER.probe, mz - w[1] * BARRIER.probe) > (cys[i] + cys[i + 1]) / 2 - BARRIER.atGrade || (!!blend && blend.covers(mx - w[0] * BARRIER.probe, mz - w[1] * BARRIER.probe, (cys[i] + cys[i + 1]) / 2, BARRIER.sameLevel));
+      segOpen.push(open(i) || open(i + 1) || midOpen);
+    }
+    let i = 0;
+    while (i < n - 1) {
+      if (segOpen[i]) { i++; continue; }
+      let j = i;
+      while (j + 1 < n - 1 && !segOpen[j + 1]) j++;
+      // a run of barrier over nodes i..j+1, without the nodes it does not need (straight and level within 2 cm between the ones kept)
+      const all: number[] = [];
+      for (let k = i; k <= j + 1; k++) all.push(k);
+      const ks: number[] = [all[0]];
+      for (let a = 1; a < all.length - 1; a++) {
+        const k0 = ks[ks.length - 1], k2 = all[a + 1];
+        let fits = true;
+        for (let b = all.indexOf(k0) + 1; b <= a && fits; b++) {
+          const k = all[b];
+          const dx = edge[k2][0] - edge[k0][0], dz = edge[k2][1] - edge[k0][1];
+          const l2 = dx * dx + dz * dz || 1;
+          const t = ((edge[k][0] - edge[k0][0]) * dx + (edge[k][1] - edge[k0][1]) * dz) / l2;
+          const off = Math.hypot(edge[k][0] - edge[k0][0] - t * dx, edge[k][1] - edge[k0][1] - t * dz);
+          const dy = Math.max(Math.abs(cys[k] - (cys[k0] + (cys[k2] - cys[k0]) * t)), Math.abs(ys[k] - (ys[k0] + (ys[k2] - ys[k0]) * t)));
+          if (off > 0.02 || dy > 0.02) fits = false;
+        }
+        if (!fits) ks.push(all[a]);
+      }
+      ks.push(all[all.length - 1]);
+      const inner = ks.map((k) => edge[k]);
+      const outer = ks.map((k) => [edge[k][0] - inward[k][0] * BARRIER.thickness, edge[k][1] - inward[k][1] * BARRIER.thickness] as V2);
+      for (let a = 0; a + 1 < ks.length; a++) metres += Math.hypot(outer[a + 1][0] - outer[a][0], outer[a + 1][1] - outer[a][1]);
+      // drawn (per face, flat-shaded) and solid (one closed strip): the same corners
+      wallStrip(res.concrete, inner, outer, ks.map((k) => ys[k]), BARRIER.height, [cg, cg, cg]);
+      wallStrip(res.collision, inner, outer, ks.map((k) => cys[k]), BARRIER.height, null);
+      i = j + 1;
+    }
+  }
+  return metres;
+}
+
+/**
+ * A wall along a path: inner face, top and outer face over the polyline pairs `inner`/`outer`, standing on `base` and `h` tall,
+ * with end faces, every face wound to face out of the wall; drawn with `colour` and its normals, or solid (no colour).
+ */
+function wallStrip(mb: MeshBuilder, inner: V2[], outer: V2[], base: number[], h: number, colour: [number, number, number] | null) {
+  const m = inner.length;
+  const quad = (a: V3, b: V3, c: V3, d: V3, out: V3) => {
+    // a b c d around the quad; wind so the normal points along `out`
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const flip = nx * out[0] + ny * out[1] + nz * out[2] < 0;
+    const l = Math.hypot(out[0], out[1], out[2]) || 1;
+    const nn: V3 = [out[0] / l, out[1] / l, out[2] / l];
+    const vs = [a, b, c, d].map((p) => (colour ? mb.vertex(p[0], p[1], p[2], nn[0], nn[1], nn[2], colour[0], colour[1], colour[2]) : mb.vertex(p[0], p[1], p[2], 0, 1, 0)));
+    if (flip) mb.indices.push(vs[0], vs[2], vs[1], vs[0], vs[3], vs[2]);
+    else mb.indices.push(vs[0], vs[1], vs[2], vs[0], vs[2], vs[3]);
+  };
+  for (let k = 0; k + 1 < m; k++) {
+    const iB0: V3 = [inner[k][0], base[k], inner[k][1]], iB1: V3 = [inner[k + 1][0], base[k + 1], inner[k + 1][1]];
+    const iT0: V3 = [inner[k][0], base[k] + h, inner[k][1]], iT1: V3 = [inner[k + 1][0], base[k + 1] + h, inner[k + 1][1]];
+    const oT0: V3 = [outer[k][0], base[k] + h, outer[k][1]], oT1: V3 = [outer[k + 1][0], base[k + 1] + h, outer[k + 1][1]];
+    const oB0: V3 = [outer[k][0], base[k] - 0.3, outer[k][1]], oB1: V3 = [outer[k + 1][0], base[k + 1] - 0.3, outer[k + 1][1]];
+    const inw: V3 = [inner[k][0] - outer[k][0], 0, inner[k][1] - outer[k][1]];
+    quad(iB0, iB1, iT1, iT0, inw);
+    quad(iT0, iT1, oT1, oT0, [0, 1, 0]);
+    quad(oT0, oT1, oB1, oB0, [-inw[0], 0, -inw[2]]);
+  }
+  // the two ends
+  for (const k of [0, m - 1]) {
+    const kk = k === 0 ? 1 : m - 2;
+    const iB: V3 = [inner[k][0], base[k], inner[k][1]], iT: V3 = [inner[k][0], base[k] + h, inner[k][1]];
+    const oT: V3 = [outer[k][0], base[k] + h, outer[k][1]], oB: V3 = [outer[k][0], base[k] - 0.3, outer[k][1]];
+    quad(iB, iT, oT, oB, [inner[k][0] - inner[kk][0], 0, inner[k][1] - inner[kk][1]]);
+  }
+}
 
 /** Decks within this of a deck vertex (m beyond their carriageway's edge) blend into its height. */
 const REACH = 2;

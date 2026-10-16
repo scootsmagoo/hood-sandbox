@@ -13,7 +13,14 @@
  *   lm_glass             glazing that is not a facade: sky reflection, a glint
  *   lm_glow              emissive at night (rings, halos, crowns), its colour the vertex colour; a dim sheen by day
  *   lm_dark              black glazing
+ *   lm_water             animated jets: COLOR_0 r = height along the jet, g = its phase; the vertex shader moves them (see JET)
  * Levels of detail are `lod0`, `lod1`... groups, one visible at a time by distance (times the tier's `lodScale`).
+ *
+ * Animated parts: a node of a level named `lod<N>_<name>` whose glTF extras say `anim`:
+ *   spin      the node (and the meshes under it) turns about `axis` through its own origin, `period` seconds a turn (the wheel)
+ *   gondolas  the meshes under the node are drawn `count` times as instances that ride a circle about `hub` (round `axis`, with
+ *             the wheel's `period`) without turning, so they hang level (the wheel's cabins)
+ * They move only while their level is the one drawn and the camera is within `ANIM_RANGE` of the model, and cost a few matrices a frame.
  *
  * A model that fails to load leaves a hole where its building was (the bake removed the generic one); the game goes on.
  */
@@ -36,6 +43,12 @@ import assetManifest from './landmarkAssets.manifest.json';
 const NIGHT = { value: 0 };
 /** How strongly a floodlit surface glows after dark. */
 const FLOOD = { value: 0 };
+/** Seconds, for the fountain's jets (the vertex shader of `lm_water` reads it). */
+const JET = { value: 0 };
+/** The jets' height from foot to tip at rest (m): fountain.py's JET_Y1 - JET_Y0. */
+const JET_RISE = '2.73';
+/** How far from a model (m) its moving parts are driven. */
+const ANIM_RANGE = 700;
 const LIFT = 'look-landmark-v1';
 
 const GLASS_GLSL = /* glsl */ `
@@ -121,7 +134,7 @@ function makeMaterial(name: string, game: Game): THREE.Material {
         shader.uniforms.uZenith = U.uZenith;
         shader.uniforms.uGround = U.uGround;
         shader.uniforms.uNight = U.uNight;
-        shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLmW;\nvarying vec3 vLmN;').replace('#include <project_vertex>', '#include <project_vertex>\n  vLmW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vLmN = normalize((modelMatrix * vec4(normal, 0.0)).xyz);');
+        shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLmW;\nvarying vec3 vLmN;').replace('#include <project_vertex>', '#include <project_vertex>\n  vec4 lmP = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\n  lmP = instanceMatrix * lmP;\n#endif\n  vLmW = (modelMatrix * lmP).xyz;\n  vLmN = normalize((modelMatrix * vec4(normal, 0.0)).xyz);');
         shader.fragmentShader = shader.fragmentShader
           .replace('#include <common>', `#include <common>\n${GLASS_GLSL}\nvarying vec3 vLmW;\nvarying vec3 vLmN;`)
           .replace(
@@ -141,6 +154,43 @@ function makeMaterial(name: string, game: Game): THREE.Material {
       };
       return m;
     }
+    case 'lm_water': {
+      // Jets: the colour attribute is data (r: height along the jet, g: phase), the albedo is set here. A wave of heights runs round
+      // each ring and the rings breathe slowly, so the fountain plays without any per-frame work but one uniform.
+      const m = new THREE.MeshStandardMaterial({ ...base, roughness: 0.2, metalness: 0, side: THREE.DoubleSide });
+      m.customProgramCacheKey = () => `${LIFT}-water`;
+      m.onBeforeCompile = (shader) => {
+        shader.uniforms.uJetT = JET;
+        shader.uniforms.uLmNight = NIGHT;
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nuniform float uJetT;\nvarying float vJet;\nvarying float vPh;')
+          .replace(
+            '#include <begin_vertex>',
+            `#include <begin_vertex>
+  {
+    float hf = color.r;
+    float ph = color.g;
+    float wave = sin(6.2831853 * (ph * 3.0 + uJetT * 0.21));
+    float swell = 0.65 + 0.35 * sin(uJetT * 0.13 + ph * 6.2831853 * 0.5);
+    float s = clamp(0.62 + 0.55 * wave * swell + 0.05 * sin(uJetT * 11.0 + ph * 57.0), 0.18, 1.5);
+    // the jets rise and fall about their feet and lean towards the middle of their ring (colour b: the bearing), so a ring is a crown of arches
+    float ang = color.b * 6.2831853;
+    float lean = 0.9 * hf * hf * s;
+    transformed.y += (s - 1.0) * hf * ${JET_RISE} / max(length(modelMatrix[1].xyz), 1e-4);
+    transformed.x += cos(ang) * lean / max(length(modelMatrix[0].xyz), 1e-4);
+    transformed.z += sin(ang) * lean / max(length(modelMatrix[2].xyz), 1e-4);
+    vJet = hf;
+    vPh = ph;
+  }`,
+          );
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nuniform float uLmNight;\nvarying float vJet;\nvarying float vPh;')
+          // streaks: broad at the foot, thin threads at the tip
+          .replace('#include <color_fragment>', '#include <color_fragment>\n  if (abs(fract(vPh * 96.0) - 0.5) * 2.0 > mix(0.66, 0.14, vJet)) discard;\n  diffuseColor.rgb = mix(vec3(0.46, 0.62, 0.74), vec3(0.93, 0.97, 1.0), vJet);')
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vec3(0.5, 0.7, 0.95) * (0.1 + 0.9 * uLmNight) * (0.15 + 0.85 * vJet);');
+      };
+      return m;
+    }
     case 'lm_dark':
       return new THREE.MeshStandardMaterial({ ...base, roughness: 0.35, metalness: 0.1 });
     default: {
@@ -153,12 +203,94 @@ function makeMaterial(name: string, game: Game): THREE.Material {
   }
 }
 
+/** A moving part of a model (see "Animated parts" above). */
+interface Anim {
+  /** the level it belongs to */
+  lod: number;
+  step(t: number): void;
+}
+
 interface Hero {
   entry: LandmarkEntry;
   root: THREE.Group;
   lods: { obj: THREE.Object3D; from: number }[];
+  anims: Anim[];
   shown: number;
   radius: number;
+}
+
+const readVec = (v: unknown): THREE.Vector3 | null => (Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number') ? new THREE.Vector3(v[0], v[1], v[2]) : null);
+
+/** The moving parts of a loaded model: a node that turns, and cabins that ride a circle without turning. Allocates only here, not per frame. */
+function findAnims(scene: THREE.Object3D): Anim[] {
+  const out: Anim[] = [];
+  scene.traverse((node) => {
+    const ud = node.userData as { anim?: string; axis?: unknown; hub?: unknown; period?: number; count?: number };
+    if (!ud.anim) return;
+    const lod = Number(/^lod(\d+)_/.exec(node.name)?.[1] ?? 0);
+    const axis = readVec(ud.axis)?.normalize();
+    const turn = ud.period && ud.period > 0 ? (Math.PI * 2) / ud.period : 0;
+    if (!axis || !turn) return;
+    if (ud.anim === 'spin') {
+      const q = new THREE.Quaternion();
+      out.push({
+        lod,
+        step: (t) => {
+          node.quaternion.copy(q.setFromAxisAngle(axis, (t * turn) % (Math.PI * 2)));
+          node.updateMatrixWorld(true);
+        },
+      });
+    } else if (ud.anim === 'gondolas') {
+      const hub = readVec(ud.hub);
+      const count = Math.max(1, Math.floor(ud.count ?? 0));
+      if (!hub) return;
+      // the template is drawn at the node's origin; the instances are offsets from it, in each mesh's own (quantised) frame
+      const rest = node.position.clone().sub(hub);
+      const meshes: { im: THREE.InstancedMesh; inv: THREE.Vector3 }[] = [];
+      for (const child of [...node.children]) {
+        const src = child as THREE.Mesh;
+        if (!src.isMesh) continue;
+        const im = new THREE.InstancedMesh(src.geometry, src.material, count);
+        im.name = src.name;
+        im.position.copy(src.position);
+        im.quaternion.copy(src.quaternion);
+        im.scale.copy(src.scale);
+        im.castShadow = src.castShadow;
+        im.receiveShadow = src.receiveShadow;
+        im.frustumCulled = false;
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        for (let k = 0; k < count; k++) im.setMatrixAt(k, new THREE.Matrix4());
+        node.remove(src);
+        node.add(im);
+        meshes.push({ im, inv: new THREE.Vector3(1 / src.scale.x, 1 / src.scale.y, 1 / src.scale.z) });
+      }
+      const v = new THREE.Vector3();
+      const d = new THREE.Vector3();
+      const stepAngle = (Math.PI * 2) / count;
+      out.push({
+        lod,
+        step: (t) => {
+          const base = (t * turn) % (Math.PI * 2);
+          for (let k = 0; k < count; k++) {
+            // the rest offset turned about the axis through the hub (Rodrigues), minus itself: how far the cabin has moved
+            const a = base + k * stepAngle;
+            const c = Math.cos(a), s = Math.sin(a);
+            v.copy(axis).cross(rest).multiplyScalar(s);
+            d.copy(rest).multiplyScalar(c).add(v).addScaledVector(axis, axis.dot(rest) * (1 - c)).sub(rest);
+            for (const m of meshes) {
+              const e = m.im.instanceMatrix.array;
+              e[k * 16] = 1; e[k * 16 + 5] = 1; e[k * 16 + 10] = 1; e[k * 16 + 15] = 1;
+              e[k * 16 + 12] = d.x * m.inv.x;
+              e[k * 16 + 13] = d.y * m.inv.y;
+              e[k * 16 + 14] = d.z * m.inv.z;
+            }
+          }
+          for (const m of meshes) m.im.instanceMatrix.needsUpdate = true;
+        },
+      });
+    }
+  });
+  return out;
 }
 
 export class Landmarks implements System {
@@ -222,8 +354,8 @@ export class Landmarks implements System {
               mesh.material = m;
               if (name === 'bld_wall' || name === 'bld_glass') prepareWallGeometry(mesh);
               if (name === 'bld_roof') prepareSurfaceGeometry(mesh);
-              mesh.castShadow = name !== 'lm_glow';
-              mesh.receiveShadow = name !== 'lm_glow';
+              mesh.castShadow = name !== 'lm_glow' && name !== 'lm_water';
+              mesh.receiveShadow = name !== 'lm_glow' && name !== 'lm_water';
             });
             for (let i = 0; i < h.lods.length; i++) {
               const obj = gltf.scene.getObjectByName(`lod${i}`);
@@ -231,8 +363,9 @@ export class Landmarks implements System {
               obj.visible = i === 0;
               lods.push({ obj, from: h.lods[i].from });
             }
+            const anims = findAnims(gltf.scene);
             root.add(gltf.scene);
-            const hero: Hero = { entry: e, root, lods, shown: 0, radius: Math.max(20, e.radius) };
+            const hero: Hero = { entry: e, root, lods, anims, shown: 0, radius: Math.max(20, e.radius) };
             this.heroes.push(hero);
             this.group.add(root);
             root.updateMatrixWorld(true);
@@ -264,14 +397,26 @@ export class Landmarks implements System {
     h.lods.forEach((l, i) => (l.obj.visible = i === want));
   }
 
-  update(_dt: number) {
+  /** Seconds the moving parts have run (the game's frame time, summed). */
+  private t = 0;
+
+  update(dt: number) {
     const cv = this.game.clockView;
     if (cv) {
       const night = nightFactor(cv.minutes);
       NIGHT.value = THREE.MathUtils.smoothstep(night, 0.15, 0.7);
       FLOOD.value = NIGHT.value;
     }
-    for (const h of this.heroes) this.select(h);
+    this.t += dt;
+    JET.value = this.t;
+    const cam = this.game.camera.position;
+    for (const h of this.heroes) {
+      this.select(h);
+      if (!h.anims.length) continue;
+      const dx = cam.x - h.entry.x, dz = cam.z - h.entry.z;
+      if (dx * dx + dz * dz > (ANIM_RANGE + h.radius) * (ANIM_RANGE + h.radius)) continue;
+      for (const a of h.anims) if (a.lod === h.shown) a.step(this.t);
+    }
   }
 
   dispose() {

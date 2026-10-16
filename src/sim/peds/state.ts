@@ -69,6 +69,9 @@ export interface AmbientState {
   /** Far from the player, or standing still: moved without character-controller queries, at this ground height. */
   lite: boolean;
   liteY: number;
+  /** Seconds spent on a freeway carriageway (a runner over open ground got onto it), and the point it is being steered to to get off it. */
+  fwT: number;
+  esc: { x: number; z: number } | null;
 }
 
 export function newAmbientState(group: string, speed: number, lane: number, tick: number): AmbientState {
@@ -79,6 +82,6 @@ export function newAmbientState(group: string, speed: number, lane: number, tick
     sc: -1, scSlot: 0, scCount: 1, scAction: 'wait', scUntil: 0, scType: null, poseT: 0,
     until: 0, faceX: 0, faceZ: 0,
     reactAt: 0, reactKind: '', reactCause: '', reactX: 0, reactZ: 0,
-    calmT: 0, stuckT: 0, stuckX: 0, stuckZ: 0, stuckN: 0, lookCool: 0, startleCool: 0, seenPoi: -1, spawnedAt: tick, lite: false, liteY: 0,
+    calmT: 0, stuckT: 0, stuckX: 0, stuckZ: 0, stuckN: 0, lookCool: 0, startleCool: 0, seenPoi: -1, spawnedAt: tick, lite: false, liteY: 0, fwT: 0, esc: null,
   };
 }

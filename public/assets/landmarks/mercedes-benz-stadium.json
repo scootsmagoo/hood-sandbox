@@ -7,7 +7,7 @@
   "lon": -84.4008537
  },
  "yaw": 0,
- "height": 90.8,
+ "height": 94,
  "bounds": {
   "min": [
    -161.1,
@@ -16,14 +16,14 @@
   ],
   "max": [
    160.8,
-   90.8,
+   94,
    138.9
   ]
  },
  "radius": 161.1,
  "lods": [
   {
-   "tris": 5822,
+   "tris": 14368,
    "from": 0
   },
   {
@@ -245,6 +245,6 @@
   "overlap": 0.4
  },
  "model": "assets/landmarks/mercedes-benz-stadium.glb",
- "hash": "2e0e138af773",
- "bytes": 119152
+ "hash": "92ab9e714b41",
+ "bytes": 261384
 }

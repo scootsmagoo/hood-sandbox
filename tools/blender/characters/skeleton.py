@@ -90,10 +90,18 @@ for _n, _s in (('L', 1), ('R', -1)):
     _add(f'foot_{_n}', f'shin_{_n}', _an, _bl)
     _add(f'toe_{_n}', f'foot_{_n}', _bl, _to)
 
+ARM = {1: _arm(1), -1: _arm(-1)}
+LEG = {1: _leg(1), -1: _leg(-1)}
+
+# The hand's fingers and thumb: six bones a hand (hand.py), after the body's own so the first 22 keep their places.
+from . import hand as _hand  # noqa: E402
+
+for _s in (1, -1):
+    for _n, _p, _h, _t in _hand.bones(_s):
+        _add(_n, _p, tuple(_h), tuple(_t))
+
 BONE_NAMES = list(BONES)
 
 # The ragdoll bodies (RagPart order) and the bone each drives.
 RAG_BONES = ['pelvis', 'spine', 'head', 'upperarm_L', 'forearm_L', 'upperarm_R', 'forearm_R', 'thigh_L', 'shin_L', 'thigh_R', 'shin_R']
 
-ARM = {1: _arm(1), -1: _arm(-1)}
-LEG = {1: _leg(1), -1: _leg(-1)}

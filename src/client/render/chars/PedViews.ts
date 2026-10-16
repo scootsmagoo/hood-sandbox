@@ -26,6 +26,7 @@ import type { AnimInput } from './animSelect';
 import { characterAssets } from './characterAssets';
 import { CHAR_OUTFITS, CHAR_OUTFIT_COUNT, appearanceOf, officerOutfit, type Appearance } from './outfits';
 import { actorLod, PedActor } from './PedActor';
+import { pedTimeUniform } from './pedMaterial';
 import { SkinnedCrowd } from './SkinnedCrowd';
 
 interface View {
@@ -82,6 +83,11 @@ export class PedViews {
   private readonly extra: PoseExtra = {};
   private readonly input: AnimInput = { speed: 0, grounded: true, mode: 'normal', pose: 0, swing: 0, yawRate: 0 };
   private readonly cands: { id: number; d: number; was: boolean }[] = [];
+  /** People getting in or out of a car this frame: where they work the door, and how far it should stand open. */
+  private doorWork: { x: number; z: number; open: number }[] = [];
+  private doorPrev: { x: number; z: number; open: number }[] = [];
+  private nDoorWork = 0;
+  private nDoorPrev = 0;
 
   constructor(private readonly game: Game, private readonly parent: THREE.Group) {
     this.shadows = game.tier.shadowMap > 0;
@@ -92,6 +98,20 @@ export class PedViews {
       this.crowd?.setShadows(this.shadows);
       for (const v of this.views.values()) v.actor?.setShadows(this.shadows);
     });
+  }
+
+  /** How far a car's driver door should stand open for someone getting in or out at (x, z) (the door's standing spot), 0 if nobody is. */
+  doorOpenAt(x: number, z: number, radius = 1.1): number {
+    let o = 0;
+    for (let i = 0; i < this.nDoorWork; i++) {
+      const w = this.doorWork[i];
+      if (Math.hypot(w.x - x, w.z - z) < radius && w.open > o) o = w.open;
+    }
+    for (let i = 0; i < this.nDoorPrev; i++) {
+      const w = this.doorPrev[i];
+      if (Math.hypot(w.x - x, w.z - z) < radius && w.open > o) o = w.open;
+    }
+    return o;
   }
 
   get skinned() {
@@ -142,6 +162,10 @@ export class PedViews {
   begin(dt: number, entities: ReadonlyMap<EntityId, EntityState>, defs: ReadonlyMap<EntityId, EntityDef>) {
     this.ensureBackends();
     this.made = 0;
+    // (a car drawn before its passenger in the frame's loop reads last frame's list)
+    [this.doorWork, this.doorPrev] = [this.doorPrev, this.doorWork];
+    this.nDoorPrev = this.nDoorWork;
+    this.nDoorWork = 0;
     // a fast camera (driving) sees people for a second: nobody new becomes an actor until it slows
     const cp = this.game.camera.position;
     const camSpeed = dt > 0 ? Math.hypot(cp.x - this.lastCam.x, cp.z - this.lastCam.z) / dt : 0;
@@ -295,7 +319,8 @@ export class PedViews {
     if (a) {
       a.root.position.set(st.x, st.y, st.z);
       a.root.quaternion.set(st.q.x, st.q.y, st.q.z, st.q.w);
-      a.setGun(gun ? gun.kind : null);
+      // at the wheel both hands are on it; the gun comes out only to shoot from the car
+      a.setGun(gun && (!(f & PedFlag.InVehicle) || x.aim !== undefined) ? gun.kind : null);
       a.setLod(actorLod(dist, this.game.tier.lodScale, a.currentLod()));
       // an officer sitting in a far car is not worth a skeleton; the player's own body would fill the view when aiming from a car
       let show = true;
@@ -304,6 +329,12 @@ export class PedViews {
       a.root.visible = show;
       v.kick = x.firing ? 1 : Math.max(0, v.kick - dt * 8);
       if (show) a.update(dt, inp, x.aim ?? 0, v.kick);
+      if (a.doorAmount > 0.001) {
+        const w = (this.doorWork[this.nDoorWork++] ??= { x: 0, z: 0, open: 0 });
+        w.x = a.doorX;
+        w.z = a.doorZ;
+        w.open = a.doorAmount;
+      }
     } else if (v.inCrowd) {
       this.crowd!.place(id, dt, st.x, st.y, st.z, st.q, inp);
     }
@@ -363,6 +394,7 @@ export class PedViews {
   /** After the frame's people: drops the gone, commits the instances. */
   end(dt: number, entities: ReadonlyMap<EntityId, EntityState>, defs: ReadonlyMap<EntityId, EntityDef>) {
     this.time += dt;
+    pedTimeUniform.value = this.time;
     for (const [id, v] of this.views) if (!entities.has(id) || !defs.has(id)) this.drop(id, v);
     this.boxRagdolls?.end();
     this.boxCrowd?.commit();

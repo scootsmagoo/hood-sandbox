@@ -229,6 +229,7 @@ node scripts/landmark-names.mjs                                      # the stree
 | `footprints.mjs`, `footprints.json` | Each landmark's anchor (a game point and its lon/lat), the real outline and the Overture parts (floors, heights), so a model is drawn on the real footprint, in the world's axes (no yaw), at the real height. Re-run when the cached Overture release changes. |
 | `lm.py` | The geometry kit: `Lod` (one level of detail) with `poly`, `ring_walls` and `facade_quad` (facade quads with the look's per-vertex data: `u` along the wall, `_WALL`, `_BLD` kind/floors/band, `_BID`), `prism`, `box`, `beam`, `tube`, `lathe`, `skin`, `cap`, `merge` (turn a part built in a rectangle's frame into the model frame), `min_obb`; and `emit`, which makes the Blender objects `lod<N>_<material>`. Plain Python lists, welded and deterministic. |
 | `parts.py` | Ledges and cornices (`band`), pyramidal roofs, columns, ring simplification. |
+| `lm.py` (moving parts) | `Lod.child(name, pivot, props)` makes a sub-level exported as an empty `lod<N>_<name>` at `pivot` with its own meshes under it, `props` in the node's extras: the game turns it or instances it (the wheel, `skyview.py`). `lm_water` is the fountain's animated material (`fountain.py`). See `docs/contracts/m1-tile-format.md`, "Moving parts". |
 | `common.py` | `report()`: the sidecar (hull prisms, cut-out, level distances). |
 | `<id>.py` | One landmark: `ID`, `build(asset)` that fills a `Lod` per level and returns `common.report(...)`. |
 
@@ -236,7 +237,7 @@ Materials are named for what the game does with them (`lm.py` header). A facade 
 window shader, lit at night and dirtied like the baked buildings; give it `floor_h` and a `kind` (`lm.K_GLASS`, `K_OFFICE`,
 `K_CIVIC`, `K_BRICK`, `K_VENUE`...). `lm_glow`, `lm_lit` and `lm_flood` are the night signatures (lit rings, a roof lit from
 within, a floodlit dome). Budgets (`landmarks/verify.ts`, run by `tests/landmarkAssets.test.ts`): LOD0 up to 40k triangles
-(the current ones are 0.3 to 4.6k), the far level a few hundred, 400 KB a file, a hull no taller than the model.
+(the current ones are 0.15 to 14.4k; a moving part is counted once, its instances are drawn by the game), the far level a few hundred, 400 KB a file, a hull no taller than the model.
 
 Adding a landmark: add it to `HEROES` in `footprints.mjs` (an Overture building by name, or an OSM way) and run it; write
 `landmarks/<name>.py` from the closest existing script; list it in `assets.json` under `"landmarks"` with the id of the city pack

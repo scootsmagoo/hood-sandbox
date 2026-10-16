@@ -27,6 +27,7 @@ import { PedEntity, type VehicleEntity } from '../entities';
 import type { PedBrain } from '../npc/brain';
 import type { Simulation } from '../Simulation';
 import { EdgeClearance } from './clearance';
+import { FreewayMask } from './freeway';
 import { cellKey, PAVEMENT_KINDS, WalkGraph } from './graph';
 import { RoadMask, RoadMaskSet } from './roadMask';
 import type { StreamListener } from '../stream/TileStreamer';
@@ -108,6 +109,10 @@ export class AmbientPeds {
   private readonly rng: Rng;
   private readonly junctionOf = new Map<string, SignalJunction>();
   private readonly roadMask: RoadMask | RoadMaskSet;
+  /** The motorway and trunk carriageways: no walk edge along or across one is walked, nobody is made on one, nobody stays on one. */
+  readonly freeway: FreewayMask;
+  /** 0 not measured, 1 an edge anyone may walk, 2 an edge on a freeway carriageway (closed). */
+  private fwState = new Uint8Array(0);
   /** How far off the middle of each edge a person can walk (measured against the real walls and props as edges are first used). */
   readonly clearance: EdgeClearance;
   private inbox: SimEvent[] = [];
@@ -138,7 +143,57 @@ export class AmbientPeds {
     for (const j of opts.junctions?.junctions ?? []) this.junctionOf.set(j.id, j);
     this.roadMask = opts.stream ? new RoadMaskSet() : new RoadMask(opts.roads, opts.junctions);
     this.clearance = new EdgeClearance(opts.graph, sim.physics);
-    opts.graph.passable = (e) => !this.clearance.isBlocked(e);
+    this.freeway = new FreewayMask(opts.roads);
+    // a streamed city fills ranges of edge ids as tiles come and go: what was decided there is forgotten
+    opts.graph.onEdges.push((start, n) => this.forgetFreewayEdges(start, n));
+    this.forgetFreewayEdges(0, opts.graph.edgeCount);
+    opts.graph.passable = (e) => !this.clearance.isBlocked(e) && !this.freewayEdge(e);
+  }
+
+  private forgetFreewayEdges(start: number, n: number) {
+    const need = start + n;
+    if (need > this.fwState.length) {
+      const st = new Uint8Array(Math.max(need, Math.ceil(this.fwState.length * 1.5)));
+      st.set(this.fwState);
+      this.fwState = st;
+    }
+    this.fwState.fill(0, start, need);
+  }
+
+  /**
+   * Whether a walk edge is closed (nobody walks or spawns on it, routes and escapes leave it out): it lies on a motorway or trunk
+   * carriageway at the carriageway's own level (along it, or across it; a footbridge or a bridge's sidewalk is at another height, and a
+   * crosswalk over the mouth of a ramp is a real crossing), or it is on a deck the physics world does not have. Measured once per edge.
+   */
+  freewayEdge(e: number): boolean {
+    let st = this.fwState[e];
+    if (st === 0) {
+      const g = this.graph;
+      const a = g.ea[e], b = g.eb[e];
+      const crossing = g.kindOf(e) === 'crossing';
+      const n = Math.max(1, Math.ceil(g.len[e] / 2.5));
+      st = 1;
+      for (let i = 0; i <= n && st === 1 && !this.freeway.empty; i++) {
+        const t = i / n;
+        const h = this.freeway.hit(g.x[a] + (g.x[b] - g.x[a]) * t, g.z[a] + (g.z[b] - g.z[a]) * t, g.y[a] + (g.y[b] - g.y[a]) * t);
+        if (h && !(crossing && h.cls === 2)) st = 2;
+      }
+      // An edge on a deck (higher than the ground by more than the pavement) must have the deck under it: a sidewalk that the bake
+      // placed on a bridge the physics world has no deck for (a skybridge, a deck cut at a tile seam) would drop its walkers.
+      if (st === 1) {
+        const phys = this.sim.physics;
+        const n2 = Math.max(1, Math.ceil(g.len[e] / 3));
+        for (let i = 0; i <= n2 && st === 1; i++) {
+          const t = i / n2;
+          const x = g.x[a] + (g.x[b] - g.x[a]) * t, z = g.z[a] + (g.z[b] - g.z[a]) * t, y = g.y[a] + (g.y[b] - g.y[a]) * t;
+          if (y - phys.groundHeight(x, z) < 0.5) continue;
+          const f = phys.floorBelow(x, y + 0.6, z, 1.6);
+          if (Number.isNaN(f) || Math.abs(f - y) > 0.8) st = 2;
+        }
+      }
+      this.fwState[e] = st;
+    }
+    return st === 2;
   }
 
   get count(): number {
@@ -153,6 +208,8 @@ export class AmbientPeds {
         const jd = namespaceJunctions(tile.junctions, r.ns);
         for (const j of jd?.junctions ?? []) this.junctionOf.set(j.id, j);
         if (this.roadMask instanceof RoadMaskSet) this.roadMask.add(key, tile.roads, jd);
+        this.freeway.add(key, tile.roads);
+        this.fwState.fill(0);
         this.tileJunctions.set(key, (jd?.junctions ?? []).map((j) => j.id));
       },
       tileDropping: (_key, rect) => {
@@ -166,6 +223,8 @@ export class AmbientPeds {
         for (const id of this.tileJunctions.get(key) ?? []) this.junctionOf.delete(id);
         this.tileJunctions.delete(key);
         if (this.roadMask instanceof RoadMaskSet) this.roadMask.remove(key);
+        this.freeway.remove(key);
+        this.fwState.fill(0);
         // anyone standing on what went (a dead edge) goes too
         for (const p of this.list) {
           const a = p.amb;
@@ -392,6 +451,7 @@ export class AmbientPeds {
       const d = Math.hypot(x - me.x, z - me.z);
       if (d < (initial ? 12 : AMBIENT.ringMin - 4) || d > AMBIENT.ringMax + 20) return false;
       if (!initial && this.visible(x, y, z)) return false;
+      if (!this.freeway.empty && this.freeway.contains(x, z, y)) return false;
       for (const p of this.list) if (Math.abs(p.controller.x - x) < 1.4 && Math.abs(p.controller.z - z) < 1.4) return false;
       return true;
     };
@@ -429,7 +489,7 @@ export class AmbientPeds {
       const y = g.yAt(e, t);
       if (!ok(x, y, z) || !this.standable(x, y, z, true)) continue;
       // not on an edge a pole, a low deck or a wall blocks, nor in a pocket of the network that is cut off by one
-      if (this.clearance.isBlocked(e) || !g.hasRoom(e)) continue;
+      if (this.clearance.isBlocked(e) || this.freewayEdge(e) || !g.hasRoom(e)) continue;
       const forward = this.rng.chance(0.5);
       this.makePed(gid, group, x, y, z, forward ? a : b, forward ? b : a, null);
       return 1;
@@ -590,6 +650,10 @@ export class AmbientPeds {
       a.reactKind = '';
       return;
     }
+    if (!this.freeway.empty) {
+      if (this.n % 6 === ped.id % 6) this.guardFreeway(ped, a);
+      if (a.esc && this.sim.registry.get(ped.id) === ped && !this.doomed.has(ped.id) && this.stepEscape(ped, a, dt)) return;
+    }
     switch (b.state) {
       case 'flee':
       case 'fight':
@@ -624,6 +688,56 @@ export class AmbientPeds {
       case 'look': this.stepHold(ped, a, dt); break;
       default: this.resumeWalk(ped, a); break;
     }
+  }
+
+  /** A pole, a low deck or a wall across the middle of an edge, or the edge being on a freeway: never that way. */
+  private edgeShut(e: number): boolean {
+    return this.clearance.isBlocked(e) || this.freewayEdge(e);
+  }
+
+  /**
+   * Nobody stays on a freeway carriageway. Somebody who is on one (a runner over open ground got onto it, or a walk edge the bake left
+   * across it) is removed when nobody can see them, and otherwise walked off it by the shortest way out.
+   */
+  private guardFreeway(ped: PedEntity, a: AmbientState) {
+    const c = ped.controller;
+    const h = this.freeway.hit(c.x, c.z, c.y);
+    if (!h) {
+      a.fwT = 0;
+      if (a.esc) {
+        a.esc = null;
+        if (ped.brain!.state !== 'flee' && a.mode !== 'flee') this.resumeWalk(ped, a);
+      }
+      return;
+    }
+    a.fwT += 0.1;
+    const me = this.sim.playerPosition();
+    const d = Math.hypot(c.x - me.x, c.z - me.z);
+    if (this.mayRemove(ped) || (a.fwT > 15 && d > 60 && !a.persistent)) {
+      this.remove(ped);
+      return;
+    }
+    const out = h.depth + 2.5;
+    a.esc = { x: c.x + h.nx * out, z: c.z + h.nz * out };
+  }
+
+  /** Walks somebody off a freeway toward `a.esc`. Returns true when it did the moving. */
+  private stepEscape(ped: PedEntity, a: AmbientState, dt: number): boolean {
+    const esc = a.esc!;
+    const c = ped.controller;
+    const b = ped.brain!;
+    this.leaveScenario(a);
+    a.reactKind = '';
+    if (b.state === 'flee') {
+      this.violent(ped, a, 'flee');
+      b.waypoint = { x: esc.x, z: esc.z };
+      return true;
+    }
+    a.mode = 'walk';
+    a.next = -1;
+    a.crossAttr = -1;
+    this.move(ped, a, Math.atan2(esc.x - c.x, esc.z - c.z), Math.min(3.4, Math.max(a.speed, 1.8) * 1.5), dt);
+    return true;
   }
 
   /** Far-off walkers and anyone standing still skip the character controller (the walk network is clear of walls, and the move keeps out of the ones it is not). */
@@ -681,8 +795,10 @@ export class AmbientPeds {
   private resumeWalk(ped: PedEntity, a: AmbientState) {
     const c = ped.controller;
     this.leaveScenario(a);
-    let n = this.graph.nearestNode(c.x, c.z, 40);
-    if (n < 0) n = this.graph.nearestNode(c.x, c.z, 160);
+    // (a node whose every edge is on a freeway is no place to resume a walk)
+    const open = (node: number) => this.graph.edgesAt(node).some((e) => !this.freewayEdge(e));
+    let n = this.graph.nearestNode(c.x, c.z, 40, open);
+    if (n < 0) n = this.graph.nearestNode(c.x, c.z, 160, open);
     if (n < 0) {
       // nowhere to walk to: gone if nobody can see it, else it stands there
       if (this.mayRemove(ped)) this.remove(ped);
@@ -829,7 +945,7 @@ export class AmbientPeds {
       if (m === a.prev && t - s > 1) w = 0.03;
       if (e === a.avoidEdge && t - s > 1) w = 0;
       // a pole, a low deck or a wall across the middle of an edge: never that way (unless it is the only way)
-      const shut = this.clearance.isBlocked(e);
+      const shut = this.edgeShut(e);
       if (shut) w = 0;
       const kind = g.kindOf(e);
       if (kind === 'crossing') w *= 0.6;
@@ -845,7 +961,7 @@ export class AmbientPeds {
     }
     if (sum <= 0) {
       // nowhere they like: the way back, or any way that is open, or any way
-      for (let k = s; k < t; k++) ws[k - s] = this.clearance.isBlocked(at[k]) ? 0 : 1;
+      for (let k = s; k < t; k++) ws[k - s] = this.edgeShut(at[k]) ? 0 : 1;
       sum = ws.reduce((x, y) => x + y, 0);
       if (sum <= 0) {
         ws.fill(1);

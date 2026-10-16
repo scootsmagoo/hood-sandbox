@@ -71,9 +71,18 @@ describe('road meshes', () => {
     expect(r.collision.triangleCount).toBeGreaterThan(100);
     // skirt and underside faces point away from the slab centre line
     const conc = normals(r.concrete).filter((t) => t.c[1] > 0.5);
-    const sideways = conc.filter((t) => Math.abs(t.n[2]) > 0.9 && Math.abs(t.c[0]) < 90);
+    // the deck's top along it, to tell the skirts (under it) from the barriers' inner faces (over it, facing the road)
+    const tops: [number, number][] = [];
+    for (let i = 0; i < top.vertexCount; i++) if (Math.abs(top.positions[i * 3 + 2]) < 6.5 && top.positions[i * 3 + 1] > 1) tops.push([top.positions[i * 3], top.positions[i * 3 + 1]]);
+    const topAt = (x: number) => tops.reduce((b, q) => (Math.abs(q[0] - x) < Math.abs(b[0] - x) ? q : b), tops[0])[1];
+    const sideways = conc.filter((t) => Math.abs(t.n[2]) > 0.9 && Math.abs(t.c[0]) < 90 && t.c[1] < topAt(t.c[0]));
     expect(sideways.length).toBeGreaterThan(10);
     for (const t of sideways) expect(t.n[2] * t.c[2]).toBeGreaterThan(0);
+    // barriers along both edges over the crossing, their inner faces vertical and facing the road
+    expect(r.stats.barrierMetres ?? 0).toBeGreaterThan(150);
+    const inner = conc.filter((t) => Math.abs(t.n[2]) > 0.99 && Math.abs(t.c[0]) < 50 && Math.abs(Math.abs(t.c[2]) - 6) < 0.01 && t.c[1] > topAt(t.c[0]));
+    expect(inner.length).toBeGreaterThan(10);
+    for (const t of inner) expect(t.n[2] * t.c[2]).toBeLessThan(0);
     // no pier stands inside the crossed road
     expect(r.stats.piers).toBeGreaterThan(0);
   });
@@ -186,5 +195,29 @@ describe('road meshes', () => {
     const r = buildRoads(plan, cut, bounds);
     expect(r.json.some((j) => j.derived)).toBe(false);
     for (const x of [-8, 0, 8]) expect(Math.abs(cut.data[50 * 101 + 50 + x / 4])).toBeLessThan(0.3);
+  });
+
+  it('draws no bridge walk, nor a ramp off one, over a car carriageway below it', () => {
+    // a street on the ground along x, down a slope (height 0.2 m per metre south); a bridge's sidewalk ends at (-20, 20) and a ramp
+    // runs from that node south, down the slope and across the street
+    const data = new Float32Array(101 * 101);
+    for (let row = 0; row < 101; row++) for (let col = 0; col < 101; col++) data[row * 101 + col] = 0.2 * (-200 + row * 4);
+    const slope = makeHeightmap(101, 101, 4, -200, -200, data);
+    const street = way(1, 'primary', [[-100, 0], [100, 0]]);
+    const deckWalk = way(2, 'footway', [[-60, 20], [-20, 20]], { kind: 'ped', width: 1.8, sub: 'sidewalk', bridge: true, layer: 1, nodeIds: [2001, 2002] });
+    const ramp = way(3, 'footway', [[-20, 20], [-20, -30]], { kind: 'ped', width: 1.8, sub: 'sidewalk', nodeIds: [2002, 3001] });
+    const r = buildRoads([street, deckWalk, ramp], slope, bounds);
+    const p = r.sidewalk.positions;
+    let north = 0, south = 0;
+    for (let i = 0; i < r.sidewalk.indices.length; i += 3) {
+      const zs = [0, 1, 2].map((k) => p[r.sidewalk.indices[i + k] * 3 + 2]);
+      // the street is |z| < 3.5: no triangle of the walk has a corner on it
+      for (const z of zs) expect(Math.abs(z)).toBeGreaterThanOrEqual(3.5 - 1e-6);
+      if (zs.every((z) => z > 0)) north++;
+      if (zs.every((z) => z < 0)) south++;
+    }
+    // the walk still runs on either side of the street, on the ground
+    expect(north).toBeGreaterThan(0);
+    expect(south).toBeGreaterThan(0);
   });
 });

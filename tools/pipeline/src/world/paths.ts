@@ -13,6 +13,9 @@ import type { RoadJson } from './roads.js';
  *   1. every mapped sidewalk, footway, pedestrian street, path, set of steps, crossing and traffic island
  *   2. synthetic sidewalks along both curbs of a street wherever OSM maps none (4 m samples, in runs)
  *   3. a building clearance pass: vertices inside a footprint cut the path there, vertices closer than half a metre to a wall are pushed out
+ *   2b. freeways: nothing is walked on a motorway or trunk carriageway (or a ramp's). The walk geometry that lies on one at the
+ *      carriageway's own level is cut away. A mapped sidewalk of a bridge that carries a street over the freeway, which the bake gave the
+ *      ground's height (the trench floor, on the carriageway), is put on the bridge's deck instead; one with no bridge to be on is cut.
  *   4. zebra and implicit crossings across the legs of junctions that have no mapped crossing, and a link pass that joins dead ends to
  *      the network (so a T where the mapper left the nodes apart still connects)
  *   5. small islands are dropped, straight chains are merged, ids are renumbered.
@@ -44,6 +47,63 @@ export interface PathAttr {
   crossing?: CrossingMeta;
 }
 
+/** The kinds of road a person never walks on (the carriageway of): a motorway or trunk, and their ramps. */
+export function freewayClassOf(cls: string): 0 | 1 | 2 {
+  if (cls === 'motorway' || cls === 'trunk') return 1;
+  if (cls === 'motorway_link' || cls === 'trunk_link') return 2;
+  return 0;
+}
+/** A walker this far above or below a carriageway's surface is on a bridge over it or in a cutting under it, not on it (the sim's `FREEWAY_LEVEL`). */
+export const FREEWAY_LEVEL = 3.2;
+/** How far a ramp's carriageway must reach over a point before the point is on the ramp (a street's pavement where a ramp meets it is not). */
+const RAMP_MARGIN = 1.2;
+
+interface RoadSeg {
+  ax: number; ay: number; az: number;
+  bx: number; by: number; bz: number;
+  half: number;
+  road: RoadJson;
+}
+
+/** Road centrelines in a grid, for "which carriageway is under this point, and how high is its surface there". */
+class RoadSegIndex {
+  private readonly cell = 32;
+  private readonly segs: RoadSeg[] = [];
+  private readonly cells = new Map<number, number[]>();
+
+  constructor(roads: readonly RoadJson[], reach = 0) {
+    for (const r of roads) {
+      const half = r.width / 2 + reach;
+      for (let i = 0; i + 1 < r.points.length; i++) {
+        const a = r.points[i], b = r.points[i + 1];
+        const k = this.segs.length;
+        this.segs.push({ ax: a[0], ay: a[1], az: a[2], bx: b[0], by: b[1], bz: b[2], half, road: r });
+        for (let x = Math.floor((Math.min(a[0], b[0]) - half) / this.cell); x <= Math.floor((Math.max(a[0], b[0]) + half) / this.cell); x++) {
+          for (let z = Math.floor((Math.min(a[2], b[2]) - half) / this.cell); z <= Math.floor((Math.max(a[2], b[2]) + half) / this.cell); z++) {
+            const key = (x + 4096) * 8192 + (z + 4096);
+            const l = this.cells.get(key);
+            if (l) l.push(k); else this.cells.set(key, [k]);
+          }
+        }
+      }
+    }
+  }
+
+  /** The segments whose strip holds (x, z): each with how far in from its edge the point is, and the surface height there. */
+  at(x: number, z: number): { road: RoadJson; depth: number; y: number }[] {
+    const out: { road: RoadJson; depth: number; y: number }[] = [];
+    for (const k of this.cells.get((Math.floor(x / this.cell) + 4096) * 8192 + (Math.floor(z / this.cell) + 4096)) ?? []) {
+      const s = this.segs[k];
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / l2));
+      const d = Math.hypot(x - (s.ax + dx * t), z - (s.az + dz * t));
+      if (d <= s.half) out.push({ road: s.road, depth: s.half - d, y: s.ay + (s.by - s.ay) * t });
+    }
+    return out;
+  }
+}
+
 export interface PathsStats {
   nodes: number;
   edges: number;
@@ -56,6 +116,9 @@ export interface PathsStats {
   droppedByBuildings: number;
   droppedIslandsM: number;
   syntheticM: number;
+  /** metres of walk geometry cut away because it lay on a freeway carriageway, and metres of bridge sidewalk put on the bridge's deck */
+  droppedByFreewayM?: number;
+  liftedToDeckM?: number;
 }
 
 export interface PathsFile {
@@ -397,7 +460,7 @@ export function buildPaths(inp: PathsInput): PathsResult {
   const { ways, roads, junctions, bounds, ground } = inp;
   const inBounds = (x: number, z: number) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
   const bIdx = new BuildingIndex(inp.footprints.map((f) => f[0]));
-  const stats = { droppedByBuildings: 0, droppedIslandsM: 0, syntheticM: 0 };
+  const stats = { droppedByBuildings: 0, droppedIslandsM: 0, syntheticM: 0, droppedByFreewayM: 0, liftedToDeckM: 0 };
 
   // car roads as a mask: where a walker must not link across
   const mask = new RoadMask();
@@ -463,7 +526,7 @@ export function buildPaths(inp: PathsInput): PathsResult {
   const g = new Builder();
 
   // 1. mapped ways -------------------------------------------------------------------------------
-  const polys: Poly[] = [];
+  let polys: Poly[] = [];
   const mappedKinds = new Set<PathKind>(['sidewalk', 'footway', 'pedestrian', 'island', 'steps']);
   const mappedPts: [V2, V2][] = [];
   for (const w of ways) {
@@ -556,6 +619,68 @@ export function buildPaths(inp: PathsInput): PathsResult {
         i = j + 1;
       }
     }
+  }
+
+  // 2b. freeways: nobody walks on one --------------------------------------------------------------
+  // (the carriageways of motorways, trunk roads and their ramps; a street's bridge over them has its own deck)
+  const fwIdx = new RoadSegIndex(roads.filter((r) => freewayClassOf(r.class) !== 0));
+  const deckIdx = new RoadSegIndex(roads.filter((r) => r.bridge && freewayClassOf(r.class) === 0), 3);
+  const onFreeway = (x: number, z: number, y: number, crossing: boolean): boolean => {
+    for (const h of fwIdx.at(x, z)) {
+      const cls = freewayClassOf(h.road.class);
+      if (crossing && cls === 2) continue; // a crosswalk over the mouth of a ramp is a real crossing
+      if (cls === 2 && h.depth < RAMP_MARGIN) continue;
+      if (Math.abs(y - h.y) > FREEWAY_LEVEL) continue;
+      return true;
+    }
+    return false;
+  };
+  /** The surface of a bridge (not a freeway's) over the point, at least half a metre above `y`: where a sidewalk of that bridge is. */
+  const deckAbove = (x: number, z: number, y: number): number | null => {
+    let best: { depth: number; y: number } | null = null;
+    for (const h of deckIdx.at(x, z)) if (h.y - y >= 0.5 && (!best || h.depth > best.depth)) best = h;
+    return best ? best.y : null;
+  };
+  if (fwIdx) {
+    const cut: Poly[] = [];
+    for (const p of polys) {
+      const crossing = g.attrs[p.attr].kind === 'crossing';
+      const ys = p.ys.map((y) => y ?? 0);
+      // A way that touches a freeway at its own level and has a bridge over it: the stretch of it that is under the bridge's deck is the
+      // bridge's sidewalk, and goes on the deck (the bake gave it the ground's height, the cutting's floor, on the carriageway).
+      const touches = p.pts.some((q, i) => onFreeway(q[0], q[1], ys[i], crossing));
+      const lifted = p.pts.map((q, i) => {
+        if (!touches) return false;
+        const d = deckAbove(q[0], q[1], ys[i]);
+        if (d === null) return false;
+        ys[i] = round2(d + WALK_LIFT);
+        return true;
+      });
+      const bad = p.pts.map((q, i) => !lifted[i] && onFreeway(q[0], q[1], ys[i], crossing));
+      let run: Poly | null = null;
+      const flush = () => { if (run && run.pts.length >= 2) cut.push(run); run = null; };
+      for (let i = 0; i < p.pts.length; i++) {
+        const segLen = i > 0 ? Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]) : 0;
+        // the stretch to the previous vertex: a vertex either side may be off the carriageway while the span crosses a corner of it
+        let ok = !bad[i];
+        if (ok && i > 0 && !bad[i - 1]) {
+          for (const t of [0.25, 0.5, 0.75]) {
+            if (onFreeway(p.pts[i - 1][0] + (p.pts[i][0] - p.pts[i - 1][0]) * t, p.pts[i - 1][1] + (p.pts[i][1] - p.pts[i - 1][1]) * t, ys[i - 1] + (ys[i] - ys[i - 1]) * t, crossing)) { ok = false; break; }
+          }
+        }
+        if (bad[i]) stats.droppedByFreewayM += segLen;
+        if (lifted[i]) stats.liftedToDeckM += segLen;
+        if (!ok) {
+          flush();
+          if (!bad[i]) run = { pts: [p.pts[i]], ys: [ys[i]], ids: [p.ids[i]], attr: p.attr };
+          continue;
+        }
+        if (!run) run = { pts: [], ys: [], ids: [], attr: p.attr };
+        run.pts.push(p.pts[i]); run.ys.push(ys[i]); run.ids.push(p.ids[i]);
+      }
+      flush();
+    }
+    polys = cut;
   }
 
   // 3. building clearance -------------------------------------------------------------------------
@@ -716,6 +841,17 @@ export function buildPaths(inp: PathsInput): PathsResult {
     }
   }
 
+  // Two big pieces of the network that the cut along a freeway left a few metres apart (the two sidewalks of a bridge, one of them
+  // ending where the other goes on): join them where nothing is in the way.
+  if (stats.droppedByFreewayM > 0) {
+    rebuildDsu();
+    deg = degree();
+    const nodes = new Map<number, number>();
+    for (let n = 0; n < deg.length; n++) if (deg[n] > 0) nodes.set(dsu.find(n), (nodes.get(dsu.find(n)) ?? 0) + 1);
+    // (a piece the cut left off the rest may reach a little farther: past the stretch of freeway edge that joined it)
+    for (let n = 0; n < deg.length; n++) if (deg[n] > 0) tryLink(n, (nodes.get(dsu.find(n)) ?? 0) < 1500 ? 26 : 5, true);
+  }
+
   // 5. components, merge straight chains, renumber ----------------------------------------------------
   rebuildDsu();
   const compLen = new Map<number, number>();
@@ -808,6 +944,8 @@ export function buildPaths(inp: PathsInput): PathsResult {
       droppedByBuildings: stats.droppedByBuildings,
       droppedIslandsM: Math.round(stats.droppedIslandsM),
       syntheticM: Math.round(lengthByKind.synthetic ?? 0),
+      droppedByFreewayM: Math.round(stats.droppedByFreewayM),
+      liftedToDeckM: Math.round(stats.liftedToDeckM),
     },
   };
   return { file, syntheticLines };

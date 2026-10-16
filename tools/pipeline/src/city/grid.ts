@@ -151,6 +151,8 @@ export function cellBakeConfig(grid: Grid, cell: GridCell): CellBake {
     outDir: path.join(grid.cacheRoot, 'build', cell.id),
     cacheDir: path.join(grid.cacheRoot, 'tiles', cell.id),
     demAlign: demAlignment(grid),
+    // (inside the query margin, so the roads of the margin are all there)
+    planMarginM: Math.max(0, spec.queryMarginM - 32),
   };
   return { cell, cfg, dx: cx, dz: cz, residual };
 }

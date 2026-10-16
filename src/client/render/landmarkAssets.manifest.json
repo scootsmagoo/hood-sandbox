@@ -66,10 +66,10 @@
     },
     "fountain-of-rings": {
       "file": "assets/landmarks/fountain-of-rings.glb",
-      "hash": "9b2ab61c3aca",
-      "bytes": 35060,
+      "hash": "0bdc491d3560",
+      "bytes": 26256,
       "tris": [
-        1733,
+        1823,
         183
       ]
     },
@@ -138,20 +138,65 @@
     },
     "mercedes-benz-stadium": {
       "file": "assets/landmarks/mercedes-benz-stadium.glb",
-      "hash": "2e0e138af773",
-      "bytes": 119152,
+      "hash": "92ab9e714b41",
+      "bytes": 261384,
       "tris": [
-        5822,
+        14368,
         724
+      ]
+    },
+    "peachtree-center-harris-tower": {
+      "file": "assets/landmarks/peachtree-center-harris-tower.glb",
+      "hash": "1aa24d26f5ba",
+      "bytes": 26344,
+      "tris": [
+        816,
+        336
+      ]
+    },
+    "peachtree-center-international-tower": {
+      "file": "assets/landmarks/peachtree-center-international-tower.glb",
+      "hash": "189aab7248de",
+      "bytes": 28256,
+      "tris": [
+        759,
+        295
+      ]
+    },
+    "peachtree-center-north-tower": {
+      "file": "assets/landmarks/peachtree-center-north-tower.glb",
+      "hash": "449da2caacbb",
+      "bytes": 26180,
+      "tris": [
+        834,
+        298
+      ]
+    },
+    "peachtree-center-south-tower": {
+      "file": "assets/landmarks/peachtree-center-south-tower.glb",
+      "hash": "0f6748e07847",
+      "bytes": 25344,
+      "tris": [
+        771,
+        241
+      ]
+    },
+    "rialto-center-for-the-arts": {
+      "file": "assets/landmarks/rialto-center-for-the-arts.glb",
+      "hash": "47801bdedace",
+      "bytes": 19476,
+      "tris": [
+        148,
+        78
       ]
     },
     "skyview-atlanta": {
       "file": "assets/landmarks/skyview-atlanta.glb",
-      "hash": "afc42d27a4fa",
-      "bytes": 87132,
+      "hash": "f1236430f660",
+      "bytes": 67016,
       "tris": [
-        3674,
-        914
+        2210,
+        422
       ]
     },
     "state-farm-arena": {
