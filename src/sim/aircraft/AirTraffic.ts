@@ -370,8 +370,9 @@ export class AirTraffic {
       const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
       for (const b of TYPES[s.cls].colliders) {
         if (Math.abs(lx - b.c[0]) < b.h[0] + 0.45 && Math.abs(dy + 0.9 - b.c[1]) < b.h[1] + 0.9 && Math.abs(lz - b.c[2]) < b.h[2] + 0.45) {
-          const sp = Math.max(2, s.speed);
-          knockDown(sim, ped, 3, (Math.sin(s.yaw) * sp * 1.6) / sp * 6, (Math.cos(s.yaw) * sp * 1.6) / sp * 6, 2.5);
+          // thrown along the way the aircraft moves (backwards in a pushback)
+          const dir = s.phase === AircraftPhase.Pushback ? -1 : 1;
+          knockDown(sim, ped, 3, Math.sin(s.yaw) * 9 * dir, Math.cos(s.yaw) * 9 * dir, 2.5);
           this.stats.runOver++;
           return;
         }

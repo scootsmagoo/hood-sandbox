@@ -29,6 +29,10 @@
  *                player is sent 1.6 km away and back, so most of the near tiles are dropped and loaded again in the sim (colliders,
  *                graphs, seams) and on the client (tile meshes, far skyline meshes, the city-wide trees, lamps, signal heads and
  *                minimap atlases). The sim's colliders and live graph edges must come back to the same counts every cycle.
+ *   aircraft 12  Hartsfield-Jackson (`?spawn=airport`, the sim on the main thread; booted again for it, after `stream`): the player is
+ *                sent out onto a concourse's apron among the parked and taxiing aircraft (their kinematic and fixed bodies are made) and
+ *                back to the curb (they are dropped) while the traffic lands, parks, pushes back and takes off; the drawn aircraft are
+ *                instanced (nothing is made per aircraft), and the sim's other bodies must come back to the same count every cycle.
  *   ragdoll  20  eight people are thrown (killed or knocked down), drawn as ragdolls, then removed: the sim's bodies and joints and the
  *                client's pooled ragdoll figures must not grow. Needs the sim on the main thread: `--query transport=loopback`.
  * Counted after each cycle: JS heap, renderer geometries, textures, programs, materials and objects in
@@ -48,8 +52,8 @@ const args = parseArgs();
 const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
-const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire,map,stream').split(',').filter(Boolean);
-const CYCLES = { map: 24, stream: 12, reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20, transit: 10 };
+const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire,map,stream,aircraft').split(',').filter(Boolean);
+const CYCLES = { aircraft: 12, map: 24, stream: 12, reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20, transit: 10 };
 const WARM = 2;
 /** Longest a single cycle may take before it is counted as stuck. */
 const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
@@ -62,6 +66,7 @@ const TOL = {
   crowd: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   drive: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   stream: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
+  aircraft: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
   // trains come in and go out at the edge on their timetable, and a station's people with them: the entity count moves by trains
   transit: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 40, entities: 30, listeners: 30, domNodes: 40 },
   default: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
@@ -370,6 +375,42 @@ const ACTIVITIES = {
     streamWorld.push(counts);
   },
 };
+/** The aircraft phase's sim after each cycle: the bodies that are not aircraft, and the aircraft's own. */
+const aircraftWorld = [];
+async function bootAirport() {
+  await boot(page, server.base, `graphics=${profile.tier}&spawn=airport&transport=loopback&timescale=0&pedbudget=0&traffic=0${args.query ? `&${args.query}` : ''}`);
+  await page.waitForTimeout(4000);
+  await page.keyboard.press('Shift');
+}
+ACTIVITIES.aircraft = async () => {
+  const counts = await page.evaluate(async () => {
+    const h = window.__hood;
+    const S = h.game.transport.host?.simulation;
+    if (!S?.aircraft) throw new Error('the aircraft phase needs the airport with the sim on the main thread');
+    const settle = async () => {
+      for (let i = 0; i < 400; i++) {
+        await window.__h.sleep(50);
+        if (S.stream.settled && h.stream.settled && !S.playerHeld) return;
+      }
+    };
+    const go = async (x, z, wait) => {
+      const ped = S.registry.get(S.playerPedId);
+      if (ped.vehicleId) S.ejectPed(ped);
+      ped.controller.teleport(x, S.groundAt(x, z) + 0.1, z);
+      await window.__h.sleep(300);
+      await settle();
+      await window.__h.sleep(wait);
+    };
+    const home = S.tile.manifest.spawns.player;
+    // the apron east of Concourse B, then back to the curb
+    await go(-4180, 12700, 2500);
+    const near = S.aircraft.stats.bodies;
+    await go(home.x, home.z, 1500);
+    const acBodies = S.aircraft.flights.filter((f) => f.body).length + S.aircraft.stands.filter((s) => s.body).length;
+    return { bodies: S.physics.world.bodies.len() - acBodies, acBodies, near, drawn: h.airport?.aircraft?.count ?? 0, flights: S.aircraft.flights.length };
+  });
+  aircraftWorld.push(counts);
+};
 /** The stream phase's sim after each cycle: back home, the same tiles, colliders and graph edges. */
 const streamWorld = [];
 async function bootStream() {
@@ -398,6 +439,10 @@ for (const phase of phases) {
   console.log(`\n== ${phase}: ${n} cycles after ${WARM} warm-up`);
   if (phase === 'stream') {
     await bootStream();
+    population = FROZEN;
+  }
+  if (phase === 'aircraft') {
+    await bootAirport();
     population = FROZEN;
   }
   const want = POPULATION[phase] ?? LIVE;
@@ -450,6 +495,11 @@ for (const phase of phases) {
     const a = ragdollWorld[0], b = ragdollWorld[ragdollWorld.length - 1];
     console.log(`  ragdolls active at the peak ${Math.max(...ragdollWorld.map((r) => r.active))} · bodies ${a.bodies} -> ${b.bodies} · joints ${a.joints} -> ${b.joints}`);
     if (b.joints > a.joints || b.bodies > a.bodies + 4) grew.push(`physics bodies ${a.bodies} -> ${b.bodies}, joints ${a.joints} -> ${b.joints}`);
+  }
+  if (phase === 'aircraft' && aircraftWorld.length >= 3) {
+    const a = aircraftWorld[1], b = aircraftWorld[aircraftWorld.length - 1];
+    console.log(`  sim: bodies other than aircraft ${a.bodies} -> ${b.bodies} · aircraft bodies near the apron ${Math.max(...aircraftWorld.map((r) => r.near))}, at the curb ${b.acBodies} · aircraft drawn ${b.drawn} · flights ${b.flights}`);
+    if (b.bodies > a.bodies + 4) grew.push(`sim bodies ${a.bodies} -> ${b.bodies}`);
   }
   if (phase === 'stream' && streamWorld.length >= 3) {
     // (the first cycle is a warm-up: from boot the drop ring keeps less than after a lap)

@@ -5,7 +5,7 @@
 import { atDriverDoor } from '../../shared/doors';
 import { HANDLING } from '../../shared/handling';
 import { rotateVecInv } from '../../shared/math';
-import { PedFlag, VehicleFlag } from '../../shared/snapshot';
+import { H, PedFlag, SnapFlag, VehicleFlag } from '../../shared/snapshot';
 import type { SimEvent } from '../../shared/protocol';
 import { HeatPhase, Overlay } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
@@ -250,7 +250,8 @@ export class Hud implements System {
 
     const drivenType = v.inVehicle ? (v.defs.get(st.id) as { typeId?: string } | undefined)?.typeId : undefined;
     const carName = HANDLING[drivenType ?? g.ready.vehicleType]?.name.replace(/ \(.*\)/, '') ?? 'car';
-    const state = v.inVehicle ? `In car · ${carName}` : 'On foot';
+    const onTrain = ((v.sample?.b.u32[H.Flags] ?? 0) & SnapFlag.OnTrain) !== 0;
+    const state = v.inVehicle ? `In car · ${carName}` : onTrain ? 'On the train' : 'On foot';
     if (state !== this.cache.state) this.stateEl.textContent = this.cache.state = state;
 
     this.updateStatus();

@@ -8,7 +8,7 @@ The engine is city-agnostic. Everything that makes the game *Atlanta* (the map d
 
 There is no story yet, and that's deliberate. The game is the city: real streets and highways, real neighborhoods, pedestrians and traffic going about their day, side hustles on every corner, and a police response that feels like Atlanta's. A minor offense on a city street won't start a chase. Do the same on I-285 and the State Patrol will PIT you at 110 mph.
 
-> **Status: playable in the browser (16 October 2026).** Play it at https://hood-sandbox.adam-021.workers.dev, or run `npm install && npm run dev` and open http://127.0.0.1:5180. How to play is in [docs/PLAYING.md](docs/PLAYING.md).
+> **Status: playable in the browser (16 October 2026).** Play it at https://hood-sandbox.adam-021.workers.dev, or run `npm install && npm run dev` and open http://127.0.0.1:5180. How to play is in [docs/PLAYING.md](docs/PLAYING.md); known problems are in [docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md).
 >
 > What works now:
 >
@@ -189,6 +189,8 @@ browser's speech voice. `?transit=0` leaves it all out.
 | Everywhere | Spaghetti Junction, the Chattahoochee River (tubing, the river parks) |
 
 **Built so far (twenty-one heroes in the Downtown tile, `tools/blender/landmarks/`, `docs/contracts/m1-tile-format.md` "Hero landmarks"):** the stadium (the folded silver shell, the eight-petal pinwheel roof, the halo board), the Capitol (the gold dome, the porticoes), the Westin-style mirrored tower, the saucer-and-dome hotel, the arena, the aquarium, the soda museum, the observation wheel, the Fountain of Rings, Truist Plaza, 191 Peachtree, the Flatiron and the Candler Building, then the Georgia-Pacific Tower, the Marriott Marquis, the State of Georgia Building, City Hall, the Hurt Building, the Central Library, Corey Tower and the Hilton (the Basilica's model is built and waits for the tile north of this one). Each replaces its generic building in the bake, has its own collision hull, and takes the real footprint, height and orientation from the map data; the street-name label shows the landmark's name as you walk up to it. They are script-built interpretations with no brand marks (`tools/blender/LICENSES.md`).
+
+**Hartsfield-Jackson is built** (its own grid of tiles until the M3 warp; `?spawn=airport`, [docs/airport.md](docs/airport.md)): the five runways, the taxiways and aprons with their paint and lights, the Domestic Terminal (walk-in: ticketing, baggage claim, the Atrium, security) and Concourse T (walk-in, gates T1 to T21), Concourses A to F with their jet bridges, the international terminal, the 121 m tower, the parking decks, the Rental Car Center and the SkyTrain, and AI airliners (three classes, parody liveries) that land, taxi to their gates, push back and take off on a deterministic schedule. Flying them comes later.
 
 **Sensitive sites are on the map and treated with respect**: the MLK historic sites, Stone Mountain's Confederate carving, the police training center ("Cop City"), Lake Lanier and the flooded town of Oscarville. They're built carefully and never played for laughs, and no missions or gags happen at them. Real gangs, real crimes and real people stay out entirely.
 

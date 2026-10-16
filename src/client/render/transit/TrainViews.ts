@@ -50,6 +50,7 @@ export class TrainViews {
   private readonly lineColours: THREE.Color[];
   /** the cars of the train the player rides, this frame */
   readonly ridden: CarView[] = [];
+  private hidden: ((x: number, y: number, z: number) => boolean) | null = null;
   /** every train's head this frame (for audio): id, position, speed, flags */
   readonly heads: { id: number; x: number; y: number; z: number; speed: number; flags: number; route: number; s: number; doors: number }[] = [];
 
@@ -88,8 +89,9 @@ export class TrainViews {
     game.scene.add(this.group);
   }
 
-  /** Lays out every car of every train in view. */
-  update(): void {
+  /** Lays out every car of every train in view; `hidden` (when given) says a car at (x, y, z) is out of sight under the ground. */
+  update(hidden: ((x: number, y: number, z: number) => boolean) | null = null): void {
+    this.hidden = hidden;
     const v = this.game.view;
     const cam = this.game.camera.position;
     const lodScale = this.game.tier.lodScale;
@@ -104,6 +106,8 @@ export class TrainViews {
     for (const l of this.lods) {
       for (const m of l.meshes) {
         m.count = l.count;
+        // (an empty level draws nothing, its shadows neither)
+        m.visible = l.count > 0;
         m.instanceMatrix.needsUpdate = true;
       }
       l.open.needsUpdate = true;
@@ -127,6 +131,7 @@ export class TrainViews {
       const p = carPoseAt(r, carMidAt(s, k, car.length, car.gap), car.bogieZ, this.pose);
       const d = Math.hypot(p.x - cam.x, p.y - cam.y, p.z - cam.z) / lodScale;
       if (d > DRAW_RANGE) continue;
+      if (st.id !== riding && this.hidden?.(p.x, p.y, p.z)) continue;
       const flip = k % 2 === 1;
       this.e.set(-Math.atan(p.grade), Math.atan2(p.fx, p.fz), 0, 'YXZ');
       this.q.setFromEuler(this.e);

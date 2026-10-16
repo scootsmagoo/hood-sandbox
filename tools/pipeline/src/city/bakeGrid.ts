@@ -271,8 +271,9 @@ export function curbSpawn(grid: Grid, dir: string, x: number, z: number): { play
   }
   if (!best) return null;
   const ground = new GridGround(grid.spec.tileSizeM, [{ i: Math.floor(best.p[0] / grid.spec.tileSizeM), j: Math.floor(best.p[2] / grid.spec.tileSizeM), dir }]);
-  // the right of the direction of travel: (-uz, ux) in x-east, z-south
-  const rx = -best.u[1], rz = best.u[0];
+  // the curb on the side of the road the point is on (the right of the direction of travel is (-uz, ux) in x-east, z-south)
+  const side = Math.sign((x - best.p[0]) * -best.u[1] + (z - best.p[2]) * best.u[0]) || 1;
+  const rx = -best.u[1] * side, rz = best.u[0] * side;
   const vo = Math.max(1.2, best.w / 2 - 1.6), po = best.w / 2 + 2.2;
   const vx = best.p[0] + rx * vo, vz = best.p[2] + rz * vo;
   const px = best.p[0] + rx * po + best.u[0] * 2, pz = best.p[2] + rz * po + best.u[1] * 2;

@@ -268,7 +268,11 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   for (const p of lanePaths) laneMask.addPolyline(p.pts, PROP_CLEAR);
   const heroDatums = heroes.map((h) => heroDatum(h, (x, z) => surfaceHeight(hm, x, z), baseElevation));
   // a hero's hull is a building of the bake that is not drawn (its model is): collision, occlusion, footprints
-  const buildings = [...clip.buildings, ...heroes.flatMap((h, i) => hullBuildings(h, heroDatums[i]))];
+  // (the airport's heroes stand at their curbs: a hull prism a lane runs through, a vestibule or a canopy's column, is cut by it as a building is)
+  const hulls = heroes.flatMap((h, i) => hullBuildings(h, heroDatums[i]));
+  const airportHulls = hulls.filter((bd) => typeof airport?.heroes.find((s) => s.id === bd.hero?.id)?.elevation === 'number');
+  const cutHulls = airportHulls.length ? clipBuildingsToRoads(airportHulls, [], 0.3, 0.2, lanePaths).buildings : [];
+  const buildings = [...clip.buildings, ...hulls.filter((bd) => !airportHulls.includes(bd)), ...cutHulls];
   if (heroes.length) log(`heroes: ${heroes.map((h, i) => `${h.side.id} (replaces ${suppressed.replaced.get(h.side.id)!.length} buildings, ${h.hull.length} hull prisms)`).join(', ')}`);
   log(`buildings on streets: ${clip.stats.clipped} cut by a road or a lane (${Math.round(clip.stats.removedAreaM2)} m2 removed, ${clip.stats.pieces} pieces, ${clip.stats.dropped} slivers dropped, ${clip.stats.failed ?? 0} the clipper could not cut)`);
   const contexts = buildContexts(buildings);

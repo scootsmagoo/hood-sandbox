@@ -396,3 +396,38 @@ writes a transit layer per tile. What the streamed runtime still needs:
   the player's train back at the tile's edge (an off-map terminus, with a fade).
 - **The Airport station** is inside the Domestic Terminal (the airport region's own tiles): its platform level will attach to
   the terminal's interior through the station's `entrances` (street-level points) or a corridor the airport layer provides.
+
+## 16. An airport in a grid (`aeroway`, Hartsfield-Jackson)
+
+A grid of `city.json` may hold an airport: `"aeroway": { "icao": "KATL", "box": { south, west, north, east } }` (the lon/lat box
+its extract is fetched for, independent of the cells, so trimming the cells does not refetch it) and an optional `"spawn": { x, z }`
+(a game point: the index's spawn is put at the curb of the nearest street there, `curbSpawn` in `bakeGrid.ts`). Hartsfield-Jackson
+is grid `airport` (cells -6..-2 x 10..14 for the field, -7 x 11..13 for the rental car centre; same origin and datum as M2, so a
+point at the airport is the same point in any later grid), baked into `public/tiles/atlanta/airport/`:
+
+```
+npm run prefetch:m2 -- --grid airport --lanes aeroway            # the aeroway extract: one Overpass request (world/aerowayFetch.ts)
+npm run prefetch:m2 -- --grid airport --lanes dem,overture       # 3DEP per tile, Overture once for the box
+npm run prefetch:m2 -- --grid airport --lanes overpass --merged  # the tiles' five queries asked ONCE for the whole selection, cut per tile
+flock /tmp/hood-bake.lock npm run bake:m2 -- --grid airport      # bake, rebase, seams, far, aeroway, index
+```
+
+- **`--merged`** (prefetch): for a sparse grid of little-mapped land (an airfield) each of the five tile queries is sent once for the
+  box of every selected cell (timeout 900 s), and the answer is cut per tile into the very files the tile bakes read (an element
+  goes to every tile whose query box its `bounds` touch). The airport's 28 tiles took six requests in all.
+- **The tile bake** (`world/aerowayBake.ts`, called from `bake.ts` only when the tile's grid has an airport and its extract is
+  cached): opens the curb roads under the terminals' overhangs (`tunnel=building_passage`) and the streets under the parking decks;
+  builds I-285 in its cut under runway 10/28 (its `tunnel=yes` dropped) with the pavement over it as a deck; drops the service
+  lanes painted on the aprons; levels the airfield (the DEM's closing and blur, a narrow cut deeper than 2.5 m bridged as a deck)
+  and the airport buildings' floors (their sidecars' `flatten`); draws the pavement (`road_airfield`) and its paint (`road_aeromark`)
+  in `roads.glb`; mown grass inside the aerodrome; no synthetic trees on the field and nothing on the pavement; floodlight masts
+  round the aprons (lamps of kind 2); the walk-in heroes' interiors (m1-tile-format.md, "Hero landmarks", the airport fields).
+- **`aeroway` step** (after the seam pass): `aeroway.json` next to `index.json`, the whole airport in the city frame (the taxi
+  graph, runways and their ends, the stands, the holding positions, the airfield lights, the map), its heights read back from the
+  baked tiles (`world/aerowayGraph.ts`, format in its header; parsed by `src/shared/aeroway.ts`). The index names it:
+  `"aeroway": "aeroway.json"` (`CityIndex.aeroway`).
+- **Runtime.** The sim (`src/sim/host.ts`) reads `aeroway.json` when the index names it and runs the AI air traffic
+  (`src/sim/aircraft`); its pose is a function of the time, not of the tiles, so it runs whatever is loaded, and only the aircraft
+  within 450 m of the player have bodies. The client (`main.ts`) loads the aircraft, the airfield lights and the map layer
+  (`src/client/render/aircraft/`). `?spawn=airport` is `?tiles=tiles/atlanta/airport/`.
+- The airport is not joined to M2 until the M3 warp places it: a grid of its own until then.

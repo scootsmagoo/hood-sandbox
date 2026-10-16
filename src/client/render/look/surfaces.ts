@@ -328,7 +328,7 @@ const BODY: Record<Kind, string> = {
     #ifndef GFX_LITE
       float stain = smoothstep(0.62, 0.86, gfxVn(p * 0.13 + 7.0));
       float spot = smoothstep(0.7, 0.95, gfxVn(p * 0.7 + 3.0)) * near;
-      diffuseColor.rgb *= (1.0 - 0.1 * stain) * (1.0 - 0.18 * spot);
+      diffuseColor.rgb *= (1.0 - 0.06 * stain) * (1.0 - 0.07 * spot);
     #endif
   }`,
   concrete: /* glsl */ `

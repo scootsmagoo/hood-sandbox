@@ -72,13 +72,13 @@ export function loadAerowayTile(cfg: TileConfig, log: (m: string) => void = () =
 }
 
 /** The terminal outlines of the airport (airport.json, tools/blender/airport), in the bake's frame: no road is opened up inside them. */
-function terminalRings(cfg: TileConfig): V2[][] {
+function terminalRings(cfg: TileConfig, kinds = ['terminal', 'concourse']): V2[][] {
   const f = path.join(REPO_ROOT, 'tools', 'blender', 'airport', 'airport.json');
   if (!existsSync(f)) return [];
   const j = JSON.parse(readFileSync(f, 'utf8')) as { heroes: Record<string, { kind: string; anchor: { lat: number; lon: number }; rings: V2[][] }> };
   const out: V2[][] = [];
   for (const h of Object.values(j.heroes)) {
-    if (h.kind !== 'terminal' && h.kind !== 'concourse') continue;
+    if (!kinds.includes(h.kind)) continue;
     const [ax, az] = cfg.projector.toGame(h.anchor.lon, h.anchor.lat);
     for (const r of h.rings) out.push(r.map((p) => [p[0] + ax, p[1] + az] as V2));
   }
@@ -90,6 +90,7 @@ export function prepareOsm(at: AerowayTile, cfg: TileConfig, osm: OsmData): { pa
   // (service roads mostly on the pavement are dropped: see below)
   const pieces = pavementPieces(at.ap);
   const term = terminalRings(cfg);
+  const decks = terminalRings(cfg, ['parking']);
   // the pieces bucketed by 64 m cells of their bounds (a point tests only the few round it)
   const G = 64;
   const cells = new Map<string, V2[][]>();
@@ -130,6 +131,14 @@ export function prepareOsm(at: AerowayTile, cfg: TileConfig, osm: OsmData): { pa
     if (t.tunnel === 'building_passage' && /^(primary|secondary|tertiary|unclassified|residential|service|primary_link|secondary_link|tertiary_link)$/.test(t.highway)) {
       if (pts.some((p) => term.some((r) => pointInRing(p[0], p[1], r)))) continue;
       delete t.tunnel;
+      passages++;
+      continue;
+    }
+    // a street in a tunnel under a parking deck (the terminal's bypasses): through the deck's ground level (its hull is cut by the lanes)
+    if (t.tunnel === 'yes' && !/^(motorway|motorway_link|trunk|trunk_link)$/.test(t.highway) && pts.some((p) => decks.some((r) => pointInRing(p[0], p[1], r)))) {
+      delete t.tunnel;
+      delete t.covered;
+      delete t.layer;
       passages++;
       continue;
     }

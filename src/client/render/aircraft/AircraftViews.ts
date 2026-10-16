@@ -9,6 +9,7 @@
  * tools/blender/airport/aircraft.py). Levels of detail by distance (aircraft.json `lod_from`, times the tier's lod scale).
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { standPose, type AerowayData } from '../../../shared/aeroway';
 import { AC, AircraftFlag, AircraftInfo, AircraftPhase, StandWord, type SnapshotView } from '../../../shared/snapshot';
 import raw from '../../../shared/data/aircraft.json';
@@ -79,12 +80,31 @@ function makeMaterial(kind: Kind): THREE.Material {
 
 const MAT_KIND: Record<AcMat, Kind> = { ac_paint: 'paint', ac_grey: 'plain', ac_metal: 'plain', ac_dark: 'plain', ac_window: 'window', ac_light: 'light' };
 
+/** A model's geometries merged by the kind of material they are drawn with (copies: the asset's own stay as they are). */
+function byKind(m: Map<AcMat, THREE.BufferGeometry>): { kind: Kind; geo: THREE.BufferGeometry }[] {
+  const lists = new Map<Kind, THREE.BufferGeometry[]>();
+  for (const [mat, g] of m) {
+    const k = MAT_KIND[mat];
+    const l = lists.get(k);
+    if (l) l.push(g);
+    else lists.set(k, [g]);
+  }
+  const out: { kind: Kind; geo: THREE.BufferGeometry }[] = [];
+  for (const [kind, gs] of lists) {
+    const geo = gs.length === 1 ? gs[0].clone() : mergeGeometries(gs, false);
+    if (geo) out.push({ kind, geo });
+  }
+  return out;
+}
+
 interface Batch {
   mesh: THREE.InstancedMesh;
   kind: Kind;
   liv?: THREE.InstancedBufferAttribute[];
   cabin?: THREE.InstancedBufferAttribute;
   n: number;
+  /** the instances of the parked aircraft (written when they change, at the front): the moving ones follow */
+  n0: number;
 }
 
 /** One aircraft to draw this frame. */
@@ -109,6 +129,11 @@ const Q = new THREE.Quaternion();
 const E = new THREE.Euler(0, 0, 0, 'YXZ');
 const P = new THREE.Vector3();
 const S1 = new THREE.Vector3(1, 1, 1);
+const SK = new THREE.Vector3(1, 1, 1);
+const M2 = new THREE.Matrix4();
+const M3 = new THREE.Matrix4();
+/** Aircraft further than this share of the camera's far plane are drawn nearer and smaller (see `update`). */
+export const FAR_SHARE = 0.9;
 
 export class AircraftViews implements System {
   readonly name = 'aircraft';
@@ -118,7 +143,6 @@ export class AircraftViews implements System {
   /** [class][lod] -> batches */
   private batches: Batch[][][] = [];
   private ground: Batch[][] = [];
-  private stand: THREE.InstancedMesh | null = null;
   private fallback: THREE.InstancedMesh | null = null;
   private ready = false;
   private disposed = false;
@@ -126,6 +150,13 @@ export class AircraftViews implements System {
   readonly draws: Draw[] = [];
   private nDraw = 0;
   private readonly prev = new Map<number, number>();
+  /** where the parked aircraft start in `draws`, the stand words they were laid out from, and the camera then */
+  private firstParked = 0;
+  private words = new Uint32Array(0);
+  private standsChanged = true;
+  private readonly laidAt = new THREE.Vector3(Infinity, 0, 0);
+  private laidScale = 0;
+  private readonly parkedStats = { byLod: [0, 0, 0], tris: 0, service: 0 };
   /** stats for the tests and the perf report */
   readonly stats = { moving: 0, parked: 0, byLod: [0, 0, 0], tugs: 0, service: 0, tris: 0 };
 
@@ -152,7 +183,7 @@ export class AircraftViews implements System {
     mesh.castShadow = shadows && kind !== 'light' && kind !== 'window';
     mesh.receiveShadow = kind !== 'light';
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    const b: Batch = { mesh, kind, n: 0 };
+    const b: Batch = { mesh, kind, n: 0, n0: 0 };
     if (kind === 'paint') {
       b.liv = ['aLivA', 'aLivB', 'aLivC', 'aLivD', 'aLivE', 'aLivF'].map((name) => {
         const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
@@ -178,10 +209,11 @@ export class AircraftViews implements System {
       if (!a) return;
       a.lods.forEach((lod, li) => {
         const list: Batch[] = [];
-        for (const [mat, geo] of lod.body) list.push(this.batch(geo.clone(), MAT_KIND[mat], CAP, li < 2));
-        // the gear: one batch per material, marked so only gear-down aircraft get them
-        for (const [mat, geo] of lod.gear) {
-          const b = this.batch(geo.clone(), MAT_KIND[mat], CAP, li < 2);
+        // one batch per kind of material (the grey, metal and dark parts are one plain batch): few draws, few instance writes
+        for (const b of byKind(lod.body)) list.push(this.batch(b.geo, b.kind, CAP, li < 2));
+        // the gear, marked so only gear-down aircraft get it
+        for (const g of byKind(lod.gear)) {
+          const b = this.batch(g.geo, g.kind, CAP, li < 2);
           (b as Batch & { gear?: boolean }).gear = true;
           list.push(b);
         }
@@ -203,10 +235,7 @@ export class AircraftViews implements System {
         const levels = gr.parts.get(name);
         const geo = levels?.[levels.length > 1 ? 1 : 0];
         const list: Batch[] = [];
-        if (geo) for (const [mat, g] of geo) {
-          const b = this.batch(g.clone(), MAT_KIND[mat], GROUND_CAP, false);
-          list.push(b);
-        }
+        if (geo) for (const g of byKind(geo)) list.push(this.batch(g.geo, g.kind, GROUND_CAP, false));
         this.ground.push(list);
       }
     }
@@ -252,9 +281,18 @@ export class AircraftViews implements System {
       moving++;
     }
     let parked = 0;
+    this.firstParked = this.nDraw;
     const ns = Math.min(b.standCount, this.data.stands.length);
+    if (this.words.length !== ns) {
+      this.words = new Uint32Array(ns);
+      this.standsChanged = true;
+    }
     for (let i = 0; i < ns && this.nDraw < CAP; i++) {
       const w = b.standWord(i);
+      if (this.words[i] !== w) {
+        this.words[i] = w;
+        this.standsChanged = true;
+      }
       if (!StandWord.occupied(w)) continue;
       const st = this.data.stands[i];
       const cls = StandWord.cls(w);
@@ -286,95 +324,126 @@ export class AircraftViews implements System {
     this.gather(s.a, s.b, s.alpha);
     const cam = this.game.camera.position;
     const scale = this.game.tier.lodScale;
-    for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) b.n = 0;
-    for (const list of this.ground) for (const b of list) b.n = 0;
-    let fb = 0;
-    this.stats.byLod[0] = this.stats.byLod[1] = this.stats.byLod[2] = 0;
-    let tugs = 0, service = 0, tris = 0;
-    for (let k = 0; k < this.nDraw; k++) {
-      const d = this.draws[k];
-      const cls = CLASS_NAMES[d.cls] ?? 'narrowbody';
-      const asset = aircraftAsset(cls);
-      const dist = Math.hypot(cam.x - d.x, cam.y - d.y, cam.z - d.z);
-      E.set(-d.pitch, d.yaw, d.roll, 'YXZ');
-      Q.setFromEuler(E);
-      P.set(d.x, d.y, d.z);
-      M.compose(P, Q, S1);
-      if (!asset || !this.batches[d.cls]?.length) {
-        if (this.fallback && fb < CAP) {
-          const t = TYPES[cls];
-          const m2 = new THREE.Matrix4().makeScale(t.span * 0.25, t.height * 0.5, t.length);
-          this.fallback.setMatrixAt(fb++, M.clone().multiply(m2));
-        }
-        continue;
-      }
-      let li = 0;
-      for (let i = asset.from.length - 1; i > 0; i--) if (dist >= asset.from[i] / scale) { li = i; break; }
-      li = Math.min(li, this.batches[d.cls].length - 1);
-      this.stats.byLod[li]++;
-      tris += asset.lods[li].tris;
-      const cabin = (d.flags & AircraftFlag.Cabin) !== 0 ? 1 : 0;
-      for (const b of this.batches[d.cls][li]) {
-        if ((b as Batch & { gear?: boolean }).gear && d.gear < 0.5) continue;
-        if (b.n >= CAP) continue;
-        b.mesh.setMatrixAt(b.n, M);
-        if (b.liv) for (let j = 0; j < 6; j++) b.liv[j].setXYZ(b.n, LIV[d.livery * 18 + j * 3], LIV[d.livery * 18 + j * 3 + 1], LIV[d.livery * 18 + j * 3 + 2]);
-        if (b.cabin) b.cabin.setX(b.n, cabin);
-        b.n++;
-      }
-      // the pushback tug, at the nose gear, facing the aircraft
-      if ((d.flags & AircraftFlag.Tug) !== 0 && this.ground[0]?.length && dist < 1500) {
-        const wb = TYPES[cls].wheelbase + 3.4;
-        P.set(d.x + Math.sin(d.yaw) * wb, d.y, d.z + Math.cos(d.yaw) * wb);
-        E.set(0, d.yaw + Math.PI, 0, 'YXZ');
-        Q.setFromEuler(E);
-        M.compose(P, Q, S1);
-        for (const b of this.ground[0]) if (b.n < GROUND_CAP) b.mesh.setMatrixAt(b.n++, M);
-        tugs++;
-      }
-      // a parked aircraft near the camera: a belt loader at its forward hold, a baggage train beside it
-      if (d.phase === AircraftPhase.Parked && dist < 420 && this.ground.length >= 4) {
-        const t = TYPES[cls];
-        const fwd = [Math.sin(d.yaw), Math.cos(d.yaw)], right = [-Math.cos(d.yaw), Math.sin(d.yaw)];
-        const place = (gi: number, along: number, side: number, yawOff: number) => {
-          const list = this.ground[gi];
-          if (!list.length) return;
-          P.set(d.x + fwd[0] * along + right[0] * side, d.y, d.z + fwd[1] * along + right[1] * side);
-          E.set(0, d.yaw + yawOff, 0, 'YXZ');
-          Q.setFromEuler(E);
-          M.compose(P, Q, S1);
-          for (const b of list) if (b.n < GROUND_CAP) b.mesh.setMatrixAt(b.n++, M);
-        };
-        const r = t.fuselage.radius;
-        place(3, t.wheelbase * 0.55, r + 4.5, -Math.PI / 2);
-        place(1, t.wheelbase * 0.2, r + 9.5, Math.PI);
-        place(2, t.wheelbase * 0.2 - 4.2, r + 9.5, Math.PI);
-        if (d.cls === 1) place(2, t.wheelbase * 0.2 - 8.4, r + 9.5, Math.PI);
-        service++;
-      }
+    // the parked aircraft (and the vehicles round them) are laid out again only when a stand changes or the camera has moved
+    // far enough to change a level of detail; in between only the moving ones are written (and uploaded)
+    const redo = this.standsChanged || this.laidAt.distanceTo(cam) > 12 || scale !== this.laidScale;
+    this.fb = 0;
+    if (redo) {
+      for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) b.n = 0;
+      for (const list of this.ground) for (const b of list) b.n = 0;
+      const ps = this.parkedStats;
+      ps.byLod[0] = ps.byLod[1] = ps.byLod[2] = 0;
+      ps.tris = ps.service = 0;
+      for (let k = this.firstParked; k < this.nDraw; k++) this.place(this.draws[k], cam, scale, ps);
+      for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) b.n0 = b.n;
+      for (const list of this.ground) for (const b of list) b.n0 = b.n;
+      this.laidAt.copy(cam);
+      this.laidScale = scale;
+      this.standsChanged = false;
+    } else {
+      for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) b.n = b.n0;
+      for (const list of this.ground) for (const b of list) b.n = b.n0;
     }
-    for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) {
+    const ms = { byLod: [0, 0, 0], tris: 0, service: 0, tugs: 0 };
+    for (let k = 0; k < this.firstParked; k++) this.place(this.draws[k], cam, scale, ms);
+    const upload = (b: Batch) => {
       b.mesh.count = b.n;
       b.mesh.visible = b.n > 0;
-      if (b.n) {
-        b.mesh.instanceMatrix.needsUpdate = true;
-        if (b.liv) for (const a of b.liv) a.needsUpdate = true;
-        if (b.cabin) b.cabin.needsUpdate = true;
+      const from = redo ? 0 : b.n0;
+      if (b.n <= from) return;
+      const attrs: THREE.BufferAttribute[] = [b.mesh.instanceMatrix, ...(b.liv ?? []), ...(b.cabin ? [b.cabin] : [])];
+      for (const a of attrs) {
+        a.clearUpdateRanges();
+        a.addUpdateRange(from * a.itemSize, (b.n - from) * a.itemSize);
+        a.needsUpdate = true;
       }
-    }
-    for (const list of this.ground) for (const b of list) {
-      b.mesh.count = b.n;
-      b.mesh.visible = b.n > 0;
-      if (b.n) b.mesh.instanceMatrix.needsUpdate = true;
-    }
+    };
+    for (const byLod of this.batches) for (const list of byLod ?? []) for (const b of list ?? []) upload(b);
+    for (const list of this.ground) for (const b of list) upload(b);
     if (this.fallback) {
-      this.fallback.count = fb;
-      this.fallback.visible = fb > 0;
+      this.fallback.count = this.fb;
+      this.fallback.visible = this.fb > 0;
       this.fallback.instanceMatrix.needsUpdate = true;
     }
-    this.stats.tugs = tugs;
-    this.stats.service = service;
-    this.stats.tris = tris;
+    const ps = this.parkedStats;
+    for (let i = 0; i < 3; i++) this.stats.byLod[i] = ps.byLod[i] + ms.byLod[i];
+    this.stats.tugs = ms.tugs;
+    this.stats.service = ps.service;
+    this.stats.tris = ps.tris + ms.tris;
+  }
+
+  private fb = 0;
+
+  /** Writes one aircraft's instances (and its tug, or the vehicles round it when parked) after the batches' current ones. */
+  private place(d: Draw, cam: THREE.Vector3, scale: number, st: { byLod: number[]; tris: number; service: number; tugs?: number }) {
+    const cls = CLASS_NAMES[d.cls] ?? 'narrowbody';
+    const asset = aircraftAsset(cls);
+    const dist = Math.hypot(cam.x - d.x, cam.y - d.y, cam.z - d.z);
+    E.set(-d.pitch, d.yaw, d.roll, 'YXZ');
+    Q.setFromEuler(E);
+    P.set(d.x, d.y, d.z);
+    // past the far plane (an arrival 14 km out, a departure climbing away): drawn nearer along the same line of sight and
+    // scaled by as much, so it looks the same size where it is, and is not clipped
+    const reach = this.game.camera.far * FAR_SHARE;
+    if (dist > reach) {
+      const k = reach / dist;
+      P.set(cam.x + (d.x - cam.x) * k, cam.y + (d.y - cam.y) * k, cam.z + (d.z - cam.z) * k);
+      SK.setScalar(k);
+      M.compose(P, Q, SK);
+    } else M.compose(P, Q, S1);
+    if (!asset || !this.batches[d.cls]?.length) {
+      if (this.fallback && this.fb < CAP) {
+        const t = TYPES[cls];
+        M2.makeScale(t.span * 0.25, t.height * 0.5, t.length);
+        this.fallback.setMatrixAt(this.fb++, M3.copy(M).multiply(M2));
+      }
+      return;
+    }
+    let li = 0;
+    for (let i = asset.from.length - 1; i > 0; i--) if (dist >= asset.from[i] / scale) { li = i; break; }
+    li = Math.min(li, this.batches[d.cls].length - 1);
+    st.byLod[li]++;
+    st.tris += asset.lods[li].tris;
+    const cabin = (d.flags & AircraftFlag.Cabin) !== 0 ? 1 : 0;
+    for (const b of this.batches[d.cls][li]) {
+      if ((b as Batch & { gear?: boolean }).gear && d.gear < 0.5) continue;
+      if (b.n >= CAP) continue;
+      b.mesh.setMatrixAt(b.n, M);
+      if (b.liv) for (let j = 0; j < 6; j++) b.liv[j].setXYZ(b.n, LIV[d.livery * 18 + j * 3], LIV[d.livery * 18 + j * 3 + 1], LIV[d.livery * 18 + j * 3 + 2]);
+      if (b.cabin) b.cabin.setX(b.n, cabin);
+      b.n++;
+    }
+    // the pushback tug, at the nose gear, facing the aircraft
+    if ((d.flags & AircraftFlag.Tug) !== 0 && this.ground[0]?.length && dist < 1500) {
+      const wb = TYPES[cls].wheelbase + 3.4;
+      P.set(d.x + Math.sin(d.yaw) * wb, d.y, d.z + Math.cos(d.yaw) * wb);
+      E.set(0, d.yaw + Math.PI, 0, 'YXZ');
+      Q.setFromEuler(E);
+      M.compose(P, Q, S1);
+      for (const b of this.ground[0]) if (b.n < GROUND_CAP) b.mesh.setMatrixAt(b.n++, M);
+      st.tugs = (st.tugs ?? 0) + 1;
+    }
+    // a parked aircraft near the camera: a belt loader at its forward hold, a baggage train beside it
+    if (d.phase === AircraftPhase.Parked && dist < 420 && this.ground.length >= 4) {
+      const t = TYPES[cls];
+      const fx = Math.sin(d.yaw), fz = Math.cos(d.yaw), rx = -Math.cos(d.yaw), rz = Math.sin(d.yaw);
+      const r = t.fuselage.radius;
+      this.service(3, d, fx, fz, rx, rz, t.wheelbase * 0.55, r + 4.5, -Math.PI / 2);
+      this.service(1, d, fx, fz, rx, rz, t.wheelbase * 0.2, r + 9.5, Math.PI);
+      this.service(2, d, fx, fz, rx, rz, t.wheelbase * 0.2 - 4.2, r + 9.5, Math.PI);
+      if (d.cls === 1) this.service(2, d, fx, fz, rx, rz, t.wheelbase * 0.2 - 8.4, r + 9.5, Math.PI);
+      st.service++;
+    }
+  }
+
+  private service(gi: number, d: Draw, fx: number, fz: number, rx: number, rz: number, along: number, side: number, yawOff: number) {
+    const list = this.ground[gi];
+    if (!list?.length) return;
+    P.set(d.x + fx * along + rx * side, d.y, d.z + fz * along + rz * side);
+    E.set(0, d.yaw + yawOff, 0, 'YXZ');
+    Q.setFromEuler(E);
+    M.compose(P, Q, S1);
+    for (const b of list) if (b.n < GROUND_CAP) b.mesh.setMatrixAt(b.n++, M);
   }
 
   /** The aircraft drawn this frame (for the lights and the audio). */

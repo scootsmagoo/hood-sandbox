@@ -584,3 +584,44 @@ Twenty-two hand-built models (`tools/blender/landmarks/`, contract: "Hero landma
 
 Each model's facade is the look's window shader on the same attributes as the baked walls, so it costs what a wall costs; the extra shaders (`lm_glow`, `lm_flood`, `lm_lit`, `lm_gold`, `lm_glass`) are a few lines of emissive each and `addSodium` on the stone, metal, gold and flood materials. A level is chosen once a frame by distance (a distance, a divide and a compare a hero, no allocation); nothing moves, so the group is `freezeStatic`. **Budgets were not changed.** If draws matter on the phone, the cheap lever is `Landmarks.select`: hide LOD1 beyond the tier's `far` and merge the facade and roof meshes of a hero.
 
+
+## Hartsfield-Jackson (2026-10-16)
+
+`?spawn=airport` ([airport.md](airport.md)), measured with `npm run perf-budget -- --dist --query spawn=airport` on this box (the
+scripted bot walks and drives the terminal curbs and looks round; the numbers are per phase, worst of the run). Three variants: the
+airport as built, without the aircraft (`aircraft=0`), and without the aircraft and the hero models (`landmarks=off`):
+
+| desktop-high (look phase) | as built | no aircraft | no aircraft, no heroes |
+|---|---|---|---|
+| main-thread CPU mean | 2.6 ms | 1.8 ms | 1.9 ms |
+| draws | 364 | 327 | 255 |
+| triangles | 885k | 624k | 464k |
+| JS heap after GC | 88 MB | 81 MB | 69 MB |
+
+| phone-low (look phase) | as built | no aircraft | no aircraft, no heroes |
+|---|---|---|---|
+| main-thread CPU mean (4x throttle) | 4.2 ms | 3.9 ms | 3.2 ms |
+| draws | 220 | 161 | 113 |
+| triangles | 599k | 330k | 226k |
+| JS heap after GC | 69 MB | 62 MB | 54 MB |
+
+- **The aircraft** (about 150 drawn: 25 to 30 moving, 120 to 130 parked) cost 40 to 60 draws (instanced per class, level of
+  detail and kind of material: paint, plain, windows, lamps and the gear), 250 to 270k triangles (the near ones at LOD0, 6 to 13k each;
+  most are LOD1/LOD2 at 2.1-2.5k and 410-430), about 7 MB of heap (the snapshots' aircraft block, the assets, the plans in the sim
+  worker are not on this thread). The client's own work is 0.05 ms a frame for the aircraft and 0.02 ms for the airfield lights
+  (`scripts/cpu-profile.mjs --query spawn=airport`): the parked aircraft are laid out again only when a stand changes or the camera
+  moves 12 m, and only the moving ones' instances are written and uploaded in between. The rest of the CPU difference is the
+  renderer submitting the extra draws.
+- **The terminal interiors** are part of the Domestic Terminal (28.8k triangles at LOD0) and Concourse T (38.0k) models: within
+  800 m of them they are drawn whole (one draw per material, about a dozen each); the heroes in all add 50 to 70 draws and 160k
+  triangles near the terminal. Their walk networks (566 and 988 nodes) and 600 scenario points are ordinary tile data.
+- **The sim** (worker): the schedule plans a flight in about 3.5 ms on average (the A* over 1,927 nodes, the profile, the separation
+  check against the flights before it, every 2 s of its track, over the delays it tries; `tests/airport/airTraffic.test.ts` plans 150
+  in half a second); a flight is planned about every 25 s. Per tick every live flight's pose
+  is a binary search in its profile; the bodies near the player (up to about 45 by a concourse, 3 at the curb) are boxes moved by
+  the kinematic integrator.
+- **Files**: the 28 airport tiles are 54 MB (1.9 MB each on average), `aeroway.json` 0.9 MB (the sim and the client each parse it
+  once), the airport models 5.0 MB (21 files).
+- The Downtown gates (`npm run perf-budget`, `perf-budget:phone`) are over budget in draws and CPU in this working tree, with or
+  without `?transit=0`; nothing of the airport runs Downtown (its client code loads only for a city whose index names an
+  `aeroway`, and the hero materials it adds are not used there), so the overrun comes from the other work in progress.

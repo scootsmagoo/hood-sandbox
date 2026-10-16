@@ -39,7 +39,18 @@ interface KitGroup {
   x: number;
   z: number;
   range: number;
+  /** under the ground (an underground station's, or a tunnel's): drawn only when the camera can see down there */
+  under: boolean;
 }
+
+/**
+ * Seeing under the ground: from the street, the stations and tunnels are behind the ground and cost draws for nothing. They are
+ * drawn when the camera is down there (or riding there), and near an opening: within OPEN_NEAR m of an entrance or PORTAL_NEAR m
+ * of a tunnel mouth, the parts within UNDER_NEAR m of the camera (what shows down the stairs or into the tunnel).
+ */
+const OPEN_NEAR = 45;
+const PORTAL_NEAR = 160;
+const UNDER_NEAR = 90;
 
 export class TransitView implements System {
   readonly name = 'transit';
@@ -53,6 +64,15 @@ export class TransitView implements System {
   private holeT = 0;
   private patchT = 0;
   private interior = 0;
+  /** the underground shell's chunks, with their boxes */
+  private readonly underShell: { mesh: THREE.Object3D; box: THREE.Box3 }[] = [];
+  /** the openings to the underground: entrances (x, z) and tunnel mouths */
+  private readonly entrancesXZ: number[] = [];
+  private readonly portalsXZ: number[] = [];
+  /** the camera sees under the ground this frame; near an opening (the underground parts close by are drawn) */
+  private below = true;
+  private nearOpening = true;
+  private openT = 0;
 
   private constructor(
     private readonly game: Game,
@@ -60,6 +80,18 @@ export class TransitView implements System {
   ) {
     this.root.name = 'transit';
     this.volumes = new VolumeIndex(data.volumes);
+    for (const st of data.stations) for (const e of st.entrances) this.entrancesXZ.push(e.x, e.z);
+    for (const t of data.tracks) {
+      for (let i = 1; i < t.runs.length; i++) {
+        const a = t.runs[i - 1][1], b = t.runs[i][1];
+        const tun = (k: string) => k === 'tunnel';
+        const open = (k: string) => k === 'trench' || k === 'grade' || k === 'elevated';
+        if ((tun(a) && open(b)) || (open(a) && tun(b))) {
+          const j = t.runs[i][0];
+          this.portalsXZ.push(t.pts[j * 3], t.pts[j * 3 + 2]);
+        }
+      }
+    }
     game.scene.add(this.root);
     game.transit = this;
   }
@@ -127,6 +159,11 @@ export class TransitView implements System {
         mesh.receiveShadow = !interior;
         mesh.updateMatrix();
         mesh.matrixAutoUpdate = false;
+        if (interior) {
+          mesh.geometry.computeBoundingBox();
+          mesh.updateWorldMatrix(true, false);
+          this.underShell.push({ mesh, box: mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld) });
+        }
       });
       gltf.scene.name = 'transit-shell';
       this.root.add(gltf.scene);
@@ -179,7 +216,9 @@ export class TransitView implements System {
         const st = g.station >= 0 ? d.stations[g.station] : null;
         const cx = st ? st.x : g.list.reduce((a, b) => a + b.x, 0) / g.list.length;
         const cz = st ? st.z : g.list.reduce((a, b) => a + b.z, 0) / g.list.length;
-        h = { group: grp, x: cx, z: cz, range: st ? STATION_RANGE : TUNNEL_RANGE };
+        // (a tunnel cell is under the ground when most of its parts are in its roofed volumes)
+        const under = st ? st.underground : g.list.filter((a) => this.roofed(a.x, a.y + 1, a.z)).length * 2 > g.list.length;
+        h = { group: grp, x: cx, z: cz, range: st ? STATION_RANGE : TUNNEL_RANGE, under };
         holders.set(hk, h);
         this.kitGroups.push(h);
         this.root.add(grp);
@@ -222,9 +261,25 @@ export class TransitView implements System {
     this.interior += (target - this.interior) * Math.min(1, dt * 2.5);
     lookState.interior = this.interior < 0.002 ? 0 : this.interior;
     INTERIOR.uNight.value = nightFactor(g.clockView?.minutes ?? 720);
+    // under the ground: seen from down there, or close to an opening
+    const onTrainUnder = !!snap && (snap.u32[H.Flags] & SnapFlag.OnTrain) !== 0 && (snap.u32[H.Flags] & SnapFlag.Underground) !== 0;
+    this.below = vi >= 0 || onTrainUnder || this.volumes.at(cam.x, cam.y, cam.z, 3) >= 0;
+    this.openT -= dt;
+    if (this.openT <= 0) {
+      this.openT = 0.2;
+      this.nearOpening = near(this.entrancesXZ, cam.x, cam.z, OPEN_NEAR) || near(this.portalsXZ, cam.x, cam.z, PORTAL_NEAR);
+    }
+    const seeAll = this.below;
+    const seeNear = !seeAll && this.nearOpening;
+    for (const u of this.underShell) {
+      u.mesh.visible = seeAll || (seeNear && boxDist(u.box, cam.x, cam.z) < UNDER_NEAR);
+    }
     // the furniture near the camera only
-    for (const k of this.kitGroups) k.group.visible = Math.hypot(k.x - cam.x, k.z - cam.z) < k.range;
-    this.trains?.update();
+    for (const k of this.kitGroups) {
+      const d = Math.hypot(k.x - cam.x, k.z - cam.z);
+      k.group.visible = d < k.range && (!k.under || seeAll || (seeNear && d < UNDER_NEAR + 60));
+    }
+    this.trains?.update(seeAll ? null : (x, y, z) => this.roofed(x, y + 1.5, z) && !(seeNear && Math.hypot(x - cam.x, z - cam.z) < UNDER_NEAR + 60));
     // the wells of the entrances
     this.holeT -= dt;
     if (this.holeT <= 0) {
@@ -242,6 +297,12 @@ export class TransitView implements System {
       this.screenT = 0.5;
       this.updateScreens();
     }
+  }
+
+  /** Whether (x, y, z) is in a roofed volume (a tunnel's or an underground station's, not a trench's). */
+  private roofed(x: number, y: number, z: number): boolean {
+    const i = this.volumes.at(x, y, z, 0.5);
+    return i >= 0 && this.data.volumes[i].kind === 'interior';
   }
 
   /** The next-train screens of the player's station (from the snapshot header); the others show their standing message. */
@@ -297,4 +358,21 @@ export class TransitView implements System {
 export function etaText(s: number): string {
   if (s < 20) return 'NOW';
   return `${Math.max(1, Math.round(s / 60))} MIN`;
+}
+
+/** Whether any of the flat (x, z) points is within r of (x, z). */
+function near(pts: number[], x: number, z: number, r: number): boolean {
+  const r2 = r * r;
+  for (let i = 0; i < pts.length; i += 2) {
+    const dx = pts[i] - x, dz = pts[i + 1] - z;
+    if (dx * dx + dz * dz < r2) return true;
+  }
+  return false;
+}
+
+/** The flat distance from (x, z) to a box, 0 inside it. */
+function boxDist(b: THREE.Box3, x: number, z: number): number {
+  const dx = Math.max(b.min.x - x, 0, x - b.max.x);
+  const dz = Math.max(b.min.z - z, 0, z - b.max.z);
+  return Math.hypot(dx, dz);
 }

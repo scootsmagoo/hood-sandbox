@@ -85,7 +85,7 @@ Escalation is earned, and slower than a ratchet. The numbers (tuned to GTA IV an
 }
 ```
 
-- `areas` with `roadClasses` match when the position is within `maxDistanceM` of a `roads.json` centreline of one of those classes. Polygon areas (`"polygon": [[x, z], ...]` in game coordinates) come later with the M3 warp, so the schema allows them, but M1 uses only road classes and the default.
+- `areas` with `roadClasses` match when the position is within `maxDistanceM` of a `roads.json` centreline of one of those classes. Polygon areas (`"polygon": [[x, z], ...]` in game coordinates) come later with the M3 warp, so the schema allows them, but M1 uses only road classes and the default. One exception: when a tile has a transit layer, the sim puts a polygon area for the transit agency (`agency` in `transit.json`, `tap`) round each station (its platforms, concourse and entrances, 25 m out) ahead of the file's own areas, so a crime in a station brings the Transit Authority Police (src/sim/transit/Transit.ts, `claimStations`).
 - The engine picks the city pack from the tile id (`atlanta/m1-five-points` → `data/cities/atlanta/`).
 
 ## Engine table: `src/shared/data/police.json` (escalation rules)

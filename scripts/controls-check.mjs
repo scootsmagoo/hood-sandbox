@@ -55,6 +55,7 @@ async function main() {
   else if (args.only === 'guns') failures += await gunSuite();
   else if (args.only === 'police') failures += await policeSuite();
   else if (args.only === 'transit') failures += await transitSuite();
+  else if (args.only === 'airport') failures += await airportSuite();
   else {
   for (const t of transports) failures += await suite(t);
   if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/tile.json'))) failures += await realTile();
@@ -63,6 +64,7 @@ async function main() {
   failures += await policeSuite();
   failures += await mapSuite();
   if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/transit.json'))) failures += await transitSuite();
+  if (existsSync(resolve(root, 'public/tiles/atlanta/airport/aeroway.json'))) failures += await airportSuite();
   }
   await browser.close();
   if (server) await server.close();
@@ -1797,6 +1799,93 @@ async function policeSuite() {
   return fails;
 }
 
+
+/**
+ * Hartsfield-Jackson (`?spawn=airport`, the sim on the main thread): it boots at the Domestic Terminal's curb with the aircraft and
+ * the airfield lights drawn, the player walks in through a door to the ticketing hall with the keyboard (the street label names
+ * the place), and an arriving aircraft lands, rolls out and taxis towards its gate (the sim's flight and the client's drawing of it).
+ */
+async function airportSuite() {
+  console.log('\n=== Hartsfield-Jackson ===');
+  const { page, errors, ctx } = await open('spawn=airport&graphics=low&transport=loopback&traffic=0');
+  const c = makeChecker(page, 'airport');
+  const { check, wait, expect } = c;
+  await wait(4000);
+  await check('boots at the airport', async () => {
+    const r = await page.evaluate(() => ({ city: window.__hood.game.ready.city?.id, ac: window.__hood.airport?.aircraft?.count ?? 0, lights: window.__hood.airport?.lights?.stats.fixed ?? 0, flights: window.__hood.game.transport.host.simulation.aircraft?.flights.length ?? 0 }));
+    expect(r.city === 'atlanta/airport', `city ${r.city}`);
+    expect(r.ac > 50, `${r.ac} aircraft drawn`);
+    expect(r.lights > 5000, `${r.lights} airfield lights`);
+    return `${r.ac} aircraft drawn, ${r.flights} flights planned, ${r.lights} airfield lights`;
+  });
+  await check('walks into the terminal', async () => {
+    const side = await page.evaluate(async () => (await fetch('assets/airport/atl-domestic-terminal.json')).json());
+    const w = side.interior.walk, A = side.anchor;
+    // the door of the ticketing hall nearest the player, and three nodes on into the hall
+    const p0 = await page.evaluate(STATE);
+    const doors = w.doors.filter((d) => w.nodes[d][2] < -60);
+    doors.sort((a, b) => Math.hypot(w.nodes[a][0] + A.x - p0.ped.x, w.nodes[a][2] + A.z - p0.ped.z) - Math.hypot(w.nodes[b][0] + A.x - p0.ped.x, w.nodes[b][2] + A.z - p0.ped.z));
+    const door = doors[0];
+    const path = [door];
+    for (let k = 0; k < 4; k++) {
+      const last = path[path.length - 1];
+      const next = w.edges.filter((e) => e[0] === last || e[1] === last).map((e) => (e[0] === last ? e[1] : e[0])).filter((n) => !path.includes(n)).sort((a, b) => w.nodes[b][2] - w.nodes[a][2])[0];
+      if (next == null) break;
+      path.push(next);
+    }
+    const P = (i) => ({ x: w.nodes[i][0] + A.x, z: w.nodes[i][2] + A.z });
+    await page.evaluate(([x, z]) => {
+      const S = window.__hood.game.transport.host.simulation;
+      const ped = S.registry.get(S.playerPedId);
+      ped.controller.teleport(x, S.groundAt(x, z) + 0.2, z);
+    }, [P(door).x, P(door).z]);
+    await wait(1200);
+    for (const n of path.slice(1)) {
+      const r = await walkTo(page, async () => P(n), { tol: 1.2, timeoutMs: 15000 });
+      expect(r.ok, `stopped ${r.dist.toFixed(1)} m short of walk node ${n}`);
+    }
+    const end = await page.evaluate(STATE);
+    const inside = end.ped.z - A.z;
+    expect(inside > -76, `still at the facade (z ${inside.toFixed(1)} from the terminal's centre)`);
+    await wait(2500);
+    const label = await page.evaluate(() => document.querySelector('.hud-street')?.textContent ?? '');
+    return `in the hall at z ${inside.toFixed(1)}; the label says "${label.trim()}"`;
+  });
+  await check('an aircraft lands and taxis towards its gate', async () => {
+    const pick = await page.evaluate(() => {
+      const S = window.__hood.game.transport.host.simulation;
+      const now = S.tick * S.dt;
+      const f = S.aircraft.flights.filter((x) => x.plan.kind === 'arrival' && now >= x.t0 && x.t0 + x.plan.tRunway > now + 3 && x.t0 + x.plan.tRunway < now + 80)[0]
+        ?? S.aircraft.flights.filter((x) => x.plan.kind === 'arrival' && x.t0 + x.plan.tRunway > now + 3).sort((a, b) => a.t0 + a.plan.tRunway - b.t0 - b.plan.tRunway)[0];
+      return f ? { id: f.id, wait: f.t0 + f.plan.tRunway - now, stand: S.aircraft.data.stands[f.plan.stand].ref } : null;
+    });
+    expect(pick, 'no arrival planned');
+    const seen = new Set();
+    let drawnMoving = 0;
+    const t0 = Date.now();
+    while (Date.now() - t0 < (pick.wait + 70) * 1000) {
+      const r = await page.evaluate((id) => {
+        const S = window.__hood.game.transport.host.simulation;
+        const f = S.aircraft.flights.find((x) => x.id === id);
+        return f ? { phase: f.state.phase, moving: window.__hood.airport.aircraft.stats.moving } : null;
+      }, pick.id);
+      if (!r) break;
+      seen.add(r.phase);
+      drawnMoving = Math.max(drawnMoving, r.moving);
+      if (seen.has(3)) break;
+      await wait(1000);
+    }
+    expect(seen.has(2) && seen.has(3), `phases seen ${[...seen].join(',')}`);
+    expect(drawnMoving > 0, 'no moving aircraft drawn');
+    return `flight ${pick.id} landed (phases ${[...seen].join(' > ')}) and is taxiing to ${pick.stand}`;
+  });
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails();
+}
+
 await main();
 
 // ------------------------------------------------------------------------------------------------
@@ -2365,7 +2454,7 @@ async function transitSuite() {
     // there: the doors open
     let at = null;
     for (let i = 0; i < 80 && (!at || at === 'Five Points'); i++) {
-      at = await sim((S, id) => { const tr = S.transit.byId.get(id); if (!tr || (tr.phase !== 'open' && tr.phase !== 'opening') || tr.doors < 0.8) return null; return S.transit.data.stations[S.transit.data.routes[tr.route].stops[tr.stop].station].name; }, trainId);
+      at = await sim((S, id) => { const tr = S.transit.byId.get(id); if (!tr || (tr.phase !== 'open' && tr.phase !== 'opening') || tr.doors < 0.8) return null; return S.transit.data.stations[S.transit.data.routes[tr.route].stops[tr.stop].station].displayName; }, trainId);
       if (!at || at === 'Five Points') await wait(150);
     }
     expect(at && at !== 'Five Points', `at ${at}`);

@@ -29,6 +29,9 @@
     "audit:ground": "node scripts/ground-audit.mjs",
     "bake:m2": "cd tools/pipeline && npm run bake:m2 --",
     "prefetch:m2": "cd tools/pipeline && npm run prefetch:m2 --",
+    "prefetch:airport": "cd tools/pipeline && npm run prefetch:m2 -- --grid airport --merged",
+    "bake:airport": "cd tools/pipeline && npm run bake:m2 -- --grid airport",
+    "shots:airport": "node scripts/airport-shots.mjs",
     "shots:stream": "node scripts/stream-shots.mjs",
     "shots:map": "node scripts/map-shots.mjs",
     "perf:nav": "node scripts/nav-cost.mjs",
@@ -39,6 +42,7 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.5.1",
     "@gltf-transform/core": "^4.5.1",
     "@gltf-transform/extensions": "^4.5.1",
     "@gltf-transform/functions": "^4.5.1",

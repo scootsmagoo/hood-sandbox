@@ -49,7 +49,7 @@
       "queryMarginM": 160,
       "out": "public/tiles/atlanta/airport",
       "aeroway": { "icao": "KATL", "box": { "south": 33.6, "west": -84.475, "north": 33.67, "east": -84.395 } },
-      "spawn": { "x": -5300, "z": 12584 },
+      "spawn": { "x": -5080, "z": 12503 },
       "regions": [
         { "id": "airfield", "name": "Hartsfield-Jackson: the five runways, the Domestic Terminal, Concourses T and A to F, the international terminal, the tower, the cargo ramps and the parking decks, with I-85 and I-285", "cells": [[-6, 10], [-2, 14]] },
         { "id": "rental-car-center", "name": "The rental car center, the Gateway Center and the SkyTrain, Camp Creek Pkwy at I-85", "cells": [[-7, 11], [-7, 13]] }

@@ -115,14 +115,14 @@ export class AirportLayer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const l of this.labels) {
-      if (l.kind === 'parking' || (l.kind === 'runway' && v.scale < 0.12)) continue;
+      // (the buildings' names come from the landmarks the map labels itself: only the runways here)
+      if (l.kind !== 'runway' || v.scale < 0.12) continue;
       v.toScreen(l.x, l.z, this.a);
-      const big = l.kind === 'terminal' || l.kind === 'runway';
-      ctx.font = `${big ? 600 : 500} ${big ? 12 : 11}px system-ui, sans-serif`;
+      ctx.font = '600 12px system-ui, sans-serif';
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(10, 12, 16, 0.75)';
       ctx.strokeText(l.name, this.a.x, this.a.y);
-      ctx.fillStyle = l.kind === 'runway' ? '#f3f3f3' : '#dfe6f2';
+      ctx.fillStyle = '#f3f3f3';
       ctx.fillText(l.name, this.a.x, this.a.y);
     }
     ctx.restore();

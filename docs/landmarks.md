@@ -28,6 +28,7 @@ Each landmark:
 | `opened` | Year opened, or `null` when not confirmed. |
 | `sources` | Wikipedia and OSM links. |
 | `anchors` | Trails only: an array of anchor points, each with its own `lat`, `lon`, `x`, `z`, `inM1Tile`. |
+| `airport` | The airport's parts only (the Domestic Terminal, the concourses, the tower, the decks, the SkyTrain): the id of the airport they belong to (`hartsfield-jackson-airport`). Their position is the hero's anchor (tools/blender/airport/airport.json); see [airport.md](airport.md). |
 
 ## Brands
 

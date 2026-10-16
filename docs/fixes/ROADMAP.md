@@ -96,6 +96,15 @@ The ground audit says there are no launches on smooth road. These problems are t
 - **Hartsfield-Jackson:** its own tile region, terminals, an interior and AI aircraft.
 - **The M2 bake** (Midtown, Inman Park, Little Five Points, Candler Park, Buckhead, Vinings): waits on the Overpass prefetch, which keeps hitting 502 and 500 errors.
 
+## Tools now on the dev box (owner, 16 Oct)
+
+- **Installed:** ffmpeg, espeak-ng, the gltf-transform CLI, the Piper TTS engine (`~/.local/share/piper-venv`, **no voice yet**), toktx/KTX v4.4.2 (`~/.local/bin`), and **MPFB2 v2.0.18 with the MakeHuman assets** in Blender 5.2.2. MPFB2 works in the GUI; headless use is untested.
+- **Next uses:**
+  - Try MPFB2 headless as a base for more realistic people (CC0 assets).
+  - KTX2 textures for P3 of the graphics plan.
+  - Piper barks once a voice with a confirmed redistributable licence is picked. Avoid ryan-high and lessac; en_US-amy is unconfirmed.
+- **Licences:** log every third-party asset in `assets/LICENSES.md`.
+
 ## Later (owner wish list)
 
 - **Flyable aircraft and helicopters** you can steal (the airport's aircraft entities are designed for it).

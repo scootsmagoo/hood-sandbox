@@ -44,8 +44,8 @@ const VIEWS = {
   'baggage-interior': { time: '14:00', interior: true, eye: [dt.x + 20, Y('atl-domestic-terminal') + 2.6, dt.z - 45], look: [dt.x + 110, Y('atl-domestic-terminal') + 1.0, dt.z - 62], fov: 66 },
   'concourse-interior': { time: '14:00', interior: true, eye: [ct.x + 2, Y('atl-concourse-t') + 2.6, ct.z + 168], look: [ct.x + 30, Y('atl-concourse-t') + 2.2, ct.z + 182], fov: 70 },
   'concourse-corridor': { time: '14:00', interior: true, eye: [ct.x + 4, Y('atl-concourse-t') + 2.4, ct.z + 300], look: [ct.x + 4, Y('atl-concourse-t') + 2.0, ct.z + 120], fov: 66 },
-  landing: { time: '15:30', dynamic: 'landing', fov: 50 },
-  'landing-night': { time: '22:30', dynamic: 'landing', fov: 50 },
+  landing: { time: '15:30', dynamic: 'landing', fov: 12 },
+  'landing-night': { time: '22:30', dynamic: 'landing', fov: 16 },
 };
 
 mkdirSync('.shots', { recursive: true });
@@ -160,7 +160,7 @@ for (const [time, list] of byTime) {
             if (d.phase !== 1) continue;
             const along = -((d.x - thr[0]) * dir[0] + (d.z - thr[2]) * dir[1]);
             const off = Math.abs((d.x - thr[0]) * -dir[1] + (d.z - thr[2]) * dir[0]);
-            if (along > 120 && along < 420 && off < 40) return { seed: d.seed, x: d.x, y: d.y, z: d.z };
+            if (along > 60 && along < 260 && off < 40) return { seed: d.seed, x: d.x, y: d.y, z: d.z };
           }
           return null;
         }, [end.thr, end.dir]);

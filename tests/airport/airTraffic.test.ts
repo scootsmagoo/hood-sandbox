@@ -57,3 +57,19 @@ describe.skipIf(!baked)('airport traffic', () => {
     expect(run()).toBe(run());
   });
 });
+
+describe('aircraft pose', () => {
+  it('the sim rotates an aircraft as the client draws it (yaw, then pitch nose up, then roll)', async () => {
+    const THREE = await import('three');
+    const { quatYPR } = await import('../../src/sim/aircraft/AirTraffic');
+    for (const [y, p, r] of [[0.3, 0.1, 0], [-2.1, 0.2, 0.05], [3, -0.05, -0.3]]) {
+      const q = quatYPR(y, p, r);
+      const t = new THREE.Quaternion().setFromEuler(new THREE.Euler(-p, y, r, 'YXZ'));
+      expect(Math.abs(q.x * t.x + q.y * t.y + q.z * t.z + q.w * t.w)).toBeCloseTo(1, 6);
+      // the nose (+Z) points along (sin yaw, cos yaw) and up by the pitch
+      const nose = new THREE.Vector3(0, 0, 1).applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w));
+      expect(nose.y).toBeCloseTo(Math.sin(p), 5);
+      expect(Math.atan2(nose.x, nose.z)).toBeCloseTo(y > Math.PI ? y - 2 * Math.PI : y, 5);
+    }
+  });
+});

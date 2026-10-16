@@ -121,6 +121,8 @@ Add these to the address after a `?`. Join several with `&`.
 | `?debug` | Show the debug readout from the start |
 | `?debug=collision` | Also draw the wireframes of everything the car and people collide with |
 | `?tiles=tiles/atlanta/m2/` | Load the streamed multi-tile city from the M2 bake. The bake is still in progress, so the files may not be there yet. See [city-tiles.md](contracts/city-tiles.md) |
+| `?spawn=airport` | Start at Hartsfield-Jackson, at the Domestic Terminal's curb (its own grid of tiles: the same as `?tiles=tiles/atlanta/airport/`). Walk in through the north doors to ticketing, the Atrium, security and Concourse T; aircraft land, taxi, park, push back and take off. See [airport.md](airport.md) |
+| `?aircraft=0` | Leave the airport's aircraft out (the sim and the drawing) |
 | `?landmarks=off` | Hide the hero landmark models |
 | `?peds=box` | Draw people as plain boxes, not models |
 | `?cars=box` | Draw cars as plain boxes, not models |

@@ -296,6 +296,27 @@ Every landmark of the pack that is in the tile (or whose model reaches into it) 
 
 **The model** (`<id>.glb`, glTF binary, meshopt-compressed, float attributes for the facade data): groups `lod0`, `lod1` ... (each with one mesh per material, `lod<N>_<material>`), one visible at a time by the camera's distance (`from`, metres, before the tier's `lodScale`); a big LOD0 is 2k to 40k triangles, the far one a few hundred. Materials, by name, are the game's: `bld_wall` and `bld_glass` carry `TEXCOORD_0`, `_WALL`, `_BLD`, `_BID` exactly as the tile's walls do (see "Mesh attributes"), so the look's window shader lights and dirties them; `bld_roof`; and `lm_stone`, `lm_flood` (floodlit at night), `lm_lit` (lit from within), `lm_metal`, `lm_gold`, `lm_glass`, `lm_glow` (emissive at night), `lm_dark`, `lm_water` (animated jets: `COLOR_0` is data, not albedo). `COLOR_0` is the albedo and its alpha the baked occlusion. No texture, no brand mark or lettering. The client places each model at `(x, hero.y, z)` turned by `yaw` and loads `?v=<hash>` from `src/client/render/landmarkAssets.manifest.json` (the hash of the file, so a rebuilt model is not served from the year-long cache). A model that fails to load leaves a hole where its building was; the game goes on. **A hero that spans tiles** (Mercedes-Benz Stadium stands 24 m past the west edge of this one) is listed by every tile it touches, each tile with its own clipped hull, and the client draws it once per id; a hero whose footprint lies wholly past a tile's edge is not in that tile's file (it would hang in the void there); its generic building is suppressed only in the tiles whose footprints it replaces (a building whose centre is past a tile's edge is not in that tile anyway).
 
+**Airport heroes** (`public/assets/airport/<id>.json`, built by `tools/blender/airport/`, read by the bake when the tile's grid
+has an airport; city-tiles.md section 16). Their sidecars add:
+
+| Field | What |
+|---|---|
+| `elevation` | metres above sea level of the model's y = 0. The datum is then this (`elevation - baseElevation`), the same in every tile, instead of the lowest ground; the Domestic Terminal and Concourse T share one, as do Concourse F and the international terminal |
+| `flatten` | `[{ ring, margin }]`, model frame: the bake sets the ground inside each ring to the datum and blends back over `margin` m, before the roads are designed |
+| `interior` | a walk-in hero (the Domestic Terminal, Concourse T), model frame, y above the floor: `walk { nodes [[x, y, z]], edges [[a, b, width]], doors [node] }` (merged into `paths.json`, cut at the tile's edges; a door is joined by a `link` edge to the nearest node of another network within 30 m in a clear line), `scenarios [{type, x, y, z, yaw, cap}]` (into `scenarios.json`; type `seat` sits on a seat the model draws: no bench is drawn or made solid), `places [{name, x, z, r}]` (into `landmarks.json` as entries of `kind: "place"`, which the street label prefers inside their radius), `zones [{ring, ceiling}]` (on the hero's entry as world rings) |
+| `hooks` | `transitStation { x, z, yaw, length, width, floorY }`: the room the Domestic Terminal leaves open at its west end for the MARTA platform (the rail layer builds it) |
+
+A walk-in hero's hull is its walls, counters, carousels and posts as thin prisms: none is dropped for being small (0.2 m² and up),
+its cut-out takes every generic building that reaches into it (3% of the building's footprint), and an airport hero's hull is cut by
+the lanes like any building (a vestibule or a canopy column a curb lane runs through). Models use the interior materials
+`lm_interior` (lit from within), `lm_floor`, `lm_window` (see-through, both sides) and `lm_screen` (unlit, emissive).
+
+**The airfield** (roads.glb, a tile of a grid with an airport): nodes of kind `airfield` (material `road_airfield`: runways,
+taxiways, aprons and the runways' asphalt shoulders, one non-overlapping set of polygons per tile, 3-6 cm over the ground; over a cut
+a deck with an underside in `road_concrete` and its slab in `collision.bin` after the buildings) and `aeromarkings` (material
+`road_aeromark`, white and yellow vertex colours, 3.5 cm over the pavement; never hidden by distance). The client gives
+`road_airfield` a weaker polygon offset than the roads (they win where a road crosses an apron) and `road_aeromark` one between.
+
 ## Rules
 
 - The sim worker reads `tile.json`, `height.bin` and `collision.bin`, and `roads.json` when `tile.json` names one (optional: without it no cars are parked at the curb). It also reads `junctions.json`, `paths.json` and `scenarios.json` when named (optional: without `paths.json` there are no ambient pedestrians). It never parses glTF and never imports three.js. `props.json` is read by both: the client draws it (trees, lamps, furniture), the sim makes the poles and trunks solid (`loadBakedTile` reads it into `TileData.anchors` with `parseProps`).
@@ -375,7 +396,7 @@ Places where a pedestrian stands about doing something, so the sim can spawn peo
   "stats": { "total": 2025, "byType": { "bench": 44, ... }, "osm": 365, "synth": 1660, "poiData": true } }
 ```
 
-- `type`: `bench` (sit; the client draws a bench there), `busstop` (wait; the client draws a stop), `atm` (one person at the machine, facing the building), `shopfront` (browse a window; a pair chats), `eatery` (wait or chat at a restaurant, cafe or bar), `lawn` (sit or chat in a park, away from the paths), `plaza` (chat, or photograph), `corner` (wait at the kerb of a signalised crossing, on the phone or chatting).
+- `type`: `bench` (sit; the client draws a bench there), `busstop` (wait; the client draws a stop), `atm` (one person at the machine, facing the building), `shopfront` (browse a window; a pair chats), `eatery` (wait or chat at a restaurant, cafe or bar), `lawn` (sit or chat in a park, away from the paths), `plaza` (chat, or photograph), `corner` (wait at the kerb of a signalised crossing, on the phone or chatting), `seat` (sit on a seat a model draws: an airport holdroom's; nothing is drawn or made solid for it).
 - `yaw` is the way people face, as a ped's yaw: forward is `(sin yaw, cos yaw)` in `(x, z)`. `cap` is how many people use it at once. `src` is `osm` (from the map) or `synth`.
 - Points on a sidewalk are on the walk network (snapped to it), clear of footprints by 0.4 m. POIs inside a building are moved out to the nearest sidewalk and face the building.
 

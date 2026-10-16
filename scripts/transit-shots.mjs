@@ -163,7 +163,7 @@ if (want('platform') || want('inside') || want('window') || want('chase')) {
   if (want('window')) {
     await page.evaluate(() => { const c = window.__hood.game.transitCamera; c.mode = 'window'; });
     await page.keyboard.down('ArrowRight');
-    await wait(500);
+    await wait(1100);
     await page.keyboard.up('ArrowRight');
     await wait(800);
     await shot('window');
@@ -178,7 +178,7 @@ if (want('platform') || want('inside') || want('window') || want('chase')) {
 
 if (want('minimap')) {
   await page.evaluate(() => { const c = window.__hood.game.transitCamera; if (c) c.mode = 'window'; });
-  await sim((S, i) => { const st = S.transit.data.stations[i]; const p = S.registry.get(S.playerPedId); if (p.ride) return; const e = st.entrances[1] ?? st.entrances[0]; const x = e.x - Math.sin(e.yaw) * 6, z = e.z - Math.cos(e.yaw) * 6; p.controller.teleport(x, S.groundAt(x, z) + 0.2, z); }, fp);
+  await sim((S, i) => { const st = S.transit.data.stations[i]; const p = S.registry.get(S.playerPedId); if (p.ride) { p.ride = null; p.controller.setEnabled(true); } const e = st.entrances[1] ?? st.entrances[0]; const x = e.x - Math.sin(e.yaw) * 6, z = e.z - Math.cos(e.yaw) * 6; p.controller.teleport(x, S.groundAt(x, z) + 0.2, z); }, fp);
   await wait(2500);
   await page.screenshot({ path: resolve(root, '.shots/transit-minimap.png'), clip: { x: 0, y: Hh - 300, width: 380, height: 300 } });
   console.log('shot .shots/transit-minimap.png');

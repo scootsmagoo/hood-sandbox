@@ -201,7 +201,10 @@ function makeMaterial(name: string, game: Game): THREE.Material {
       const m = new THREE.MeshStandardMaterial({ ...base, roughness: floor ? 0.32 : 0.78, metalness: 0 });
       m.customProgramCacheKey = () => `${LIFT}-${name}`;
       m.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * ${floor ? '0.2' : '0.26'} * vec3(1.0, 0.97, 0.9);`);
+        // (the halls' pale finishes are toned down a little: under a glass roof the sky alone lights them well)
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <color_fragment>', `#include <color_fragment>\n  diffuseColor.rgb *= ${floor ? '0.72' : '0.8'};`)
+          .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * ${floor ? '0.1' : '0.14'} * vec3(1.0, 0.96, 0.88);`);
       };
       return m;
     }

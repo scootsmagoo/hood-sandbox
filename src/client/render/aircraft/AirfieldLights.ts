@@ -14,7 +14,7 @@ import raw from '../../../shared/data/aircraft.json';
 import type { Game, System } from '../../Game';
 import { nightFactor } from '../timeOfDay';
 import type { AircraftViews } from './AircraftViews';
-import { CLASS_NAMES } from './AircraftViews';
+import { CLASS_NAMES, FAR_SHARE } from './AircraftViews';
 
 const TYPES = raw.types as unknown as Record<string, { lights: Record<string, number[]> }>;
 
@@ -167,14 +167,24 @@ export class AirfieldLights implements System {
         const d = av.at(k);
         const L = TYPES[CLASS_NAMES[d.cls]]?.lights;
         if (!L) continue;
-        const far = Math.hypot(cam.x - d.x, cam.z - d.z) > 3000;
+        const dist = Math.hypot(cam.x - d.x, cam.y - d.y, cam.z - d.z);
+        const far = dist > 3000;
+        const reach = this.game.camera.far * FAR_SHARE;
+        const pull = dist > reach ? reach / dist : 1;
         const cy = Math.cos(d.yaw), sy = Math.sin(d.yaw), cp = Math.cos(d.pitch), sp = Math.sin(d.pitch);
         const put = (p: number[], r: number, g: number, b: number, size: number, flash: number) => {
           // model (x left, y up, z forward) to world: pitch about x (nose up), then yaw
           const y1 = p[1] * cp + p[2] * sp, z1 = -p[1] * sp + p[2] * cp;
-          const x = d.x + p[0] * cy + z1 * sy, z = d.z - p[0] * sy + z1 * cy;
+          let x = d.x + p[0] * cy + z1 * sy, y = d.y + y1, z = d.z - p[0] * sy + z1 * cy;
+          // beyond the far plane: nearer along the line of sight (the shader sizes it by the distance it is drawn at, so it is a
+          // little bigger than it would be: a light far out over the approach reads)
+          if (pull < 1) {
+            x = cam.x + (x - cam.x) * pull;
+            y = cam.y + (y - cam.y) * pull;
+            z = cam.z + (z - cam.z) * pull;
+          }
           this.acPos[n * 3] = x;
-          this.acPos[n * 3 + 1] = d.y + y1;
+          this.acPos[n * 3 + 1] = y;
           this.acPos[n * 3 + 2] = z;
           this.acCol[n * 3] = r;
           this.acCol[n * 3 + 1] = g;

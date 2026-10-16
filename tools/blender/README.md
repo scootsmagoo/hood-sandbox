@@ -290,3 +290,18 @@ fare_gate, canopy, tunnel_bay, bin): `column`, `bench`, `sign_name`, `screen`, `
 `station-kit.json`). Materials: `tr_steel`, `tr_dark`, `tr_glass`, `tr_interior`, `tr_light`, `tr_concrete`, `tr_tile`,
 `tr_signface` (blank sign faces), `tr_screen` (the next-train display), `tr_lightface` (lamp and signal lenses, colour in COLOR_0).
 Budgets: canopy 2k / 500, tunnel_bay 600, the rest 800; 400 KB. The fare gate's cabinet is the sim's 0.26 x 0.85 x 1.6 collider.
+
+## The airport (`airport/`)
+
+`npm run assets` also builds Hartsfield-Jackson into `public/assets/airport/` (the `"airport"` list of `assets.json`, kind `hero` or
+`aircraft`/`ground`; manifest `src/client/render/airportAssets.manifest.json`). [docs/airport.md](../../docs/airport.md) says what is there.
+
+| Module | What |
+|---|---|
+| `footprints.ts`, `airport.json` | `cd tools/pipeline && npx tsx ../blender/airport/footprints.ts`: the heroes' outlines, anchors and floor elevations, every gate's wall point, jet bridge root, stand, parked yaw, size class and jet bridge tip (the L1 door of that class parked there, from `src/shared/data/aircraft.json`), the SkyTrain's guideway with the ground under it, the rail station. Committed; re-run when the pipeline's airport cache changes. |
+| `apt.py` | The shared kit: `hero`, `gates`, `report` (the landmark sidecar plus `elevation`, `flatten`, `interior`, `hooks`; docs/contracts/m1-tile-format.md, "Airport heroes"), hull helpers, `jet_bridge`. |
+| `concourse.py`, `terminal_intl.py`, `tower.py`, `decks.py`, `skytrain.py` | Concourses A to F, the international terminal, Atlanta Tower, the parking decks and the Rental Car Center, the SkyTrain. |
+| `domestic.py`, `concourse_t.py`, `interior.py` | The two walk-in heroes and their interiors (hull, walk network, scenario points, places, zones). |
+| `aircraft.py`, `ac_kit.py`, `ground.py` | The airliners (`ac-narrowbody`, `ac-widebody`, `ac-regional`: one parametric builder over `aircraft.json`) and the airside vehicles (`ac-ground`: tug, baggage tractor and cart, belt loader). Livery regions in the paint's COLOR_0 red (k/7: crown, belly, fin, engines, stripe, accent). |
+| `verifyHeroes.ts`, `verifyAircraft.ts` | The checks of `tests/airportHeroes.test.ts` and `tests/airportAircraft.test.ts`. |
+
