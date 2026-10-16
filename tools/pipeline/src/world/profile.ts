@@ -34,7 +34,7 @@ export interface ProfileWay {
    * closing and never make deck spans of their own. Designed with the ground roads in one solve, a deck meets the roads it
    * lands on and forks from at their height, with the same grade and vertical-curve limits as they have.
    */
-  deck?: { target: number[]; targetWeight?: number };
+  deck?: { target: number[]; targetWeight?: number; weights?: number[] };
 }
 
 /** The deck node must stand at least `gap` above the lower node (or above a fixed height): a road, a railway or a path under a deck. */
@@ -251,7 +251,7 @@ export function solveProfiles(ways: ProfileWay[], user: Partial<ProfileOptions> 
     wayNodes[wi].forEach((k, i) => {
       if (!deckOnly[k]) return;
       target[k] = w.deck!.target[i];
-      weight[k] = w.deck!.targetWeight ?? DECK_TARGET_WEIGHT;
+      weight[k] = w.deck!.weights?.[i] ?? w.deck!.targetWeight ?? DECK_TARGET_WEIGHT;
     });
   });
   if (o.wanted) {

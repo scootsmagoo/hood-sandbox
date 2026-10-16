@@ -45,6 +45,15 @@ describe.skipIf(!have)('the GPS on Downtown Atlanta', () => {
     for (let i = 1; i < r.count; i++) expect(Math.hypot(r.xs[i] - r.xs[i - 1], r.zs[i] - r.zs[i - 1])).toBeLessThan(260);
   });
 
+  it('finds a route from a deck stub over a freeway (Capitol Square SW over I-20), whatever way the car faces', () => {
+    // the nearest lanes there are the freeway's under the deck, which only run off the map: the route starts on one that leads on
+    for (const h of [{ x: 1, z: 0 }, { x: 0, z: 1 }, { x: -1, z: 0 }, { x: 0, z: -1 }]) {
+      const plan = planDrive(net, { x: 227, z: 739, heading: h }, { x: 600, z: -735 });
+      if ('error' in plan) throw new Error(plan.error);
+      expect(plan.search.step(100000)).toBe('found');
+    }
+  });
+
   it('a waypoint on a freeway nothing in the tile leads onto is reached by the nearest street', () => {
     const core = new NavCore();
     core.roads.setTile('m1', roads);

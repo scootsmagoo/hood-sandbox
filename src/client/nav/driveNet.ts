@@ -192,6 +192,9 @@ export class DriveNet {
   vmax = 10;
   /** 1 for the lanes a car can be driven to from the largest strongly connected part of the net (a goal elsewhere may be a parking lot nobody can reach). */
   reach = new Uint8Array(0);
+  /** 1 for the lanes from which a car can be driven into the largest strongly connected part: a start the route can go on from. A
+   * freeway under a deck stub that only runs off the map is not one. */
+  leads = new Uint8Array(0);
   /** Edges in the largest strongly connected component. */
   mainSize = 0;
   /** Seams joined, and out-ports with no partner although the neighbour is loaded. */
@@ -430,6 +433,24 @@ export class DriveNet {
           this.reach[w] = 1;
           queue[qt++] = w;
         }
+      }
+    }
+    // and everything that leads into it: a backward flood
+    this.leads = new Uint8Array(n);
+    const prevOff = new Int32Array(n + 1);
+    for (let k = 0; k < this.nextIdx.length; k++) prevOff[this.nextIdx[k] + 1]++;
+    for (let e = 0; e < n; e++) prevOff[e + 1] += prevOff[e];
+    const prevIdx = new Int32Array(this.nextIdx.length);
+    const fill = prevOff.slice(0, n);
+    for (let e = 0; e < n; e++) for (let k = this.nextOff[e]; k < this.nextOff[e + 1]; k++) prevIdx[fill[this.nextIdx[k]]++] = e;
+    qh = 0;
+    qt = 0;
+    for (let e = 0; e < n; e++) if (comp[e] === big) { this.leads[e] = 1; queue[qt++] = e; }
+    while (qh < qt) {
+      const e = queue[qh++];
+      for (let k = prevOff[e]; k < prevOff[e + 1]; k++) {
+        const w = prevIdx[k];
+        if (!this.leads[w]) { this.leads[w] = 1; queue[qt++] = w; }
       }
     }
   }

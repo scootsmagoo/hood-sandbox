@@ -1,4 +1,4 @@
-import { checkDeckWidths } from './world/deckWidths.js';
+import { checkDeckWidths, checkLaneBarriers } from './world/deckWidths.js';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -196,6 +196,13 @@ check(jn.junctions.filter((j) => j.control === 'signals').every((j) => j.legs.so
   const dw = checkDeckWidths(roads as unknown as Parameters<typeof checkDeckWidths>[0], lanes.edges as unknown as Parameters<typeof checkDeckWidths>[1]);
   console.log(`     decks: ${dw.decks} deck pieces, ${dw.points} lane points on them; ${dw.lanesPastBarrier} past a barrier, ${dw.decksTooWide} decks more than 2.5 m a side wider than their lanes (a motorway shoulder is 1.5 to 2 m)${dw.worst.length ? `; worst ${dw.worst.slice(0, 5).map((w) => `${w.id} (${w.x.toFixed(0)}, ${w.z.toFixed(0)}) ${w.what} by ${w.by.toFixed(2)} m`).join(', ')}` : ''}`);
   check(dw.lanesPastBarrier === 0 && dw.decksTooWide === 0, 'every lane on a deck is clear of its barriers, and no deck is far wider than its lanes');
+  const barriers = (JSON.parse(readFileSync(path.join(dir, tile.roads), 'utf8')).barriers ?? []) as number[][];
+  const bb = tile.bounds as { minX: number; minZ: number; maxX: number; maxZ: number };
+  const nearEdge = (x: number, z: number) => x - bb.minX < 40 || bb.maxX - x < 40 || z - bb.minZ < 40 || bb.maxZ - z < 40;
+  const lb = checkLaneBarriers(lanes.edges as unknown as Parameters<typeof checkLaneBarriers>[0], barriers, conn.comp, conn.largest, nearEdge);
+  console.log(`     barriers: ${barriers.length} runs; ${lb.crossings} lanes or turns through one, ${lb.blockedEnds} lanes ending against one; ${lb.deckLanes} deck lanes, ${lb.strandedDeckLanes} off the main network${lb.worst.length ? `; ${lb.worst.slice(0, 6).map((w) => `${w.what} at (${w.x.toFixed(0)}, ${w.z.toFixed(0)}) edge ${w.edge}`).join(', ')}` : ''}`);
+  check(lb.crossings === 0 && lb.blockedEnds === 0, 'no lane or turn runs through a deck barrier or ends against one');
+  check(lb.strandedDeckLanes === 0, 'every lane on a deck is on the main lane network (a deck can be driven off)');
 }
 
 // mesh attributes (meshFormat 2 and 3) and the anchors file

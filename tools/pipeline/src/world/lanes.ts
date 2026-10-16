@@ -408,6 +408,12 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
 
   const nodes: JNode[] = [];
   let skippedLegs = 0;
+  const atBounds = (road: Road, end: 0 | 1) => {
+    const b = opts.bounds;
+    if (!b) return false;
+    const p = road.r.points[end === 0 ? 0 : road.r.points.length - 1];
+    return Math.abs(p[0] - b.minX) < 0.01 || Math.abs(p[0] - b.maxX) < 0.01 || Math.abs(p[2] - b.minZ) < 0.01 || Math.abs(p[2] - b.maxZ) < 0.01;
+  };
 
   const addCut = (road: Road, s: number, node: JNode): Cut => {
     let c = road.cuts.find((k) => k.node === node && Math.abs(k.s - s) < 1.5);
@@ -626,7 +632,9 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
       }
       sa += ta;
       sb -= tb;
-      if (sb - sa < 0.5) continue;
+      // (a piece that ends on a seam is kept however short: its lanes meet the neighbour's there)
+      const onSeam = (!a && atBounds(road, 0)) || (!b && atBounds(road, 1));
+      if (sb - sa < (onSeam ? 0.05 : 0.5)) continue;
       const st: Stretch = { road, a, b, sa, sb, fwd: [], bwd: [] };
       stretches.push(st);
       if (a) startsAt.set(a, st);
@@ -914,7 +922,7 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
     largestComponent: 0,
     largestComponentStreets: 0,
   };
-  if (opts.bounds) snapToBounds(edges, opts.bounds);
+  if (opts.bounds) snapToBounds(edges, opts.bounds, roadsIn);
   const file: LanesFile = { format: 'hood-lanes', version: 1, edges, junctions: records, stats };
   const conn = connectivity(file);
   stats.largestComponent = round(conn.share, 4);
@@ -1052,19 +1060,41 @@ export function connectivity(file: Pick<LanesFile, 'edges'>): { comp: Int32Array
   return { comp, largest, share: total > 0 ? (sizes[largest] ?? 0) / total : 0, streetShare: streets > 0 ? streetsIn / streets : 0, sizes };
 }
 
-/** Puts the ends of lanes (not connectors) that are within 0.3 m of a bounds line on it, along the lane (see `LaneOptions.bounds`). */
-function snapToBounds(edges: Edge[], b: { minX: number; minZ: number; maxX: number; maxZ: number }) {
+/**
+ * Puts the ends of lanes (not connectors) on a bounds line that their road ends on, along the lane, when they are within `SEAM_SNAP`
+ * m of it (see `LaneOptions.bounds`): a lane offset from a centreline that crosses the seam at an angle ends short of the line or
+ * past it by its offset times the angle's tangent (0.3 m on a two-lane street at 10 degrees, metres on a wide one).
+ */
+const SEAM_SNAP = 6;
+function snapToBounds(edges: Edge[], b: { minX: number; minZ: number; maxX: number; maxZ: number }, roads: RoadInput[]) {
+  // which bounds lines each road (by id) has a piece ending on
+  const lines = new Map<string, Set<string>>();
+  for (const r of roads) {
+    for (const q of [r.points[0], r.points[r.points.length - 1]]) {
+      if (!q) continue;
+      const on = (v: number, l: number) => Math.abs(v - l) < 0.01;
+      const set = lines.get(r.id) ?? new Set<string>();
+      if (on(q[0], b.minX)) set.add('x0'); if (on(q[0], b.maxX)) set.add('x1'); if (on(q[2], b.minZ)) set.add('z0'); if (on(q[2], b.maxZ)) set.add('z1');
+      lines.set(r.id, set);
+    }
+  }
   for (const e of edges) {
     if (e.t !== 0 || e.pts.length < 6) continue;
+    const own = lines.get(e.road);
+    if (!own || !own.size) continue;
     const p = e.pts;
     for (const [i, j] of [[0, 3], [p.length - 3, p.length - 6]]) {
       const dx = p[i] - p[j], dy = p[i + 1] - p[j + 1], dz = p[i + 2] - p[j + 2];
-      for (const [axis, line] of [[0, b.minX], [0, b.maxX], [2, b.minZ], [2, b.maxZ]] as const) {
+      for (const [axis, line, name, out] of [[0, b.minX, 'x0', -1], [0, b.maxX, 'x1', 1], [2, b.minZ, 'z0', -1], [2, b.maxZ, 'z1', 1]] as const) {
+        if (!own.has(name)) continue;
         const off = line - p[i + axis];
-        if (Math.abs(off) > 0.3 || Math.abs(off) < 1e-4) continue;
+        if (Math.abs(off) > SEAM_SNAP || Math.abs(off) < 1e-4) continue;
         const d = axis === 0 ? dx : dz;
-        if (Math.abs(d) < 1e-6) continue;
+        // only the end that runs toward the line (the lane's other end is at a junction, or across the piece from it)
+        if (d * out < 1e-3 * Math.hypot(dx, dz) || Math.abs(d) < 1e-6) continue;
         const t = off / d;
+        // a lane wholly past the line (an offset lane of a piece only centimetres long) is left alone, not turned round
+        if (t <= -0.95) continue;
         p[i] = Math.round((p[i] + dx * t) * 100) / 100;
         p[i + 1] = Math.round((p[i + 1] + dy * t) * 100) / 100;
         p[i + 2] = Math.round((p[i + 2] + dz * t) * 100) / 100;

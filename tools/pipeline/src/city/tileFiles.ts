@@ -6,7 +6,7 @@
  *   height.bin      every sample (y; x and z follow from the grid)
  *   heightmapFine   (optional) every sample of its file (y), and its minX/minZ when it has them
  *   collision.bin   every position
- *   roads.json      roads[].points
+ *   roads.json      roads[].points, barriers[] (flat x, y, z triples)
  *   junctions.json  junctions[] x/y/z, polygon [x, z], legs[].at [x, z], legs[].stopLine [x, y, z]; signals[], stops[] x/y/z;
  *                   crossings[].points
  *   lanes.json      edges[].pts (flat x, y, z); junctions[] x/z; junctions[].heads[] x/y/z
@@ -96,6 +96,7 @@ export function mapJsonPoints(t: Pick<TileFiles, 'tile' | 'json'>, p3: P3, p2: P
   if (sp?.vehicle) set3(sp.vehicle);
   const { json } = t;
   for (const r of json['roads.json']?.roads ?? []) for (const p of r.points) arr3(p);
+  for (const b of json['roads.json']?.barriers ?? []) for (let k = 0; k + 2 < b.length; k += 3) arr3(b, k);
   const jn = json['junctions.json'];
   if (jn) {
     for (const j of jn.junctions ?? []) {

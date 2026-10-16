@@ -1,5 +1,6 @@
 import earcut from 'earcut';
 import type { V2 } from '../geo.js';
+import polygonClipping from 'polygon-clipping';
 import { segmentIntersection } from '../geo.js';
 import type { MeshBuilder } from '../mesh/builder.js';
 import type { RoadWay } from './osm.js';
@@ -320,6 +321,7 @@ export function addJunctionMesh(
   ground: (x: number, z: number) => number,
   color: [number, number, number],
   centerLift: number,
+  grid?: { cell: number; origin: V2 },
 ): number {
   const before = target.triangleCount;
   const poly = j.polygon;
@@ -353,6 +355,31 @@ export function addJunctionMesh(
     if (Math.abs(ny) < 1e-6) return; // a sliver with no area
     if (ny > 0) target.tri(i0, i1, i2); else target.tri(i0, i2, i1);
   };
+  // Large junctions: the polygon cut by the heightmap's cells and every piece draped, so the surface follows the ground inside it
+  // (the fan's long triangles cut straight across it, and where the ground rose under them it showed through: grey blobs).
+  if (grid && n >= 3) {
+    const pieces = gridPieces(ring, grid.cell, grid.origin);
+    if (pieces) {
+      // the lift at a point: the boundary's (the legs' own) at the kerb, the centre's within the polygon
+      const liftAt = (x: number, z: number) => {
+        let best = Infinity, lift = centerLift;
+        for (const q of poly) { const d = Math.hypot(q.x - x, q.z - z); if (d < best) { best = d; lift = q.lift; } }
+        return best < 0.05 ? lift : centerLift;
+      };
+      const index = new Map<string, number>();
+      const vert = (x: number, z: number) => {
+        const k = `${Math.round(x * 1000)},${Math.round(z * 1000)}`;
+        let i = index.get(k);
+        if (i === undefined) { i = v(x, z, liftAt(x, z)); index.set(k, i); }
+        return i;
+      };
+      for (const pc of pieces) {
+        const ids = pc.ring.map((q) => vert(q[0], q[1]));
+        for (const [a, b, c] of pc.tris) up(ids[a], ids[b], ids[c]);
+      }
+      return target.triangleCount - before;
+    }
+  }
   if (star) {
     const c = v(j.center[0], j.center[1], centerLift);
     const outer = poly.map((q) => v(q.x, q.z, q.lift));
@@ -402,4 +429,38 @@ export function trimPolyline<T extends { pts: V2[]; vals?: number[] }>(line: T, 
   outPts.push(last.p);
   outVals.push(last.v);
   return { pts: outPts, vals: line.vals ? outVals : undefined, start: s0, end: s1 };
+}
+
+/**
+ * A simple polygon cut by a grid of `cell` m squares anchored at `origin`: each piece's ring and its triangles (indices into the
+ * ring). Null when the clipper fails.
+ */
+function gridPieces(ring: V2[], cell: number, origin: V2): { ring: V2[]; tris: [number, number, number][] }[] | null {
+  const xs = ring.map((q) => q[0]), zs = ring.map((q) => q[1]);
+  const poly: polygonClipping.Polygon = [[...ring.map((q) => [q[0], q[1]] as [number, number]), [ring[0][0], ring[0][1]]]];
+  const out: { ring: V2[]; tris: [number, number, number][] }[] = [];
+  try {
+    for (let cx = Math.floor((Math.min(...xs) - origin[0]) / cell); cx <= Math.floor((Math.max(...xs) - origin[0]) / cell); cx++) {
+      for (let cz = Math.floor((Math.min(...zs) - origin[1]) / cell); cz <= Math.floor((Math.max(...zs) - origin[1]) / cell); cz++) {
+        const x0 = origin[0] + cx * cell, z0 = origin[1] + cz * cell;
+        const sq: polygonClipping.Polygon = [[[x0, z0], [x0 + cell, z0], [x0 + cell, z0 + cell], [x0, z0 + cell], [x0, z0]]];
+        for (const pc of polygonClipping.intersection(sq, poly)) {
+          const flat: number[] = [];
+          const holes: number[] = [];
+          const pts: V2[] = [];
+          pc.forEach((r, k) => {
+            if (k > 0) holes.push(pts.length);
+            for (let m = 0; m + 1 < r.length; m++) { flat.push(r[m][0], r[m][1]); pts.push([r[m][0], r[m][1]]); }
+          });
+          const t = earcut(flat, holes.length ? holes : undefined);
+          const tris: [number, number, number][] = [];
+          for (let m = 0; m + 2 < t.length; m += 3) tris.push([t[m], t[m + 1], t[m + 2]]);
+          out.push({ ring: pts, tris });
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return out;
 }

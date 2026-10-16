@@ -26,16 +26,21 @@ export function planDrive(net: DriveNet, from: Pose, to: { x: number; z: number 
   const heading = from.heading ?? null;
   // the lanes that run the way the car faces, nearest first, the nearest radius that has one first. Only when there is none within
   // 120 m does the search take the lanes that run against it (a one-way, facing the wrong way): their cost below is high
+  // (lanes a route can go on from first: on a deck stub over a freeway, the freeway under it is nearest and only runs off the map)
+  const going = (l: LaneHit[]) => (net.leads.length ? l.filter((c) => net.leads[c.edge]) : l);
   let cands: LaneHit[] = [];
-  for (const r of [14, 40, 120]) {
-    cands = net.near(from.x, from.z, r, heading, 0.15);
-    if (cands.length) break;
-  }
-  if (!cands.length && heading) {
+  for (const pass of [going, (l: LaneHit[]) => l]) {
     for (const r of [14, 40, 120]) {
-      cands = net.near(from.x, from.z, r, heading, -2);
+      cands = pass(net.near(from.x, from.z, r, heading, 0.15));
       if (cands.length) break;
     }
+    if (!cands.length && heading) {
+      for (const r of [14, 40, 120]) {
+        cands = pass(net.near(from.x, from.z, r, heading, -2));
+        if (cands.length) break;
+      }
+    }
+    if (cands.length) break;
   }
   if (!cands.length) return { error: 'no-road' };
   // facing against the lane it is on (a one-way's wrong way): the route starts on a lane that runs the car's way, and says to turn round
