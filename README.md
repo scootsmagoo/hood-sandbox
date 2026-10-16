@@ -8,30 +8,69 @@ The engine is city-agnostic. Everything that makes the game *Atlanta* (the map d
 
 There is no story yet, and that's deliberate. The game is the city: real streets and highways, real neighborhoods, pedestrians and traffic going about their day, side hustles on every corner, and a police response that feels like Atlanta's. A minor offense on a city street won't start a chase. Do the same on I-285 and the State Patrol will PIT you at 110 mph.
 
-> **Status: playable in the browser (16 October 2026).** Play it at https://hood-sandbox.adam-021.workers.dev, or run `npm install && npm run dev` and open http://127.0.0.1:5180. How to play is in [docs/PLAYING.md](docs/PLAYING.md); known problems are in [docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md).
->
-> What works now:
->
-> - One 2 × 2 km tile of Downtown, with real streets and buildings.
-> - The GTA IV look and lighting, with a day and night cycle.
-> - GTA IV car physics and ragdolls.
-> - Cars and people built in Blender.
-> - Traffic, pedestrians and police. The police escalate on a heat ladder.
-> - Weapons and cover.
-> - Trees and street furniture.
-> - 22 hero landmarks, hand-built.
-> - The rail transit ("Peach Rapid Transit"): four lines, five stations on the tile, trains to ride.
-> - A minimap and street names.
-> - Deployed on Cloudflare.
->
-> M1 is partly checked. The owner measured 120 fps on a Mac in Chrome. The iPhone is still to check ([docs/perf.md](docs/perf.md)). Multi-tile streaming is built, and the M2 bake is in progress.
->
-> This README is the plan: what we're building, what it's built with, and the order we'll build it in. The research behind it is in [`docs/research/`](docs/research/). The cast (the protagonist, the crews and the police agencies) is drafted in [`docs/CAST.md`](docs/CAST.md) and waiting for review.
+## Play it
+
+**▶ https://hood-sandbox.adam-021.workers.dev** (no install; click the game to start)
+
+It runs in a desktop browser (Chrome is the fastest), with a gamepad, or on a phone. The controls, the map and every URL option are in **[docs/PLAYING.md](docs/PLAYING.md)**. To run it locally: `npm install && npm run dev`, then open http://127.0.0.1:5180.
+
+> **Status (16 October 2026):** playable. One 2 × 2 km tile of Downtown Atlanta, plus Hartsfield-Jackson as its own area. The owner measured 120 fps on a Mac in Chrome; the iPhone 15 Pro is still to check. Known problems, worst first, are in **[docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md)**.
+
+### What needs testing
+
+Each link opens the live build with the right options. "#n" is the entry in the [fixes roadmap](docs/fixes/ROADMAP.md).
+
+| Area | Link | What to try and look for |
+|---|---|---|
+| **Roads and overpasses** (P1, #1–4) | [Start by a car](https://hood-sandbox.adam-021.workers.dev/?start=car) | Drive the Capitol and I-20 decks, Capitol Square SW and the Connector. Look for humps, blunt slabs, barriers that box you in, and the car launching off the road. |
+| Collision wireframes | [Car + collision view](https://hood-sandbox.adam-021.workers.dev/?start=car&debug=collision) | The same drive, with everything the car hits drawn as wireframe. Useful for screenshots of road bugs. |
+| **Aiming and shooting** (P1, #5) | [Every gun](https://hood-sandbox.adam-021.workers.dev/?weapons=all) | Aim (right-click, ctrl-click, or tap Z) and look up and down. The aim pose bending the character over is a known bug; a fix is in progress. |
+| GPS and the map | [Default start](https://hood-sandbox.adam-021.workers.dev/) | Tab, P or click the radar. Click a street to set a waypoint and follow the magenta route on foot and in a car. Try a one-way street. |
+| Police | [Ready to carjack](https://hood-sandbox.adam-021.workers.dev/?start=jack) | Jack the car (E) in front of witnesses, watch the heat climb, then break line of sight to lose them. |
+| Night look | [11 pm, clock stopped](https://hood-sandbox.adam-021.workers.dev/?time=23:00&timescale=0) | The sodium street lights, headlights, windows and trees at night. |
+| **Rail transit** | [Default start](https://hood-sandbox.adam-021.workers.dev/) | You start at Five Points. Walk down into the station, through the fare gates to a platform, and board at an open door. On the train you can skip to the next station or get off; the on-screen prompts show the keys. |
+| **Hartsfield-Jackson** | [Airport](https://hood-sandbox.adam-021.workers.dev/?spawn=airport) | Walk in through the Domestic Terminal's north doors to ticketing, the Atrium, security and Concourse T. Watch the aircraft land, taxi, push back and take off. See [docs/airport.md](docs/airport.md). |
+| Old renderer | [Classic look](https://hood-sandbox.adam-021.workers.dev/?gfx=classic) | The flat pre-GTA IV renderer, for comparison. |
+| **Phone** | [Default start](https://hood-sandbox.adam-021.workers.dev/) | On an iPhone 15 Pro (the minimum device): the touch controls and the frame rate. The checklist is in [docs/deploy.md](docs/deploy.md). |
+
+The streamed multi-tile city (`?tiles=tiles/atlanta/m2/`) isn't deployed yet: the M2 bake is waiting on the OpenStreetMap download.
+
+### What's there
+
+- **The city:** Downtown around Five Points, baked from OpenStreetMap, Overture buildings and USGS elevation. Real streets with names, sidewalks, junctions, overpasses and the Connector; trees and street furniture.
+- **22 hero landmarks,** hand-built in Blender to look like the real buildings (Mercedes-Benz Stadium, the Georgia State Capitol, the Georgia Aquarium and more). Trademarked names are parodies (the stadium is "Silverline Stadium"); see [docs/landmarks.md](docs/landmarks.md).
+- **The GTA IV look:** its lighting and color, sodium street lights, and a day and night cycle. See [docs/graphics-plan.md](docs/graphics-plan.md).
+- **Driving:** GTA IV-style raycast car physics with body roll, damage and ragdolls. See [docs/physics.md](docs/physics.md).
+- **On foot:** realistic walk, jog and sprint speeds, carjacking, cover, and skinned, animated characters.
+- **Weapons:** hip fire and aim, auto-reload, and a one-button mouse mode (Magic Mouse and trackpads).
+- **The ambient city:** traffic on the lane graph (including freeway traffic), pedestrians, and police who escalate on a heat ladder. One kill is two stars.
+- **The map and GPS:** a minimap, street names, and a full pause map with waypoints and turn-by-turn routes.
+- **Peach Rapid Transit:** four rail lines and five stations on the tile (Five Points, Peachtree Center, Georgia State, Garnett and SEC District), with trains you can ride.
+- **Hartsfield-Jackson:** the terminal, its interior and AI aircraft, in its own area until the metro map joins it to the city.
+- **Under the hood:** a deterministic 60 Hz sim in a worker (Rapier physics), a tile pipeline, multi-tile streaming, and test harnesses for controls, leaks, performance and collision.
+
+### Docs
+
+| Doc | What's in it |
+|---|---|
+| [PLAYING.md](docs/PLAYING.md) | Controls (keyboard, one-button mouse, gamepad, touch), the map, URL options, what to try |
+| [fixes/ROADMAP.md](docs/fixes/ROADMAP.md) | Known problems, worst first, with screenshots |
+| [deploy.md](docs/deploy.md) | Deploying to Cloudflare, and the device checklist |
+| [perf.md](docs/perf.md) | Performance budgets and the harnesses |
+| [physics.md](docs/physics.md) · [graphics-plan.md](docs/graphics-plan.md) | Car physics; the GTA IV look |
+| [landmarks.md](docs/landmarks.md) · [airport.md](docs/airport.md) | The hero landmarks; Hartsfield-Jackson |
+| [ground-audit.md](docs/ground-audit.md) | The road-surface audit and its residuals |
+| [contracts/](docs/contracts/) | Tile formats and data contracts between the pipeline and the game |
+| [CAST.md](docs/CAST.md) | The draft cast: the protagonist, crews and police agencies |
+| [research/](docs/research/) | The research behind this plan |
+
+The rest of this README is the plan: what we're building, what it's built with, and the order we'll build it in.
 
 ---
 
 ## Contents
 
+- [Play it](#play-it) ([What needs testing](#what-needs-testing), [What's there](#whats-there), [Docs](#docs))
 - [Pillars](#pillars)
 - [Decisions so far](#decisions-so-far)
 - [The map](#the-map)
@@ -522,14 +561,18 @@ The account already has **Workers Paid** and **R2 Paid** (both renew on 24 Oct).
 
 ## Roadmap
 
+The milestones are below. The day-to-day list of known problems and fixes, worst first, is **[docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md)**. Right now that means the roads and overpasses (humps, deck barriers, junction surfaces, tile seams) and the aim pose.
+
 | Milestone | Goal | Done when |
 |---|---|---|
 | **M0: Research** | This README and the research notes | ✅ 14 Oct 2026 |
 | **M1: Spike: drive a real block** | The pipeline bakes one 2 × 2 km tile of **Downtown centered on Five Points** (OSM + 3DEP + Overture; it takes in a stretch of the Connector and Centennial Park), with one drivable raycast car, the protagonist on foot, a chase camera, the sim in a worker and a loopback transport | 60 fps on the Mac, runs on the iPhone, controls check passes. **Progress:** the owner measured 120 fps on a Mac in Chrome; the iPhone check is still to do |
 | **M2: Vertical slice: Intown and the river** | **Downtown, Midtown, the Connector, Old Fourth Ward and Inman Park on the way to Little Five Points and Candler Park, Buckhead, and west over the Chattahoochee to Vinings** (via West Paces Ferry and I-75). Streaming tiles, lane-graph traffic with signals, pedestrians with scenario points, carjacking, **driving and gunplay at equal polish** (cover, two or three weapons), heat 1–3 with the city police (and State Patrol on I-75/85), the first two fictional crews and their turf, one side activity (rideshare). **Progress:** multi-tile streaming is built; the M2 bake is in progress | A 10-minute session of "steal a car, shoot your way out, lose them on the Connector" is fun |
-| **M3: The metro** | The compression warp across the whole area, the interstates and hand-built interchanges, Cobb and Gwinnett districts, the airport, Stone Mountain and the lakes, jurisdictions (State Patrol PITs on interstates), time of day and weather | Drive Marietta Square → Downtown → Duluth with no seams |
-| **M4: Sandbox depth** | Weapons and cover, the full dispatch ladder to 6 stars, side-activity backlog, economy, safehouses, garages, car mods, radio, random events | A player has reasons to stay for hours |
+| **M3: The metro** | The compression warp across the whole area, the interstates and hand-built interchanges, Cobb and Gwinnett districts, the airport, Stone Mountain and the lakes, jurisdictions (State Patrol PITs on interstates), time of day and weather. **Progress:** Hartsfield-Jackson is built as its own area (terminal, interior, AI aircraft); the day and night cycle is in | Drive Marietta Square → Downtown → Duluth with no seams |
+| **M4: Sandbox depth** | Weapons and cover, the full dispatch ladder to 6 stars, side-activity backlog, economy, safehouses, garages, car mods, radio, random events. **Progress:** weapons, cover and the heat ladder are in; the rail transit (Peach Rapid Transit) is rideable | A player has reasons to stay for hours |
 | **M5: Multiplayer alpha** | Headless server, accounts, 8–16 player sessions, interest management, server-owned police | Friends can cause trouble together from a link |
+
+After that, from the owner's wish list: flyable aircraft and helicopters you can steal, and voices and dialogue once licence-safe voices are picked.
 
 ---
 
