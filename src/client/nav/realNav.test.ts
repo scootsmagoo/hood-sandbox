@@ -14,12 +14,13 @@ const have = existsSync(`${dir}lanes.json`);
 const bounds = { minX: -1000, minZ: -1000, maxX: 1000, maxZ: 1000 };
 
 describe.skipIf(!have)('the GPS on Downtown Atlanta', () => {
+  // A skipped describe still runs its body to collect tests, so read the tile only when it is there (CI has no baked tiles).
   const rd = (f: string) => JSON.parse(readFileSync(dir + f, 'utf8'));
-  const roads = parseRoads(rd('roads.json'));
-  const lanes = parseLanes(rd('lanes.json'))!;
-  const paths = parsePaths(rd('paths.json'))!;
-  const net = DriveNet.assemble([buildDriveTile('m1', bounds, lanes, roads)]);
-  const walk = WalkNet.assemble([buildWalkTile('m1', bounds, paths)]);
+  const roads = have ? parseRoads(rd('roads.json')) : (undefined as never);
+  const lanes = have ? parseLanes(rd('lanes.json'))! : (undefined as never);
+  const paths = have ? parsePaths(rd('paths.json'))! : (undefined as never);
+  const net = have ? DriveNet.assemble([buildDriveTile('m1', bounds, lanes, roads)]) : (undefined as never);
+  const walk = have ? WalkNet.assemble([buildWalkTile('m1', bounds, paths)]) : (undefined as never);
 
   it('builds the graphs and finds the big connected part', () => {
     expect(net.count).toBeGreaterThan(5000);
