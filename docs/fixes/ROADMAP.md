@@ -57,21 +57,10 @@ The ground audit says there are no launches on smooth road. These problems are t
 - **M2 seam gap:** several northbound lanes in M2 tile `0_0` stop 1–4 m short of the z = 0 seam, so routes north of the Capitol detour 4–5 km. That's a bake fix, not a GPS fix.
 - **Six unmatched M2 lane ports** (ways 631611892, 1040543348, 9245347).
 
-## P1: Shooting animation (owner, 16 Oct)
-
-### 5. The aim pose bends the character over upside down
-
-![aim pose](aim-pose-upside-down.jpg)
-
-- **What:** aiming the pistol on foot (King St) bends Kudzu right over: head down and torso flipped, with the gun pointing up.
-- **Likely cause:** the aim-pitch spine and chest tilt in the skinned characters (`src/client/render/chars/`, the `aim_*` clips plus the pitch bend), with a wrong sign or axis, or a bend applied in the wrong bone space after the hand and finger rework.
-- **Fix direction:** clamp the bend; test aim pitch from -60° to +60° with screenshots; check the pistol, rifle and crouch aims.
-
 ## P2: Gameplay and world
 
-- **GPS:**
-  - Starting the wrong way down a one-way gives a route that keeps going the wrong way.
-  - Walking turns near unnamed service roads show blank street names.
+- **GPS:** walking turns near unnamed service roads show blank street names.
+- **Aim pose** (the upside-down bend is fixed): at +45° and above the pistol arms go almost straight up, and the rifle sits 10–20° low when aiming up. Crouched aim is never played (the sim never sets crouch and aim together).
 - **Big map:** no parks or water yet (needs the tile's land-class mesh), and the hint line can sit over labels.
 - **Georgia State Capitol hero:** the main portico faces **west onto Washington St**. Remove the extra east portico (`landmarks.json` note).
 - **Landmark positions:** 25 still unverified (`landmarks.json` notes). Overpass was overloaded.
@@ -85,7 +74,6 @@ The ground audit says there are no launches on smooth road. These problems are t
 
 ## P2: Harness and performance housekeeping
 
-- **`leaks` vehicle phase:** it flags a one-time +155 objects (the parked car kept as a full model within 20 m). It plateaus and isn't a leak. Allow one full-car step in that phase, as the live phases already do.
 - **`perf-budget`:** budgets are stale after rounds 8–9 (landmarks, trees, people, freeway traffic). Re-baseline on a quiet machine (load under 2) by hand: best of two runs, and no `--write-budget` on noisy p95 values.
 - **The 5-minute soak:** re-run on a quiet machine. The last run was at load 23, so its CPU-per-draw drift isn't meaningful.
 - **Real devices:** the Mac measured 120 fps in Chrome. The iPhone 15 Pro hasn't been checked yet; see the checklist in `docs/deploy.md`.

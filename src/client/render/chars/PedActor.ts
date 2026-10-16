@@ -30,6 +30,14 @@ export function actorLod(dist: number, lodScale: number, current = -1): 0 | 1 | 
 
 const X = new THREE.Vector3(1, 0, 0);
 
+/** The aim bend: the pitch it follows (a camera can look further), the torso's share and limit, the head's share, the neck's limit. */
+export const AIM_PITCH_MAX = THREE.MathUtils.degToRad(75);
+export const TORSO_SHARE = 0.5;
+export const TORSO_MAX = THREE.MathUtils.degToRad(35);
+export const TORSO_MAX_SEATED = THREE.MathUtils.degToRad(20);
+const HEAD_SHARE = 0.75;
+const NECK_MAX = THREE.MathUtils.degToRad(25);
+
 const ragBonesCache = new WeakMap<object, RagBones>();
 
 export class PedActor {
@@ -69,12 +77,14 @@ export class PedActor {
   private owed = 0;
   private readonly overlay = new THREE.Quaternion();
   private readonly axis = new THREE.Vector3();
-  private readonly restInv: THREE.Quaternion[] = [];
+  private readonly figure = new THREE.Quaternion();
+  /** Bones this actor has bent on top of the clips: the pose the mixer gave (`pre`) and what was left after the bend (`post`). */
+  private readonly bent = new Map<number, { pre: THREE.Quaternion; post: THREE.Quaternion }>();
   private readonly mount = new THREE.Quaternion();
   /** Where the gun's origin (the middle of its grip) sits in the hand bone's frame: in the palm's fist, thumb side up. */
   private readonly grip = new THREE.Vector3();
   private readonly gripUp = new THREE.Vector3();
-  private readonly idx: { spine: number; chest: number; hand: number };
+  private readonly idx: { spine: number; chest: number; neck: number; head: number; armL: number; armR: number; hand: number };
   /** Set by the owner: the scale the person is drawn at (height, width). */
   height = 1;
   width = 1;
@@ -109,8 +119,7 @@ export class PedActor {
     let rb = ragBonesCache.get(rig);
     if (!rb) ragBonesCache.set(rig, (rb = new RagBones(rig)));
     this.rag = rb;
-    for (let i = 0; i < rig.names.length; i++) this.restInv.push(new THREE.Quaternion().fromArray(rig.restWorldQuat, i * 4).invert());
-    this.idx = { spine: rig.index.get('spine')!, chest: rig.index.get('chest')!, hand: rig.index.get('hand_R')! };
+    this.idx = { spine: rig.index.get('spine')!, chest: rig.index.get('chest')!, neck: rig.index.get('neck')!, head: rig.index.get('head')!, armL: rig.index.get('upperarm_L')!, armR: rig.index.get('upperarm_R')!, hand: rig.index.get('hand_R')! };
     // the gun's grip frame on the right hand: barrel along the hand, thumb side up
     const rh = new THREE.Quaternion().fromArray(rig.restWorldQuat, this.idx.hand * 4);
     const z = new THREE.Vector3(0, 1, 0).applyQuaternion(rh).normalize();
@@ -153,6 +162,7 @@ export class PedActor {
     }
     this.weights.clear();
     this.rag.reset(this.bones);
+    this.bent.clear();
     this.ragdolled = false;
     // out of the scene, and the bone texture is given back (it is made again on first use)
     this.root.removeFromParent();
@@ -239,13 +249,53 @@ export class PedActor {
     }
   }
 
-  /** Rotates a bone about a figure-frame axis on top of its animated pose. */
+  /**
+   * Rotates a bone about a figure-frame axis on top of its animated pose. The axis is taken into the parent's frame as the
+   * parent stands now (the clip and any bend above it included), so the bend is about the same line in space whatever the clip does.
+   */
   private twist(bone: number, axis: THREE.Vector3, angle: number) {
-    const p = this.assets.rig.parent[bone];
-    this.axis.copy(axis);
-    if (p >= 0) this.axis.applyQuaternion(this.restInv[p]);
+    let b = this.bent.get(bone);
+    if (!b) this.bent.set(bone, (b = { pre: new THREE.Quaternion(), post: new THREE.Quaternion() }));
+    const q = this.bones[bone].quaternion;
+    b.pre.copy(q);
+    this.figure.identity();
+    for (let p = this.assets.rig.parent[bone]; p >= 0; p = this.assets.rig.parent[p]) this.figure.premultiply(this.bones[p].quaternion);
+    this.axis.copy(axis).applyQuaternion(this.figure.invert());
     this.overlay.setFromAxisAngle(this.axis, angle);
-    this.bones[bone].quaternion.premultiply(this.overlay);
+    q.premultiply(this.overlay);
+    b.post.copy(q);
+  }
+
+  /**
+   * Takes last frame's bends off. The mixer writes a track's value only when it changes, and a held aim clip does not change:
+   * the bend would be laid on again every frame and grow until the person is folded in two.
+   */
+  private unbend() {
+    for (const [bone, b] of this.bent) {
+      const q = this.bones[bone].quaternion;
+      if (q.equals(b.post)) q.copy(b.pre);
+    }
+    this.bent.clear();
+  }
+
+  /**
+   * The aim pitch (radians, up positive) as a pose: a share in the torso (spine, then chest, limited to about 35 degrees), the neck
+   * turning the head toward the same line, and the arms taking the rest, so the gun points where the camera does and the body stays upright.
+   */
+  private aim(pitch: number, kick: number, seated: boolean) {
+    const p = Math.max(-AIM_PITCH_MAX, Math.min(AIM_PITCH_MAX, pitch));
+    // in a seat the back is already reclined and there is no room to lean: the arms take more
+    const limit = seated ? TORSO_MAX_SEATED : TORSO_MAX;
+    const torso = Math.max(-limit, Math.min(limit, p * TORSO_SHARE));
+    // a positive angle about +X leans the figure forward: up is the other way
+    this.twist(this.idx.spine, X, -torso * 0.45);
+    this.twist(this.idx.chest, X, -torso * 0.55 - 0.06 * kick);
+    const neck = Math.max(-NECK_MAX, Math.min(NECK_MAX, p * HEAD_SHARE - torso));
+    this.twist(this.idx.neck, X, -neck);
+    // the clips hold the arms level: they take what the torso does not, from the shoulder
+    const arms = p - torso;
+    this.twist(this.idx.armL, X, -arms);
+    this.twist(this.idx.armR, X, -arms);
   }
 
   /**
@@ -266,6 +316,7 @@ export class PedActor {
     if (this.ragdolled) {
       this.ragdolled = false;
       this.rag.reset(this.bones);
+      this.bent.clear();
       this.root.position.set(0, 0, 0);
     }
     if (this.lastMode && this.lastMode !== input.mode && (this.lastMode === 'seated' || input.mode === 'seated')) {
@@ -293,10 +344,9 @@ export class PedActor {
     }
     this.play(dt, plan);
     this.mixer.update(0);
+    this.unbend();
     if (input.extra?.aim !== undefined) {
-      this.twist(this.idx.spine, X, -aimPitch * 0.45);
-      this.twist(this.idx.chest, X, -aimPitch * 0.55);
-      if (kick > 0) this.twist(this.idx.chest, X, -0.06 * kick);
+      this.aim(aimPitch, kick, input.mode === 'seated');
     }
     // the seat takes a little off the figure (shared/doors.ts); easing it keeps the exit from jumping
     this.seatScale += ((input.mode === 'seated' ? SEATED_SCALE : 1) - this.seatScale) * Math.min(1, dt * 12);
