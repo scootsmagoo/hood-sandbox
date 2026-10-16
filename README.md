@@ -24,7 +24,7 @@ Each link opens the live build with the right options. "#n" is the entry in the 
 |---|---|---|
 | **Roads and overpasses** (P1, #1–4) | [Start by a car](https://hood-sandbox.adam-021.workers.dev/?start=car) | Drive the Capitol and I-20 decks, Capitol Square SW and the Connector. Look for humps, blunt slabs, barriers that box you in, and the car launching off the road. |
 | Collision wireframes | [Car + collision view](https://hood-sandbox.adam-021.workers.dev/?start=car&debug=collision) | The same drive, with everything the car hits drawn as wireframe. Useful for screenshots of road bugs. |
-| **Aiming and shooting** (P1, #5) | [Every gun](https://hood-sandbox.adam-021.workers.dev/?weapons=all) | Aim (right-click, ctrl-click, or tap Z) and look up and down. The aim pose bending the character over is a known bug; a fix is in progress. |
+| **Aiming and shooting** | [Every gun](https://hood-sandbox.adam-021.workers.dev/?weapons=all) | Aim (right-click, ctrl-click, or tap Z) and look up and down. The character should stay upright with the gun following the camera (the fold-over bug is fixed in the next deploy). |
 | GPS and the map | [Default start](https://hood-sandbox.adam-021.workers.dev/) | Tab, P or click the radar. Click a street to set a waypoint and follow the magenta route on foot and in a car. Try a one-way street. |
 | Police | [Ready to carjack](https://hood-sandbox.adam-021.workers.dev/?start=jack) | Jack the car (E) in front of witnesses, watch the heat climb, then break line of sight to lose them. |
 | Night look | [11 pm, clock stopped](https://hood-sandbox.adam-021.workers.dev/?time=23:00&timescale=0) | The sodium street lights, headlights, windows and trees at night. |
@@ -561,7 +561,7 @@ The account already has **Workers Paid** and **R2 Paid** (both renew on 24 Oct).
 
 ## Roadmap
 
-The milestones are below. The day-to-day list of known problems and fixes, worst first, is **[docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md)**. Right now that means the roads and overpasses (humps, deck barriers, junction surfaces, tile seams) and the aim pose.
+The milestones are below. The day-to-day list of known problems and fixes, worst first, is **[docs/fixes/ROADMAP.md](docs/fixes/ROADMAP.md)**. Right now that means the roads and overpasses (humps, deck barriers, junction surfaces, tile seams).
 
 | Milestone | Goal | Done when |
 |---|---|---|
