@@ -36,6 +36,24 @@
         { "id": "west-paces", "name": "West Paces Ferry and I-75 to the river", "cells": [[-6, -12], [-3, -10]] },
         { "id": "vinings", "name": "Over the Chattahoochee to Vinings", "cells": [[-8, -13], [-7, -11]] }
       ]
+    },
+    {
+      "id": "airport",
+      "name": "Hartsfield-Jackson Atlanta International Airport and the roads round it",
+      "origin": { "lat": 33.7543, "lon": -84.3898 },
+      "baseElevation": 318.59,
+      "tileSizeM": 1024,
+      "heightmapCellSizeM": 4,
+      "groundMeshStep": 1,
+      "chunkSizeM": 256,
+      "queryMarginM": 160,
+      "out": "public/tiles/atlanta/airport",
+      "aeroway": { "icao": "KATL", "box": { "south": 33.6, "west": -84.475, "north": 33.67, "east": -84.395 } },
+      "spawn": { "x": -5300, "z": 12584 },
+      "regions": [
+        { "id": "airfield", "name": "Hartsfield-Jackson: the five runways, the Domestic Terminal, Concourses T and A to F, the international terminal, the tower, the cargo ramps and the parking decks, with I-85 and I-285", "cells": [[-6, 10], [-2, 14]] },
+        { "id": "rental-car-center", "name": "The rental car center, the Gateway Center and the SkyTrain, Camp Creek Pkwy at I-85", "cells": [[-7, 11], [-7, 13]] }
+      ]
     }
   ],
   "sources": {

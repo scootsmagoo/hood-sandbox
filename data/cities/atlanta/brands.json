@@ -203,6 +203,72 @@
       "parody": "Crestview Atlanta Hotel",
       "kind": "hotel",
       "note": "hotel brand; added with the hero model"
+    },
+    {
+      "real": "Delta Air Lines",
+      "parody": "Peachtree Air Lines",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `peachtree`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "Delta Connection",
+      "parody": "Peachtree Connection",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `peachtree-connection`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "Southwest Airlines",
+      "parody": "Sunbelt Airways",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `sunbelt`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "American Airlines",
+      "parody": "Americano Airlines",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `americano`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "United Airlines",
+      "parody": "Untied Airlines",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `untied`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "Spirit Airlines",
+      "parody": "Ghostly Air",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `ghostly`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "Frontier Airlines",
+      "parody": "Outpost Air",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `outpost`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "British Airways",
+      "parody": "Albion Airways",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `albion`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "KLM",
+      "parody": "Royal Tulip",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `tulip`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "FedEx",
+      "parody": "QuickShip Cargo",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `quickship`). Colours only on the aircraft, no lettering. Parody for owner review."
+    },
+    {
+      "real": "UPS Airlines",
+      "parody": "Brownline Cargo",
+      "kind": "airline",
+      "note": "Airline (Hartsfield-Jackson's aircraft liveries: src/shared/data/aircraft.json `brownline`). Colours only on the aircraft, no lettering. Parody for owner review."
     }
   ]
 }

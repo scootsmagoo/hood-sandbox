@@ -185,6 +185,7 @@ export class NetSystem implements System {
       (input.down('handbrake') ? Button.Handbrake : 0) |
       (input.down('reset') ? Button.Reset : 0) |
       (input.down('melee') ? Button.Melee : 0) |
+      (input.down('skip') || input.pressed('skip') ? Button.Skip : 0) |
       this.gunButtons(input);
     if (buttons === (this.lastSent?.buttons ?? 0) && now - this.lastSendAt < MIN_SEND_GAP) return;
     const axes = new Array<number>(AXIS_COUNT).fill(0);

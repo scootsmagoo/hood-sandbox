@@ -171,6 +171,12 @@ export class Atmosphere implements System {
     }
     this.time += dt;
     if (this.style === 'gta4') (this.dome.material as THREE.ShaderMaterial).uniforms.uTime.value = this.time;
+    // under the ground (a station, a tunnel: lookState.interior, set by the transit layer) the sun and the sky give way
+    const k = lookState.interior;
+    if (k > 0 || this.wasInterior) {
+      this.wasInterior = k > 0;
+      this.applyInterior(k);
+    }
     this.glowTimer -= dt;
     if (this.glowTimer <= 0) {
       this.glowTimer = GLOW_EVERY;
@@ -210,6 +216,26 @@ export class Atmosphere implements System {
       (u.uMoonDir.value as THREE.Vector3).copy(this.moonDir);
       (u.uSunColor.value as THREE.Color).copy(look.sun);
       u.uNight.value = night;
+    }
+  }
+
+  private wasInterior = false;
+  private readonly interiorFog = new THREE.Color(0.028, 0.027, 0.03);
+  private readonly interiorSky = new THREE.Color(1.0, 0.95, 0.88);
+
+  /** Scales the outdoor light toward the stations' lamps: no sun, a neutral fill, a dark fog that closes in. k = 0 is the open air. */
+  private applyInterior(k: number) {
+    const look = this.look;
+    this.sun.intensity = look.sunIntensity * (1 - k);
+    this.hemi.intensity = look.hemiIntensity * (1 - k) + 1.05 * k;
+    this.hemi.color.copy(look.hemiSky).lerp(this.interiorSky, k);
+    this.hemi.groundColor.copy(look.hemiGround).lerp(this.interiorFog, k);
+    this.ambient.intensity = look.ambient * (1 - k) + 0.25 * k;
+    const fog = this.game.scene.fog as THREE.Fog;
+    fog.color.copy(look.fog).lerp(this.interiorFog, k);
+    if (this.style === 'gta4' && this.haze) {
+      const far = Math.min(look.visibility, this.game.tier.far * 0.75);
+      fog.far = far + (220 - far) * k;
     }
   }
 

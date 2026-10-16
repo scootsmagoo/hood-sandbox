@@ -8,7 +8,8 @@
     "kill_ped":         { "severity": 4, "heat": 2, "witnessRadius": 60, "points": 4, "violent": true },
     "assault_officer":  { "severity": 4, "heat": 3, "witnessRadius": 60, "points": 6, "violent": true },
     "discharge":        { "severity": 1, "heat": 1, "witnessRadius": 45, "hearRadius": 130, "points": 1 },
-    "shoot_ped":        { "severity": 4, "heat": 2, "witnessRadius": 55, "hearRadius": 140, "points": 3, "violent": true }
+    "shoot_ped":        { "severity": 4, "heat": 2, "witnessRadius": 55, "hearRadius": 140, "points": 3, "violent": true },
+    "fare_evasion":     { "severity": 1, "heat": 1, "witnessRadius": 22, "points": 1 }
   },
   "rules": {
     "callDelayS": [8, 20],

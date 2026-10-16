@@ -14,7 +14,7 @@ import type { RoadJson } from './roads.js';
  * crossings, park lawns), so the city never depends on how well a neighbourhood is mapped.
  */
 
-export type ScenarioType = 'bench' | 'busstop' | 'atm' | 'shopfront' | 'eatery' | 'lawn' | 'plaza' | 'corner';
+export type ScenarioType = 'bench' | 'busstop' | 'atm' | 'shopfront' | 'eatery' | 'lawn' | 'plaza' | 'corner' | 'seat';
 
 export interface ScenarioPoint {
   id: string;
@@ -48,7 +48,7 @@ export interface ScenarioInput {
   seed?: number;
 }
 
-const CAPACITY: Record<ScenarioType, number> = { bench: 2, busstop: 4, atm: 1, shopfront: 2, eatery: 3, lawn: 4, plaza: 5, corner: 3 };
+const CAPACITY: Record<ScenarioType, number> = { bench: 2, busstop: 4, atm: 1, shopfront: 2, eatery: 3, lawn: 4, plaza: 5, corner: 3, seat: 2 };
 const WALKABLE = new Set(['sidewalk', 'synthetic', 'pedestrian', 'footway']);
 
 function rng(seed: number) {

@@ -56,6 +56,8 @@ export class Input {
   private ctrlClick = false;
   /** Set by the net system each frame: the player is in a car (the pad's triggers are pedals there, so the gun moves to other buttons). */
   inVehicle = false;
+  /** The full-screen map holds the handbrake on, so a car parked to look at it stays where it is. */
+  parkBrake = false;
 
   private held = new Set<string>();
   private pressedCodes = new Set<string>();
@@ -94,6 +96,7 @@ export class Input {
   // ---------------------------------------------------------------- queries
 
   down(action: Action): boolean {
+    if (action === 'handbrake' && this.parkBrake) return true;
     if (!this.enabled && isGameplay(action)) return false;
     if (this.held.has(actionCode(action))) return true;
     for (const c of this.bindings[action] ?? []) if (this.held.has(c)) return true;
@@ -454,7 +457,7 @@ export class Input {
   }
 }
 
-const NON_GAMEPLAY: ReadonlySet<Action> = new Set<Action>(['pause', 'debug', 'help']);
+const NON_GAMEPLAY: ReadonlySet<Action> = new Set<Action>(['pause', 'debug', 'help', 'map']);
 const isGameplay = (action: Action) => !NON_GAMEPLAY.has(action);
 
 function isTypingTarget(t: EventTarget | null) {

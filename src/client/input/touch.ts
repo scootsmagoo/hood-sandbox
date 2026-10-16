@@ -24,6 +24,7 @@ const BUTTONS: TouchButton[] = [
   { label: 'Run', actions: ['sprint'], cls: 'b-run' },
   { label: 'Get in', actions: ['interact'], cls: 'b-use' },
   { label: 'Reset', actions: ['reset'], cls: 'b-reset' },
+  // The map button stands on its own, over the radar's corner (touch.css: .b-map), not in the cluster.
   { label: 'Punch', actions: ['melee'], cls: 'b-melee' },
   // The gun: fire (drag it to turn), aim (a toggle), reload, change weapon, cover.
   { label: 'Fire', actions: ['fire'], cls: 'b-fire', gun: true, mode: 'look' },
@@ -112,6 +113,24 @@ export class TouchControls implements InputSource {
     }
     root.appendChild(gunPad);
     root.appendChild(pad);
+    // The map: a button of its own above the health bars, at the left (the radar is under the move zone, which a tap would start a stick on).
+    const mapBtn = document.createElement('button');
+    mapBtn.type = 'button';
+    mapBtn.className = 'touch-btn b-map';
+    mapBtn.textContent = 'Map';
+    mapBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      mapBtn.setPointerCapture(e.pointerId);
+      input.setDevice('touch');
+      input.holdAction('map', true);
+    });
+    const mapUp = (e: PointerEvent) => {
+      e.preventDefault();
+      input.holdAction('map', false);
+    };
+    mapBtn.addEventListener('pointerup', mapUp);
+    mapBtn.addEventListener('pointercancel', mapUp);
+    root.appendChild(mapBtn);
     parent.appendChild(root);
 
     const move = root.querySelector('.touch-move') as HTMLElement;

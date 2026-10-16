@@ -25,11 +25,14 @@ import { Law } from './law/Law';
 import { GENERIC_LAW, loadLawForTile } from './law/cityPack';
 import { PoliceManager } from './police/PoliceSystem';
 import { Rng } from '../shared/rng';
-import { E, H, HeatPhase, PedFlag, SnapFlag, VehicleFlag, WHEEL_FLOATS, MAX_ENTITIES, SnapshotView } from '../shared/snapshot';
+import { E, H, HeatPhase, PedFlag, PedPose, SnapFlag, VehicleFlag, WHEEL_FLOATS, MAX_ENTITIES, SnapshotView } from '../shared/snapshot';
 import type { TileData } from '../shared/tile';
 import { PedController } from './character/PedController';
 import type { CarjackState } from './carjack';
-import { HelicopterEntity, PedEntity, PlayerSlot, SpikeStripEntity, VehicleEntity, type SimEntity } from './entities';
+import { HelicopterEntity, PedEntity, PlayerSlot, SpikeStripEntity, TrainEntity, VehicleEntity, type SimEntity } from './entities';
+import { Transit } from './transit/Transit';
+import { AirTraffic, writeNoAircraft } from './aircraft/AirTraffic';
+import type { AerowayData } from '../shared/aeroway';
 import { PedBrain, rollPersonality, type Reaction } from './npc/brain';
 import { GROUPS, initRapier } from './physics/rapier';
 import { defaultSystems, type SimSystem } from './systems';
@@ -84,6 +87,11 @@ export interface SimOptions {
   trafficPopulation?: TrafficPopulation;
   /** Start time and pace of the game clock (default Wednesday 14:00, half a game minute per real second). */
   clock?: ClockOptions;
+  /** The tile's trains and stations (`transit.json`; default on when the tile has a transit layer). */
+  transit?: boolean;
+  /** The city's airport (`aeroway.json`): the AI air traffic flies there (src/sim/aircraft). `aircraft: false` leaves it out. */
+  aeroway?: AerowayData | null;
+  aircraft?: boolean;
   /**
    * A streamed city (docs/contracts/city-tiles.md): the streamer, already preloaded round the spawn (`Simulation.createCity` does
    * both). `tile` is then the streamer's composite tile.
@@ -140,6 +148,10 @@ export class Simulation {
   readonly ambient: AmbientPeds | null = null;
   /** Ambient traffic, when the tile has a lane graph and a density was asked for. */
   readonly traffic: TrafficManager | null = null;
+  /** The trains and stations (src/sim/transit), when the tile has a transit layer. */
+  readonly transit: Transit | null = null;
+  /** The airport's AI air traffic (src/sim/aircraft), when the city has an airport. */
+  readonly aircraft: AirTraffic | null = null;
   /** The tile streamer of a streamed city, or null for a single tile. */
   readonly stream: TileStreamer | null;
   /** Cars frozen because their tile dropped (the player's own), thawed when it is back. */
@@ -198,6 +210,16 @@ export class Simulation {
         if (st) st.listen(this.traffic.streamListener());
       }
     }
+    if (opts.transit !== false && !st && opts.tile.transit && opts.tile.transit.data.routes.length) {
+      // a transit layer that cannot be built leaves the game without trains, never without a game
+      try {
+        this.transit = new Transit(this, opts.tile.transit);
+      } catch (e) {
+        console.warn('transit: not built', e);
+        this.transit = null;
+      }
+    }
+    if (opts.aeroway && opts.aircraft !== false) this.aircraft = new AirTraffic(opts.aeroway, this.rng.fork('aircraft'), this);
     if (st) {
       st.listen(this.police.streamListener());
       st.listen({ tileDropping: (_k, rect) => this.dropOn(rect), tileAdded: () => this.thaw() });
@@ -363,6 +385,10 @@ export class Simulation {
   defOf(e: SimEntity): EntityDef {
     if (e instanceof HelicopterEntity) return { id: e.id, kind: EntityKind.Helicopter, typeId: 'helicopter', color: e.color, agency: e.agency };
     if (e instanceof SpikeStripEntity) return { id: e.id, kind: EntityKind.SpikeStrip, length: e.length, depth: e.depth };
+    if (e instanceof TrainEntity) {
+      const tr = this.transit?.byId.get(e.id);
+      return { id: e.id, kind: EntityKind.Train, route: tr?.route ?? 0, line: tr?.line ?? 0, cars: this.transit?.model.tt.cars ?? 6 };
+    }
     if (e instanceof VehicleEntity) return { id: e.id, kind: EntityKind.Vehicle, typeId: e.typeId, color: e.color, plate: e.plate, ...(e.police ? { police: e.police } : {}) };
     return { id: e.id, kind: EntityKind.Ped, outfit: e.outfit, player: e.role === 'player', ...(e.officer ? { police: { agency: e.officer.agency, uniform: e.officer.uniform } } : {}) };
   }
@@ -652,6 +678,10 @@ export class Simulation {
     const life = this.lifeOf(slot);
     const ped = this.registry.get(this.players.get(slot)!.pedId) as PedEntity;
     if (ped.vehicleId) this.ejectPed(ped);
+    if (ped.ride) {
+      ped.ride = null;
+      ped.controller.setEnabled(true);
+    }
     const sp = this.tile.manifest.spawns.player;
     // (a streamed city loads the spawn's tiles; the player is held there until they are in)
     this.stream?.checkNow(sp.x, sp.z);
@@ -747,10 +777,21 @@ export class Simulation {
       u[o + E.Kind] = e.kind;
       if (e instanceof PedEntity) this.writePed(view, o, e);
       else if (e instanceof VehicleEntity) this.writeVehicle(view, o, e);
+      else if (e instanceof TrainEntity) this.transit?.safe('the snapshot', () => this.transit!.writeEntity(view, o, e));
       else this.police.writeEntity(view, o, e);
     }
     u[H.Count] = n;
+    u[H.Train] = 0;
+    u[H.TransitInfo] = 0;
+    view.f32[H.Eta0] = view.f32[H.Eta1] = -1;
+    u[H.EtaRoutes] = 0;
+    this.transit?.safe('the snapshot header', () => this.transit!.writeHeader(view));
     this.ragdolls.write(view);
+    // the aircraft block follows the ragdoll records
+    if (this.aircraft) {
+      const pp = this.playerPosition();
+      this.aircraft.write(view, pp);
+    } else writeNoAircraft(view);
     this.police.writeHeader(view);
   }
 
@@ -790,7 +831,7 @@ export class Simulation {
       (e.stumbleT > 0 ? PedFlag.Stumble : 0) |
       (e.officer && e.officer.fireT > 0 ? PedFlag.Firing : 0) |
       gunFlags(e, this.tick) |
-      ((e.pose & 7) << PedFlag.PoseShift);
+      (((e.ride ? (e.ride.stand ? 0 : PedPose.Sit) : e.pose) & 7) << PedFlag.PoseShift);
     f[o + E.Speed] = c.speed;
     f[o + E.Aux0] = c.yaw;
     f[o + E.Aux1] = e.melee ? Math.min(1, e.melee.t / COMBAT.swingTime) : (b?.swing ?? 0);

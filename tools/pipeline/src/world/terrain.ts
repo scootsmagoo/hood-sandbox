@@ -125,6 +125,9 @@ export function landColor(code: number): RGB {
 }
 
 /** Ground class ids (`_LAND.x`); `landClasses` in tile.json lists the names in this order. */
+/** The land raster's code of an area kind (what `rasterizeAreas` writes for it). */
+export const landCode = (kind: AreaKind): number => PAINT_ORDER.indexOf(kind) + 1;
+
 export const LAND_CLASSES = ['urban', 'grass', 'woodland', 'dirt', 'plaza', 'parking', 'industrial', 'rail', 'water', 'pitch', 'cemetery', 'residential', 'commercial'] as const;
 
 const LAND_ID: Record<AreaKind, number> = {

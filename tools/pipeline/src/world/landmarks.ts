@@ -40,6 +40,11 @@ export interface HeroSidecar {
   cutout: V2[];
   /** which ground height under the footprint is the model's y = 0: the lowest (the default: a building stands on its low side), or the highest (a flat model such as a plaza, built on a terrace) */
   datum?: 'min' | 'max';
+  /**
+   * The model's y = 0 as an elevation above sea level (the airport's walk-in buildings): the datum then is this, the same in every
+   * tile the model touches, and the bake levels the ground under its `flatten` rings to it (world/aerowayBake.ts).
+   */
+  elevation?: number;
   /** model-frame rings that no tree or lamp may stand in (a plaza with no walls: the fountain); the cut-out's own ring is always clear */
   clear?: V2[][];
   replaces: {
@@ -93,6 +98,8 @@ export interface TileLandmark {
     /** collision triangles of the hull inside the tile */
     hullTris?: number;
   };
+  /** a walk-in hero's indoor areas (world x, z rings; `ceiling` above the model's y): the client dims the sky light there */
+  zones?: { ring: V2[]; ceiling: number }[];
 }
 
 export interface HeroPlacement {
@@ -159,7 +166,9 @@ export function placeHeroes(sidecars: HeroSidecar[], proj: Projector, bounds: Re
           parts = [];
         }
       }
-      for (const p of parts) if (Math.abs(signedArea(p)) >= 6) hull.push({ ring: p, height: h.height });
+      // (a walk-in hero's hull is thin walls, counters and posts: keep its small prisms, which are what the player bumps into)
+      const minArea = (side as { interior?: unknown }).interior ? 0.2 : 6;
+      for (const p of parts) if (Math.abs(signedArea(p)) >= minArea) hull.push({ ring: p, height: h.height });
     }
     out.push({ side, x, z, cutout: side.cutout.map(at), clearRings: [side.cutout.map(at), ...(side.clear ?? []).map((r) => r.map(at))].filter((r) => r.length >= 3), hull });
   }
@@ -196,7 +205,8 @@ export function isReplaced(b: Building, h: HeroPlacement): boolean {
   const r = h.side.replaces;
   const bare = b.srcId ?? b.id.replace(/^overture:/, '').replace(/\/\d+$/, '');
   if (r.overture?.includes(bare) || r.osm?.includes(b.id) || r.also?.includes(b.id)) return true;
-  const thr = r.overlap ?? 0.4;
+  // a walk-in hero (the airport's halls) takes every building that reaches into it: nothing generic may stand in its rooms
+  const thr = (h.side as { interior?: unknown }).interior ? Math.min(r.overlap ?? 0.4, 0.03) : (r.overlap ?? 0.4);
   return thr > 0 && h.cutout.length >= 3 && overlapShare(b.rings[0], h.cutout) >= thr;
 }
 
@@ -226,8 +236,10 @@ export function hullBuildings(h: HeroPlacement, datum: number): Building[] {
   }));
 }
 
-/** The lowest ground under a hero: the model's y = 0. `ground(x, z)` is the surface height. */
-export function heroDatum(h: HeroPlacement, ground: (x: number, z: number) => number): number {
+/** The lowest ground under a hero: the model's y = 0. `ground(x, z)` is the surface height. A sidecar with an `elevation` (and the
+ * bake's `baseElevation`) says it outright. */
+export function heroDatum(h: HeroPlacement, ground: (x: number, z: number) => number, baseElevation?: number): number {
+  if (typeof h.side.elevation === 'number' && typeof baseElevation === 'number') return h.side.elevation - baseElevation;
   const pick = h.side.datum === 'max' ? Math.max : Math.min;
   let y = ground(h.x, h.z);
   for (const p of h.cutout) y = pick(y, ground(p[0], p[1]));

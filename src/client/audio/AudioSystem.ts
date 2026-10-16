@@ -6,6 +6,7 @@
  * and unmutes, and the choice is kept in localStorage. Sim events arrive through `game.onSimEvent`;
  * unknown event types and missing fields are ignored, so new gameplay events can't break audio.
  */
+import { TransitAudio } from './transitAudio';
 import type { SimEvent } from '../../shared/protocol';
 import { EntityKind } from '../../shared/entities';
 import { PedFlag, VehicleFlag, WHEEL_COUNT, WHEEL_FLOATS } from '../../shared/snapshot';
@@ -35,6 +36,13 @@ function writeMuted(muted: boolean) {
   }
 }
 
+declare module '../Game' {
+  interface Game {
+    /** The sound system (the GPS asks it for its chimes). */
+    audio?: AudioSystem;
+  }
+}
+
 type Num = number | undefined;
 const num = (v: unknown): Num => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
@@ -54,9 +62,12 @@ export class AudioSystem implements System {
   private stride = 0;
   private readonly doorOpen = new Map<number, boolean>();
   private siren: Siren | null = null;
+  /** The trains (transitAudio.ts). */
+  private transit: TransitAudio | null = null;
   private sirenCar = 0;
 
   constructor(private readonly game: Game) {
+    game.audio = this;
     window.addEventListener('pointerdown', this.unlock);
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('touchend', this.unlock);
@@ -74,6 +85,46 @@ export class AudioSystem implements System {
     if (this.ctx && this.master) this.master.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, this.ctx.currentTime, 0.05);
   }
 
+  /**
+   * The GPS's chimes: a pair of rising notes for a waypoint set, falling for one cleared, and a bell-like arpeggio on arrival.
+   * Sine notes with a soft attack; nothing before the first gesture (no audio context yet) and nothing while muted.
+   */
+  chime(kind: 'set' | 'clear' | 'arrive') {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || this.disposed || this.muted) return;
+    const notes = kind === 'set' ? [659.3, 880] : kind === 'clear' ? [880, 659.3] : [523.3, 659.3, 784, 1046.5];
+    const step = kind === 'arrive' ? 0.11 : 0.085;
+    const now = ctx.currentTime + 0.01;
+    notes.forEach((hz, i) => {
+      const at = now + i * step;
+      const last = i === notes.length - 1;
+      const len = last ? (kind === 'arrive' ? 0.9 : 0.22) : step + 0.05;
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, at);
+      env.gain.exponentialRampToValueAtTime(kind === 'arrive' ? 0.2 : 0.16, at + 0.012);
+      env.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      env.connect(this.master!);
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = hz;
+      o.connect(env);
+      this.play(o, at, len, env);
+      if (kind === 'arrive') {
+        // a quiet octave above gives it the ring of a bell
+        const env2 = ctx.createGain();
+        env2.gain.setValueAtTime(0.0001, at);
+        env2.gain.exponentialRampToValueAtTime(0.05, at + 0.01);
+        env2.gain.exponentialRampToValueAtTime(0.0001, at + len * 0.8);
+        env2.connect(this.master!);
+        const o2 = ctx.createOscillator();
+        o2.type = 'triangle';
+        o2.frequency.value = hz * 2;
+        o2.connect(env2);
+        this.play(o2, at, len, env2);
+      }
+    });
+  }
+
   private readonly unlock = () => {
     if (this.ctx || this.disposed) return;
     const AC: typeof AudioContext | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -88,6 +139,7 @@ export class AudioSystem implements System {
       this.noise = makeNoise(ctx);
       this.engine = new Engine(ctx, master);
       this.squeal = new Squeal(ctx, master, this.noise);
+      this.transit = new TransitAudio(ctx, master, this.noise, this.game);
       void ctx.resume().catch(() => {});
     } catch {
       this.ctx = null;
@@ -104,7 +156,6 @@ export class AudioSystem implements System {
   };
 
   update(dt: number) {
-    void dt;
     if (!this.ctx || this.disposed) return;
     const v = this.game.view;
     const now = this.ctx.currentTime;
@@ -128,6 +179,15 @@ export class AudioSystem implements System {
     this.updateDoors(v.entities);
     this.updateSiren(v.entities);
     this.updateRotor(v.entities);
+    if (this.transit) {
+      try {
+        this.transit.update(now, dt);
+      } catch (e) {
+        console.warn('transit audio failed; silent', e);
+        this.transit.dispose();
+        this.transit = null;
+      }
+    }
   }
 
   private updateFootsteps(ped: EntityState | null, inVehicle: boolean) {
@@ -552,6 +612,7 @@ export class AudioSystem implements System {
     this.siren = null;
     this.engine?.dispose();
     this.squeal?.dispose();
+    this.transit?.dispose();
     this.rotor?.dispose();
     this.engine = null;
     this.squeal = null;

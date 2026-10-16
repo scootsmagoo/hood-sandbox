@@ -52,6 +52,8 @@ export interface CityIndex {
   attribution: string[];
   seams?: { matched: number; unmatched: number; maxStep: number };
   built?: string;
+  /** An airport in the city (`aeroway.json`, relative to index.json): the aircraft's taxi graph, its stands, lights and map (src/shared/aeroway.ts). */
+  aeroway?: string;
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -98,6 +100,7 @@ export function parseCityIndex(json: unknown): CityIndex {
     attribution: Array.isArray(j.attribution) ? j.attribution : [],
     seams: j.seams,
     built: j.built,
+    ...(typeof j.aeroway === 'string' ? { aeroway: j.aeroway } : {}),
   };
 }
 

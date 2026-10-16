@@ -1,0 +1,44 @@
+{
+  "_comment": "The Peach Rapid Transit railcar, metres, in the car's frame (+X left, +Y up, +Z forward, the sims's frame; y = 0 is the top of the rail, x = 0 the track's centre, z = 0 the car's middle; the cab is at +Z). The ONE place the drawn model (tools/blender/transit/railcar.py builds to it, tools/blender/transit/verify.ts measures the .glb against it) and the sim (src/sim/transit: boarding at the doors, seats and standing spots, the kinematic hull, the gap between cars) get their numbers from. Inspired by the real fleet's look: a 75 ft stainless car, 10.5 ft wide, high-floor for 1.1 m platforms, married pairs with a cab at the outer end of each car. No logos.",
+  "length": 22.86,
+  "gap": 0.9,
+  "halfWidth": 1.6,
+  "floorY": 1.1,
+  "roofY": 3.62,
+  "skirtY": 0.55,
+  "bogieZ": 8.1,
+  "wheelR": 0.43,
+  "doors": {
+    "z": [-6.9, 0, 6.9],
+    "width": 1.3,
+    "height": 1.95,
+    "leafTravel": 0.64,
+    "openS": 1.6
+  },
+  "hull": { "halfLength": 11.43, "halfWidth": 1.6, "bottom": 0.55, "top": 3.62 },
+  "seats": [
+    [ 1.18, 1.55, -10.90, 0], [ 0.72, 1.55, -10.90, 0], [-0.72, 1.55, -10.90, 0], [-1.18, 1.55, -10.90, 0],
+    [ 1.18, 1.55,  -9.54, 3.1416], [ 0.72, 1.55,  -9.54, 3.1416], [-0.72, 1.55,  -9.54, 3.1416], [-1.18, 1.55,  -9.54, 3.1416],
+    [ 1.18, 1.55,  -9.10, 0], [ 0.72, 1.55,  -9.10, 0], [-0.72, 1.55,  -9.10, 0], [-1.18, 1.55,  -9.10, 0],
+    [ 1.18, 1.55,  -5.73, 0], [ 0.72, 1.55,  -5.73, 0], [-0.72, 1.55,  -5.73, 0], [-1.18, 1.55,  -5.73, 0],
+    [ 1.18, 1.55,  -4.37, 3.1416], [ 0.72, 1.55,  -4.37, 3.1416], [-0.72, 1.55,  -4.37, 3.1416], [-1.18, 1.55,  -4.37, 3.1416],
+    [ 1.18, 1.55,  -3.93, 0], [ 0.72, 1.55,  -3.93, 0], [-0.72, 1.55,  -3.93, 0], [-1.18, 1.55,  -3.93, 0],
+    [ 1.18, 1.55,  -2.57, 3.1416], [ 0.72, 1.55,  -2.57, 3.1416], [-0.72, 1.55,  -2.57, 3.1416], [-1.18, 1.55,  -2.57, 3.1416],
+    [ 1.18, 1.55,  -2.13, 0], [ 0.72, 1.55,  -2.13, 0], [-0.72, 1.55,  -2.13, 0], [-1.18, 1.55,  -2.13, 0],
+    [ 1.18, 1.55,   2.13, 3.1416], [ 0.72, 1.55,   2.13, 3.1416], [-0.72, 1.55,   2.13, 3.1416], [-1.18, 1.55,   2.13, 3.1416],
+    [ 1.18, 1.55,   2.57, 0], [ 0.72, 1.55,   2.57, 0], [-0.72, 1.55,   2.57, 0], [-1.18, 1.55,   2.57, 0],
+    [ 1.18, 1.55,   3.93, 3.1416], [ 0.72, 1.55,   3.93, 3.1416], [-0.72, 1.55,   3.93, 3.1416], [-1.18, 1.55,   3.93, 3.1416],
+    [ 1.18, 1.55,   4.37, 0], [ 0.72, 1.55,   4.37, 0], [-0.72, 1.55,   4.37, 0], [-1.18, 1.55,   4.37, 0],
+    [ 1.18, 1.55,   5.73, 3.1416], [ 0.72, 1.55,   5.73, 3.1416], [-0.72, 1.55,   5.73, 3.1416], [-1.18, 1.55,   5.73, 3.1416],
+    [ 1.18, 1.55,   8.49, 0], [ 0.72, 1.55,   8.49, 0], [-0.72, 1.55,   8.49, 0], [-1.18, 1.55,   8.49, 0],
+    [ 1.18, 1.55,   9.85, 3.1416], [ 0.72, 1.55,   9.85, 3.1416], [-0.72, 1.55,   9.85, 3.1416], [-1.18, 1.55,   9.85, 3.1416]
+  ],
+  "stands": [
+    [ 0.0, 1.1, -6.9, 1.5708], [ 0.0, 1.1, 0.0, 1.5708], [ 0.0, 1.1, 6.9, -1.5708],
+    [ 0.6, 1.1, -6.2, 3.1416], [-0.6, 1.1, 0.7, 0], [ 0.6, 1.1, 6.2, 3.1416]
+  ],
+  "seatsNote": "seats: [x, y, z, yaw] of a seated person's hips (yaw as a ped's: forward (sin yaw, cos yaw) in the car's (x, z)); stands: [x, y, z, yaw] of a standing person's feet. Transverse 2 + 2 seats in bays between the doors, a cab at +Z (the first bay starts behind it).",
+  "cab": { "z0": 10.2, "windscreenY": [1.9, 3.0] },
+  "bandY": [1.55, 1.85],
+  "windowY": [1.85, 2.75]
+}

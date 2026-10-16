@@ -7,6 +7,7 @@
 import { generateProceduralTile } from './proceduralTile';
 import { parseLanes, type LanesData } from './lanes';
 import { parsePaths, parseScenarios, type PathsData, type ScenariosData } from './walk';
+import { parseTransit, type TransitData } from './transit';
 
 export interface TileManifest {
   format: 'hood-tile';
@@ -34,6 +35,8 @@ export interface TileManifest {
   props?: string;
   /** `landmarks.json`: the landmarks of the city pack in the tile and the hero models that stand in it (see the contract). */
   landmarks?: string;
+  /** `transit.json`: the rail lines, stations and tunnels of the tile (see the contract, "transit.json"). */
+  transit?: string;
   /** 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)" in the contract, 3 when the buildings also carry `_LOOK` ("Building appearance (meshFormat 3)"); absent in an older bake. */
   meshFormat?: number;
   /** Names of the building kind ids (`_BLD.x`) and ground class ids (`_LAND.x`), in id order. */
@@ -145,9 +148,24 @@ export interface TileData {
   junctions?: JunctionsData;
   /** The lane graph, when the tile has one. Without it there is no ambient traffic. */
   lanes?: LanesData;
+  /** The transit layer and its collision mesh (`transit.json`, `transit.bin`), when the tile has one. */
+  transit?: TransitTile;
   source: 'baked' | 'procedural';
   /** Why the baked tile was not used. */
   fallbackReason?: string;
+}
+
+export interface TransitTile {
+  data: TransitData;
+  positions: Float32Array;
+  indices: Uint32Array;
+}
+
+/** Reads `transit.bin` against the counts `transit.json` gives; an empty mesh when they do not match. */
+export function decodeTransitCollision(data: TransitData, bytes: ArrayBuffer | null): TransitTile {
+  const c = data.collision;
+  if (!c || !bytes || bytes.byteLength !== c.vertexCount * 12 + c.indexCount * 4) return { data, positions: new Float32Array(0), indices: new Uint32Array(0) };
+  return { data, positions: new Float32Array(bytes, 0, c.vertexCount * 3), indices: new Uint32Array(bytes, c.vertexCount * 12, c.indexCount) };
 }
 
 function fail(msg: string): never {
@@ -270,7 +288,7 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     // A dev server answers unknown paths with index.html, which fails here as a JSON error.
     throw new Error(`no usable tile at ${base} (${(e as Error).message})`);
   }
-  const [h, c, roads, paths, scenarios, junctions, lanes, props] = await Promise.all([
+  const [h, c, roads, paths, scenarios, junctions, lanes, props, transit] = await Promise.all([
     get(manifest.heightmap.file),
     get(manifest.collision.file),
     loadRoads(base, manifest, fetchFn),
@@ -279,6 +297,7 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
     loadOptional(base, manifest.junctions, (j) => ((j as JunctionsData | null)?.junctions ? (j as JunctionsData) : null), fetchFn),
     loadOptional(base, manifest.lanes, parseLanes, fetchFn),
     loadOptional(base, manifest.props, parseProps, fetchFn),
+    loadOptional(base, manifest.transit, parseTransit, fetchFn),
   ]);
   const tile = decodeTile(manifest, await h.arrayBuffer(), await c.arrayBuffer());
   if (roads) tile.roads = roads;
@@ -287,6 +306,18 @@ export async function loadBakedTile(baseUrl: string, fetchFn: Fetch = fetch as u
   if (junctions) tile.junctions = junctions;
   if (lanes) tile.lanes = lanes;
   if (props) tile.anchors = props;
+  if (transit) {
+    let bin: ArrayBuffer | null = null;
+    if (transit.collision) {
+      try {
+        const res = await fetchFn(base + transit.collision.file);
+        bin = res.ok ? await res.arrayBuffer() : null;
+      } catch {
+        bin = null;
+      }
+    }
+    tile.transit = decodeTransitCollision(transit, bin);
+  }
   return tile;
 }
 

@@ -1,0 +1,380 @@
+{
+ "asset": "railcar",
+ "dims": {
+  "length": 22.86,
+  "gap": 0.9,
+  "halfWidth": 1.6,
+  "floorY": 1.1,
+  "roofY": 3.62,
+  "skirtY": 0.55,
+  "bogieZ": 8.1,
+  "wheelR": 0.43,
+  "doors": {
+   "z": [
+    -6.9,
+    0,
+    6.9
+   ],
+   "width": 1.3,
+   "height": 1.95,
+   "leafTravel": 0.64,
+   "openS": 1.6
+  },
+  "cab": {
+   "z0": 10.2,
+   "windscreenY": [
+    1.9,
+    3
+   ]
+  },
+  "bandY": [
+   1.55,
+   1.85
+  ],
+  "windowY": [
+   1.85,
+   2.75
+  ]
+ },
+ "bounds": {
+  "min": [
+   -1.618,
+   -0.028,
+   -11.875
+  ],
+  "max": [
+   1.618,
+   3.62,
+   11.875
+  ]
+ },
+ "lods": [
+  {
+   "tris": 15146,
+   "from": 0
+  },
+  {
+   "tris": 2528,
+   "from": 60
+  },
+  {
+   "tris": 412,
+   "from": 220
+  }
+ ],
+ "doors": {
+  "travel": 0.64,
+  "nodes": {
+   "lod0": [
+    "lod0_door_L0_a",
+    "lod0_door_L0_b",
+    "lod0_door_L1_a",
+    "lod0_door_L1_b",
+    "lod0_door_L2_a",
+    "lod0_door_L2_b",
+    "lod0_door_R0_a",
+    "lod0_door_R0_b",
+    "lod0_door_R1_a",
+    "lod0_door_R1_b",
+    "lod0_door_R2_a",
+    "lod0_door_R2_b"
+   ],
+   "lod1": [
+    "lod1_door_L0_a",
+    "lod1_door_L0_b",
+    "lod1_door_L1_a",
+    "lod1_door_L1_b",
+    "lod1_door_L2_a",
+    "lod1_door_L2_b",
+    "lod1_door_R0_a",
+    "lod1_door_R0_b",
+    "lod1_door_R1_a",
+    "lod1_door_R1_b",
+    "lod1_door_R2_a",
+    "lod1_door_R2_b"
+   ]
+  },
+  "leaves": [
+   {
+    "name": "door_L0_a",
+    "side": "L",
+    "index": 0,
+    "leaf": "a",
+    "closed": [
+     1.545,
+     2.075,
+     -7.225
+    ],
+    "open": [
+     1.545,
+     2.075,
+     -7.865
+    ]
+   },
+   {
+    "name": "door_L0_b",
+    "side": "L",
+    "index": 0,
+    "leaf": "b",
+    "closed": [
+     1.545,
+     2.075,
+     -6.575
+    ],
+    "open": [
+     1.545,
+     2.075,
+     -5.935
+    ]
+   },
+   {
+    "name": "door_L1_a",
+    "side": "L",
+    "index": 1,
+    "leaf": "a",
+    "closed": [
+     1.545,
+     2.075,
+     -0.325
+    ],
+    "open": [
+     1.545,
+     2.075,
+     -0.965
+    ]
+   },
+   {
+    "name": "door_L1_b",
+    "side": "L",
+    "index": 1,
+    "leaf": "b",
+    "closed": [
+     1.545,
+     2.075,
+     0.325
+    ],
+    "open": [
+     1.545,
+     2.075,
+     0.965
+    ]
+   },
+   {
+    "name": "door_L2_a",
+    "side": "L",
+    "index": 2,
+    "leaf": "a",
+    "closed": [
+     1.545,
+     2.075,
+     6.575
+    ],
+    "open": [
+     1.545,
+     2.075,
+     5.935
+    ]
+   },
+   {
+    "name": "door_L2_b",
+    "side": "L",
+    "index": 2,
+    "leaf": "b",
+    "closed": [
+     1.545,
+     2.075,
+     7.225
+    ],
+    "open": [
+     1.545,
+     2.075,
+     7.865
+    ]
+   },
+   {
+    "name": "door_R0_a",
+    "side": "R",
+    "index": 0,
+    "leaf": "a",
+    "closed": [
+     -1.545,
+     2.075,
+     -7.225
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     -7.865
+    ]
+   },
+   {
+    "name": "door_R0_b",
+    "side": "R",
+    "index": 0,
+    "leaf": "b",
+    "closed": [
+     -1.545,
+     2.075,
+     -6.575
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     -5.935
+    ]
+   },
+   {
+    "name": "door_R1_a",
+    "side": "R",
+    "index": 1,
+    "leaf": "a",
+    "closed": [
+     -1.545,
+     2.075,
+     -0.325
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     -0.965
+    ]
+   },
+   {
+    "name": "door_R1_b",
+    "side": "R",
+    "index": 1,
+    "leaf": "b",
+    "closed": [
+     -1.545,
+     2.075,
+     0.325
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     0.965
+    ]
+   },
+   {
+    "name": "door_R2_a",
+    "side": "R",
+    "index": 2,
+    "leaf": "a",
+    "closed": [
+     -1.545,
+     2.075,
+     6.575
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     5.935
+    ]
+   },
+   {
+    "name": "door_R2_b",
+    "side": "R",
+    "index": 2,
+    "leaf": "b",
+    "closed": [
+     -1.545,
+     2.075,
+     7.225
+    ],
+    "open": [
+     -1.545,
+     2.075,
+     7.865
+    ]
+   }
+  ]
+ },
+ "bogies": {
+  "lod0": [
+   "lod0_bogie_F",
+   "lod0_bogie_R"
+  ],
+  "lod1": [
+   "lod1_bogie_F",
+   "lod1_bogie_R"
+  ]
+ },
+ "anchors": {
+  "anchor_cam_window": [
+   1.13,
+   2.3,
+   4.37
+  ],
+  "anchor_coupler_F": [
+   0,
+   0.8,
+   11.87
+  ],
+  "anchor_coupler_R": [
+   0,
+   0.8,
+   -11.87
+  ],
+  "anchor_door_L0": [
+   1.6,
+   1.1,
+   -6.9
+  ],
+  "anchor_door_L1": [
+   1.6,
+   1.1,
+   0
+  ],
+  "anchor_door_L2": [
+   1.6,
+   1.1,
+   6.9
+  ],
+  "anchor_door_R0": [
+   -1.6,
+   1.1,
+   -6.9
+  ],
+  "anchor_door_R1": [
+   -1.6,
+   1.1,
+   0
+  ],
+  "anchor_door_R2": [
+   -1.6,
+   1.1,
+   6.9
+  ],
+  "anchor_headlight": [
+   0,
+   1.25,
+   11.46
+  ]
+ },
+ "materials": [
+  "tr_steel",
+  "tr_band",
+  "tr_cab",
+  "tr_glass",
+  "tr_dark",
+  "tr_interior",
+  "tr_floor",
+  "tr_light",
+  "tr_head",
+  "tr_tail",
+  "tr_sign"
+ ],
+ "signs": {
+  "front": [
+   1.4,
+   0.22
+  ],
+  "side": [
+   1.2,
+   0.2
+  ]
+ },
+ "model": "assets/transit/railcar.glb",
+ "hash": "ae57eb7efb3e",
+ "bytes": 410764
+}

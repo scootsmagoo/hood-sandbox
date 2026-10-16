@@ -1,0 +1,114 @@
+{
+ "kind": "ground",
+ "parts": {
+  "tug": {
+   "tris": [
+    576,
+    274
+   ],
+   "dims": {
+    "length": 6.2,
+    "width": 2.6,
+    "height": 1.7
+   },
+   "min": [
+    -1.3,
+    0,
+    -1.2
+   ],
+   "max": [
+    1.3,
+    1.7,
+    5
+   ],
+   "hitch": [
+    0,
+    0.35,
+    3.3
+   ]
+  },
+  "baggageTractor": {
+   "tris": [
+    592,
+    276
+   ],
+   "dims": {
+    "length": 2.9,
+    "width": 1.4,
+    "height": 1.9
+   },
+   "min": [
+    -0.68,
+    0,
+    -0.58
+   ],
+   "max": [
+    0.68,
+    1.9,
+    2.49
+   ]
+  },
+  "baggageCart": {
+   "tris": [
+    488,
+    228
+   ],
+   "dims": {
+    "length": 3.2,
+    "width": 1.55,
+    "height": 1.95
+   },
+   "min": [
+    -0.775,
+    0,
+    -0.5
+   ],
+   "max": [
+    0.775,
+    1.95,
+    2.753
+   ]
+  },
+  "beltLoader": {
+   "tris": [
+    618,
+    294
+   ],
+   "dims": {
+    "length": 8.2,
+    "width": 2.2,
+    "height": 1.8
+   },
+   "min": [
+    -0.978,
+    0,
+    -1.101
+   ],
+   "max": [
+    1.08,
+    1.769,
+    7.12
+   ]
+  }
+ },
+ "materials": [
+  "ac_paint",
+  "ac_grey",
+  "ac_metal",
+  "ac_dark",
+  "ac_window",
+  "ac_light"
+ ],
+ "regions": {
+  "crown": 0,
+  "belly": 1,
+  "fin": 2,
+  "engine": 3,
+  "stripe": 4,
+  "accent": 5
+ },
+ "id": "ac-ground",
+ "model": "assets/airport/ac-ground.glb",
+ "hash": "4d272e98a199",
+ "bytes": 92628
+}

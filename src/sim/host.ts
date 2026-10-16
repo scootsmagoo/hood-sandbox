@@ -47,6 +47,8 @@ export class SimHost {
         source = init.cityUrl.startsWith('fixture') ? new FixtureTileSource(fixtureOptions(init.cityUrl)) : await HttpTileSource.open(init.cityUrl);
       }
       const tile = source ? null : await loadTileOrFallback(init.tileBaseUrl, init.seed);
+      // the city's airport (src/shared/aeroway.ts): the AI aircraft fly from its taxi graph
+      const aeroway = source?.index.aeroway && init.cityUrl && !init.cityUrl.startsWith('fixture') && init.aircraft !== false ? await loadAeroway(init.cityUrl, source.index.aeroway) : null;
       const common = {
         seed: init.seed,
         vehicleType: init.vehicleType,
@@ -61,6 +63,9 @@ export class SimHost {
         ambientPeds: init.ambientPeds ?? true,
         pedBudget: this.pendingBudget ?? init.pedBudget,
         traffic: this.pendingTraffic ?? init.traffic,
+        transit: init.transit ?? true,
+        aeroway,
+        aircraft: init.aircraft ?? true,
       };
       const sim = source
         ? await Simulation.createCity({ ...common, source, streamOptions: { rings: RINGS[init.streamTier ?? 'high'] } })
@@ -170,5 +175,19 @@ export class SimHost {
     } else {
       this.sink.snapshot(this.view.buffer.slice(0, used));
     }
+  }
+}
+
+/** The city's `aeroway.json` (relative to its index), parsed; null when it cannot be read (the city goes on without aircraft). */
+async function loadAeroway(cityUrl: string, rel: string) {
+  try {
+    const { parseAeroway } = await import('../shared/aeroway');
+    const base = cityUrl.endsWith('.json') ? cityUrl.slice(0, cityUrl.lastIndexOf('/') + 1) : cityUrl.endsWith('/') ? cityUrl : `${cityUrl}/`;
+    const res = await fetch(new URL(rel, base).href);
+    if (!res.ok) return null;
+    return parseAeroway(await res.json());
+  } catch (e) {
+    console.warn(`aeroway: ${(e as Error).message}`);
+    return null;
   }
 }

@@ -20,6 +20,7 @@ There is no story yet, and that's deliberate. The game is the city: real streets
 > - Weapons and cover.
 > - Trees and street furniture.
 > - 22 hero landmarks, hand-built.
+> - The rail transit ("Peach Rapid Transit"): four lines, five stations on the tile, trains to ride.
 > - A minimap and street names.
 > - Deployed on Cloudflare.
 >
@@ -157,6 +158,22 @@ With these factors the game world comes out at about 18 × 22 km. At that size f
 - **Express lanes**: I-85 Express and the reversible Northwest Corridor lanes on I-75/I-575. Barriers and few exits make them great chase set-pieces. GA-400's lanes are under construction until about 2031, so in the game they're cones, lane shifts and closed ramps.
 - **Arterials**: Peachtree St, Peachtree Rd and Peachtree Industrial (the "everything is Peachtree" joke), Ponce de Leon, Buford Hwy, Roswell Rd, Cobb Pkwy (US-41), Memorial Dr, Moreland, Northside Dr, Fulton Industrial, Pleasant Hill, Satellite Blvd.
 - **Transit**: the four rail lines of the city's transit system (under a parody brand) meeting at Five Points, the Downtown streetcar, buses, and the Amtrak stop at Brookwood.
+
+**Built (rail, first pass):** "Peach Rapid Transit", the parody of the real system (no logos or wordmarks anywhere). The bake's
+transit layer (`tools/pipeline/src/world/transit*.ts`, contract: [m1-tile-format.md](docs/contracts/m1-tile-format.md), "transit.json")
+takes the Red, Gold, Blue and Green lines from OpenStreetMap with their tunnels and viaducts, designs the tracks in 3D (stations at
+their real depths: Peachtree Center 37 m under Peachtree Street, Five Points' two platform levels under its concourse; at most 4%
+grade), and lays out the stations: halls, island and side platforms, concourses with fare gates, stairs and escalators, the
+entrances' stairwells from the street and their corridors. On the M1 tile: Five Points, Peachtree Center, Georgia State, Garnett and
+Stadium District. The sim (`src/sim/transit/`) runs six-car trains on a synthetic timetable (a train every 6 timetable minutes at the
+peaks, 10 to 12 off-peak, 20 at night; Red and Gold, Blue and Green take turns on their shared tracks), with acceleration,
+braking, dwell and doors on the platform side; they come in and go out at the edge of the tile. **Riding, GTA IV style:** walk down
+to the platform (the board shows the next trains), get on with the use key when the doors are open, sit or stand, look out of the
+window or switch to the chase view (V), get off at any station (use), or skip to the next one (N, a short fade); ride past the last
+stop and the train turns back. Walking through a fare gate pays; jumping one is fare evasion, a minor crime the transit police
+officer at the gates reports. Station people wait, board and leave. A train hits whoever is on its track. The lines and stations
+are on the radar and the map; the street label names the station you are in. The station chime is original, the announcer is the
+browser's speech voice. `?transit=0` leaves it all out.
 
 ### Landmarks (the first list for hand-built "hero" models)
 

@@ -153,9 +153,9 @@ export class Hud implements System {
     const pad = this.game.input.device === 'gamepad';
     const touch = this.game.input.device === 'touch';
     const rows: [string, string][] = touch
-      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, punch, reset'], ['Aim / Fire', 'Hold Aim, tap Fire; Cover, Reload, Gun to change weapon']]
+      ? [['Left thumb', 'Move, steer and throttle'], ['Right side', 'Drag to look'], ['Buttons', 'Jump, run, get in, punch, reset'], ['Map', 'Tap to open; tap the map to set a GPS waypoint'], ['Aim / Fire', 'Hold Aim, tap Fire; Cover, Reload, Gun to change weapon']]
       : pad
-        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('melee'), 'Punch (reload while aiming)'], [k('reset'), 'Reset car'], ['LT / RT', 'Aim / fire (RB / X from a car)'], ['D-pad left, right', 'Change weapon'], [k('cover'), 'Take cover']]
+        ? [['Left stick', 'Move / steer'], ['RT / LT', 'Throttle / brake'], ['Right stick', 'Look'], [k('jump'), 'Jump'], [k('handbrake'), 'Handbrake'], [k('interact'), 'Get in / out'], [k('melee'), 'Punch (reload while aiming)'], [k('reset'), 'Reset car'], ['LT / RT', 'Aim / fire (RB / X from a car)'], ['D-pad left, right', 'Change weapon'], [k('cover'), 'Take cover'], [k('map'), 'Map (A sets a GPS waypoint)']]
         : [
             ['W A S D', 'Move, or throttle, brake and steer'],
             ['Shift', 'Sprint'],
@@ -169,6 +169,7 @@ export class Hud implements System {
             [k('lookBack'), 'Look behind (car)'],
             [`${k('toggleView')} / scroll`, 'Camera distance'],
             [k('reset'), 'Stand the car back up'],
+            [`${k('map')} / click radar`, 'Map: click to set a GPS waypoint, click it to clear'],
             [`${k('debug')} / ${k('help')}`, 'Debug / this help'],
           ];
     this.helpEl.textContent = '';

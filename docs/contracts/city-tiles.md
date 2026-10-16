@@ -376,3 +376,23 @@ so nothing in this contract or the runtime changes: the grid, the seams and the 
 - **Not yet**: rebasing (section 7, not needed for M2), deck seams welded across tiles, the bake's seam-aware junctions (section 10),
   per-tile `heightmapFine` jobs (section 4), tile-local vertex positions in the client's 2 x 2 chunk merge, and draining the near
   tiles' prop and lamp sets per tile rather than as one union.
+
+## 15. Rail transit across tiles (not built yet)
+
+Each tile's `transit.json` (m1-tile-format.md) cuts the network to its cell from the one city-wide cache, so an M2 bake already
+writes a transit layer per tile. What the streamed runtime still needs:
+
+- **Route stitching.** A route leaving a tile (`exit` side) and its continuation entering the neighbour (`enter`) share the OSM
+  relation id (`osm`) and meet on the seam line within centimetres (the track design runs 420 m past the cell, so both sides
+  designed the same heights there). Key: `T|<axis><line>|<relation>|<ordinal>`, like the lane ports. The sim's trains would then
+  run on a route made of the loaded tiles' pieces, and enter and leave at the edge of the *loaded area* (sources and sinks, as
+  the freeways' traffic does), not at each tile's edge.
+- **A station on a seam** (its hall, concourse or a corridor crossing into the neighbour) is laid out by the tile that holds its
+  station node; the other tile must leave its tracks there to it (the hold box is the station's). Not handled yet: the bake would
+  need the neighbour's plan.
+- **Trains over unloaded ground**: a train whose cars are on a tile that dropped keeps running as state (it is not physics), its
+  cars' bodies only where their tile is in.
+- **Terminals**: a line that ends inside the grid (North Springs, the Airport) turns its trains round there; a single tile turns
+  the player's train back at the tile's edge (an off-map terminus, with a fade).
+- **The Airport station** is inside the Domestic Terminal (the airport region's own tiles): its platform level will attach to
+  the terminal's interior through the station's `entrances` (street-level points) or a corridor the airport layer provides.

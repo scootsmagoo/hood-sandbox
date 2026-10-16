@@ -23,6 +23,10 @@ Materials are named for what the game does with them (src/client/render/Landmark
   lm_dark     black glazing, shadow gaps, tyres: unlit dark
   lm_water    animated water jets (the fountain): COLOR_0 is data, not albedo: r = height along the jet (0 foot, 1 tip),
               g = the jet's phase in its show; the shader moves the vertices (Landmarks.ts)
+  lm_interior an indoor surface (walls, ceilings, counters, seats): lit from within all day (it does not go dark in the roof's shadow)
+  lm_floor    an indoor floor: polished terrazzo or carpet, lit from within, a soft sheen
+  lm_window   see-through glazing (a hall's windows onto the apron): tinted, transparent, drawn both sides
+  lm_screen   emissive panels (departure boards, shop signs without lettering): colour is the vertex colour, bright day and night
 
 A model may have moving parts: `Lod.child(name, pivot, props)` makes a sub-level whose geometry (written in the model frame
 like the rest) is exported as an empty `lod<N>_<name>` at `pivot` with the meshes under it, so the game can turn or scale it
@@ -38,7 +42,10 @@ from mathutils import Vector
 
 from hoodlib.frame import to_bl
 
-MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark', 'lm_water']
+MATERIALS = ['bld_wall', 'bld_glass', 'bld_roof', 'lm_stone', 'lm_flood', 'lm_lit', 'lm_metal', 'lm_gold', 'lm_glass', 'lm_glow', 'lm_dark', 'lm_water',
+             # interiors (the airport's walk-in halls, tools/blender/airport): lit from within by day and night, a polished floor, see-through
+             # windows, emissive screens and signs
+             'lm_interior', 'lm_floor', 'lm_window', 'lm_screen']
 
 # building kind ids (tools/pipeline/src/world/classify.ts BUILDING_KINDS)
 K_GENERIC, K_OFFICE, K_GLASS, K_BRICK, K_PARKING, K_RETAIL, K_CIVIC, K_RELIGIOUS, K_INDUSTRIAL, K_RESID, K_HOUSE, K_SMALL, K_VENUE = range(13)

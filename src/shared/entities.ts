@@ -10,6 +10,8 @@ export const EntityKind = {
   Helicopter: 3,
   /** A spike strip lying across a lane. */
   SpikeStrip: 4,
+  /** A metro train (src/sim/transit): its cars follow its route; the record carries where it is along it (see `TrainFlag`). */
+  Train: 5,
 } as const;
 export type EntityKind = (typeof EntityKind)[keyof typeof EntityKind];
 

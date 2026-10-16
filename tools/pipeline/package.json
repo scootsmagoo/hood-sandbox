@@ -12,7 +12,8 @@
     "verify": "tsx src/verify.ts && tsx src/preview.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "audit:buildings": "tsx src/audit-buildings.ts"
+    "audit:buildings": "tsx src/audit-buildings.ts",
+    "transit": "tsx src/transit-bake.ts"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.6-r.1",

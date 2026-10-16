@@ -6,7 +6,7 @@
 import crimesRaw from './data/crimes.json';
 import type { RoadData } from './tile';
 
-export type CrimeId = 'carjack' | 'assault' | 'vehicle_theft' | 'hit_ped' | 'kill_ped' | 'assault_officer' | 'discharge' | 'shoot_ped';
+export type CrimeId = 'carjack' | 'assault' | 'vehicle_theft' | 'hit_ped' | 'kill_ped' | 'assault_officer' | 'discharge' | 'shoot_ped' | 'fare_evasion';
 
 export interface CrimeDef {
   severity: number;

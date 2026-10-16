@@ -17,6 +17,7 @@ Crimes are the same in every city.
     "hit_ped":      { "severity": 3, "heat": 2, "witnessRadius": 40, "points": 3, "violent": true },
     "discharge":    { "severity": 1, "heat": 1, "witnessRadius": 45, "hearRadius": 130, "points": 1 },   // firing a gun in public
     "shoot_ped":    { "severity": 4, "heat": 2, "witnessRadius": 55, "hearRadius": 140, "points": 3, "violent": true },   // a bullet that hurts but does not kill (a kill is kill_ped; a shot officer is assault_officer)
+    "fare_evasion": { "severity": 1, "heat": 1, "witnessRadius": 22, "points": 1 },   // jumping a fare gate (src/sim/transit; the station's transit police officer sees it at once)
     "kill_ped":     { "severity": 4, "heat": 2, "witnessRadius": 60, "points": 4, "violent": true },
     "assault_officer": { "severity": 4, "heat": 3, "witnessRadius": 60, "points": 6, "violent": true }
   },

@@ -128,6 +128,11 @@ export class StreetName implements System {
 
   private zonesLoaded = false;
 
+  /** A streamed city: the landmarks of the loaded tiles (their landmarks.json, the heroes' footprints and the named places inside them). */
+  setLandmarks(list: LandmarkEntry[]) {
+    this.landmarks = list;
+  }
+
   update(_dt: number) {
     const v = this.game.view;
     const st = v.controlled;
@@ -149,7 +154,12 @@ export class StreetName implements System {
     const zi = zoneIndexAt(this.zones, st.x, st.z);
     this.zone.offer(zi >= 0 ? this.zones[zi].name : null, now);
     // at a landmark (inside its footprint or within its radius): its name takes the area line, "Peachtree St NW" over "Peachtree Summit Plaza"
-    this.landmark.offer(this.landmarks.length ? (landmarkAt(this.landmarks, st.x, st.z)?.displayName ?? null) : null, now);
+    // in a station (render/transit): its name takes the area line too, "Peachtree St NW" over "Peachtree Center station"
+    const tv = this.game.transit;
+    const si = tv && !tv.broken ? tv.stationOfPlayer() : -1;
+    const sname = si >= 0 ? tv!.data.stations[si]?.displayName : undefined;
+    const station = sname ? `${sname} station` : null;
+    this.landmark.offer(station ?? (this.landmarks.length ? (landmarkAt(this.landmarks, st.x, st.z)?.displayName ?? null) : null), now);
 
     this.render();
   }

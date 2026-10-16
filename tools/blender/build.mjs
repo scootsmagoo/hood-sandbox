@@ -34,18 +34,24 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, arr) =>
 const assetsJson = JSON.parse(readFileSync(join(here, 'assets.json'), 'utf8'));
 // vehicles -> public/assets/vehicles + carAssets.manifest.json; props (trees, street furniture) -> public/assets/props + propAssets.manifest.json
 // landmarks -> public/assets/landmarks (the .glb and a <name>.json sidecar: placement, collision hull, levels of detail) + landmarkAssets.manifest.json
+// transit (the railcar, the station kit) -> public/assets/transit (the .glb and a <name>.json sidecar: dimensions, levels of detail, node names) + transitAssets.manifest.json
 const list = [
   ...assetsJson.vehicles.map((a) => ({ ...a, group: 'vehicles' })),
   ...(assetsJson.props ?? []).map((a) => ({ ...a, group: 'props' })),
   ...(assetsJson.landmarks ?? []).map((a) => ({ ...a, group: 'landmarks' })),
+  ...(assetsJson.transit ?? []).map((a) => ({ ...a, group: 'transit' })),
+  // airport (tools/blender/airport): the hero buildings of Hartsfield-Jackson (a landmark sidecar each) and the aircraft (a sidecar of dimensions and colliders)
+  ...(assetsJson.airport ?? []).map((a) => ({ ...a, group: 'airport' })),
 ];
 const only = typeof args.only === 'string' ? new Set(args.only.split(',')) : null;
 const jobs = Math.max(1, Number(args.jobs ?? 4));
-const outDirs = { vehicles: join(root, 'public', 'assets', 'vehicles'), props: join(root, 'public', 'assets', 'props'), landmarks: join(root, 'public', 'assets', 'landmarks') };
+const outDirs = { vehicles: join(root, 'public', 'assets', 'vehicles'), props: join(root, 'public', 'assets', 'props'), landmarks: join(root, 'public', 'assets', 'landmarks'), transit: join(root, 'public', 'assets', 'transit'), airport: join(root, 'public', 'assets', 'airport') };
 const manifestPaths = {
   vehicles: join(root, 'src', 'client', 'render', 'carAssets.manifest.json'),
   props: join(root, 'src', 'client', 'render', 'propAssets.manifest.json'),
   landmarks: join(root, 'src', 'client', 'render', 'landmarkAssets.manifest.json'),
+  transit: join(root, 'src', 'client', 'render', 'transitAssets.manifest.json'),
+  airport: join(root, 'src', 'client', 'render', 'airportAssets.manifest.json'),
 };
 
 const blender = process.env.BLENDER ?? (existsSync('/snap/blender/current/blender') ? '/snap/blender/current/blender' : 'blender');
@@ -80,16 +86,32 @@ async function buildOne(a, tmp) {
   // the exporter's generator string carries Blender's version; keep the file stable across patch releases
   doc.getRoot().getAsset().generator = 'hood-sandbox tools/blender';
   // a landmark is up to 300 m across and carries the facade shader's attributes (metres along the wall, the quad's span): more bits for them
-  const q = a.group === 'landmarks' ? { quantizePosition: 16, quantizeNormal: 10, quantizeTexcoord: 16, quantizeGeneric: 16 } : { quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 };
+  const q = a.group === 'landmarks' || a.group === 'airport' ? { quantizePosition: 16, quantizeNormal: 10, quantizeTexcoord: 16, quantizeGeneric: 16 } : { quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 };
   await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', ...q }));
-  if (a.group === 'landmarks') {
+  if (a.group === 'landmarks' || a.group === 'airport') {
     // the file's own triangle counts per level (the compression drops degenerate triangles)
     const count = (n) => (n.getMesh()?.listPrimitives() ?? []).reduce((t, p) => t + (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3, 0) + n.listChildren().reduce((t, c) => t + count(c), 0);
     report.tris = report.tris.map((_, i) => {
       const g = doc.getRoot().listNodes().find((n) => n.getName() === `lod${i}`);
       return g ? count(g) : 0;
     });
-    report.sidecar.lods.forEach((l, i) => (l.tris = report.tris[i]));
+    report.sidecar.lods?.forEach((l, i) => (l.tris = report.tris[i]));
+  }
+  if (a.group === 'transit') {
+    // the file's own triangle counts: the railcar per `lod<N>` group, the kit per part (`<part>_lod<N>`) and summed per level
+    const count = (n) => (n.getMesh()?.listPrimitives() ?? []).reduce((t, p) => t + (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3, 0) + n.listChildren().reduce((t, c) => t + count(c), 0);
+    const named = (name) => doc.getRoot().listNodes().find((n) => n.getName() === name);
+    if (report.sidecar.parts) {
+      const sums = report.tris.map(() => 0);
+      for (const [p, part] of Object.entries(report.sidecar.parts)) {
+        part.tris = part.tris.map((_, i) => (named(`${p}_lod${i}`) ? count(named(`${p}_lod${i}`)) : 0));
+        sums.forEach((_, i) => (sums[i] += part.tris[Math.min(i, part.tris.length - 1)]));
+      }
+      report.tris = sums;
+    } else {
+      report.tris = report.tris.map((_, i) => (named(`lod${i}`) ? count(named(`lod${i}`)) : 0));
+      report.sidecar.lods.forEach((l, i) => (l.tris = report.tris[i]));
+    }
   }
   const bytes = await io.writeBinary(doc);
   writeFileSync(join(outDirs[a.group], `${a.name}.glb`), bytes);
@@ -99,13 +121,22 @@ async function buildOne(a, tmp) {
     const side = { ...report.sidecar, id: a.name, model: `assets/landmarks/${a.name}.glb`, hash, bytes: bytes.length };
     writeFileSync(join(outDirs.landmarks, `${a.name}.json`), `${JSON.stringify(side, null, 1)}\n`);
   }
+  if (a.group === 'airport') {
+    // a hero: the landmark sidecar (the pipeline reads it from public/assets/airport/); an aircraft: its dimensions and colliders
+    const side = { ...report.sidecar, id: a.name, model: `assets/airport/${a.name}.glb`, hash, bytes: bytes.length };
+    writeFileSync(join(outDirs.airport, `${a.name}.json`), `${JSON.stringify(side, null, 1)}\n`);
+  }
+  if (a.group === 'transit') {
+    const side = { ...report.sidecar, model: `assets/transit/${a.name}.glb`, hash, bytes: bytes.length };
+    writeFileSync(join(outDirs.transit, `${a.name}.json`), `${JSON.stringify(side, null, 1)}\n`);
+  }
   return { report, bytes: bytes.length, hash };
 }
 
 for (const d of Object.values(outDirs)) mkdirSync(d, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'hood-assets-'));
 const readManifest = (g) => (existsSync(manifestPaths[g]) ? JSON.parse(readFileSync(manifestPaths[g], 'utf8')) : { [g]: {} });
-const manifests = { vehicles: readManifest('vehicles'), props: readManifest('props'), landmarks: readManifest('landmarks') };
+const manifests = { vehicles: readManifest('vehicles'), props: readManifest('props'), landmarks: readManifest('landmarks'), transit: readManifest('transit'), airport: readManifest('airport') };
 const todo = list.filter((a) => !only || only.has(a.name));
 let failed = 0;
 try {
@@ -118,6 +149,8 @@ try {
           const r = await buildOne(a, tmp);
           if (a.group === 'landmarks') manifests.landmarks.landmarks[a.name] = { file: `assets/landmarks/${a.name}.glb`, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
           else if (a.group === 'props') manifests.props.props[a.name] = { file: `assets/props/${a.name}.glb`, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
+          else if (a.group === 'airport') manifests.airport.airport[a.name] = { file: `assets/airport/${a.name}.glb`, sidecar: `assets/airport/${a.name}.json`, kind: a.kind ?? 'hero', hash: r.hash, bytes: r.bytes, tris: r.report.tris };
+          else if (a.group === 'transit') manifests.transit.transit[a.name] = { file: `assets/transit/${a.name}.glb`, sidecar: `assets/transit/${a.name}.json`, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
           else manifests.vehicles.vehicles[a.name] = { file: `assets/vehicles/${a.name}.glb`, type: a.type, police: !!a.police, hash: r.hash, bytes: r.bytes, tris: r.report.tris };
           const warn = r.report.warnings?.length ? `  WARN ${r.report.warnings.join('; ')}` : '';
           console.log(`${a.name.padEnd(14)} ${String(r.bytes).padStart(7)} B  tris ${r.report.tris.join(' / ')}  ${((Date.now() - t0) / 1000).toFixed(1)} s${warn}`);
@@ -136,5 +169,7 @@ const comment = 'Written by tools/blender/build.mjs (npm run assets). Do not edi
 writeFileSync(manifestPaths.vehicles, `${JSON.stringify(sortedBy(manifests.vehicles, 'vehicles', comment), null, 2)}\n`);
 writeFileSync(manifestPaths.props, `${JSON.stringify(sortedBy(manifests.props, 'props', comment), null, 2)}\n`);
 writeFileSync(manifestPaths.landmarks, `${JSON.stringify(sortedBy(manifests.landmarks, 'landmarks', comment), null, 2)}\n`);
-console.log(`manifests: ${manifestPaths.vehicles}, ${manifestPaths.props}, ${manifestPaths.landmarks}`);
+writeFileSync(manifestPaths.transit, `${JSON.stringify(sortedBy(manifests.transit, 'transit', comment), null, 2)}\n`);
+writeFileSync(manifestPaths.airport, `${JSON.stringify(sortedBy(manifests.airport, 'airport', comment), null, 2)}\n`);
+console.log(`manifests: ${manifestPaths.vehicles}, ${manifestPaths.props}, ${manifestPaths.landmarks}, ${manifestPaths.transit}, ${manifestPaths.airport}`);
 process.exit(failed ? 1 : 0);

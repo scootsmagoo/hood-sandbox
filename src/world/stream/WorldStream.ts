@@ -14,6 +14,8 @@ import { fixtureFar, fixtureTile } from '../../shared/fixture';
 import { parseLanes, type LaneJunctionData } from '../../shared/lanes';
 import { parseProps, parseRoads, type PropsData, type RoadData } from '../../shared/tile';
 import { parseScenarios, type ScenarioPoint } from '../../shared/walk';
+import { parseLandmarks, type LandmarkEntry } from '../../shared/landmarks';
+import { Landmarks } from '../../client/render/Landmarks';
 import type { Game, System } from '../../client/Game';
 import { freezeStatic } from '../../client/render/freeze';
 import type { Look } from '../../client/render/look';
@@ -33,6 +35,8 @@ export interface ClientTileData {
   anchors: PropsData | null;
   scenarios: ScenarioPoint[];
   junctions: LaneJunctionData[];
+  /** the tile's landmarks.json (the heroes drawn by `Landmarks`, the names the street label shows) */
+  landmarks?: LandmarkEntry[];
 }
 
 interface NearTile {
@@ -90,6 +94,9 @@ export class WorldStream implements System {
   private unionDirty = false;
   private unionStep = 0;
   private props: ScenarioProps | null = null;
+  /** the hero models of the loaded tiles (made with the first tile that has any; a hero, once loaded, stays: they are few) */
+  private heroes: Landmarks | null = null;
+  private readonly landmarkById = new Map<string, LandmarkEntry>();
   private heads: SignalHeads | null = null;
   private lastCheck = -Infinity;
   private readonly counters = { adds: 0, drops: 0, unionBuilds: 0, addMs: [] as number[], tileMs: 0, blockMs: 0, stepMs: [] as number[] };
@@ -231,7 +238,7 @@ export class WorldStream implements System {
         .catch(() => null);
     const manifest = await get('tile.json');
     if (!manifest) throw new Error('no tile.json');
-    const [view, roads, props, scen, lanes] = await Promise.all([createTileView(manifest, dir, `tile:${e.id}`), get(manifest.roads ?? 'roads.json'), manifest.props ? get(manifest.props) : null, manifest.scenarios ? get(manifest.scenarios) : null, manifest.lanes ? get(manifest.lanes) : null]);
+    const [view, roads, props, scen, lanes, marks] = await Promise.all([createTileView(manifest, dir, `tile:${e.id}`), get(manifest.roads ?? 'roads.json'), manifest.props ? get(manifest.props) : null, manifest.scenarios ? get(manifest.scenarios) : null, manifest.lanes ? get(manifest.lanes) : null, manifest.landmarks ? get(manifest.landmarks) : null]);
     if (t.gone) {
       view.dispose();
       return;
@@ -244,6 +251,7 @@ export class WorldStream implements System {
       anchors: props ? parseProps(props) : null,
       scenarios: scen ? (parseScenarios(scen)?.points ?? []) : [],
       junctions: (lanesData?.junctions ?? []).map((j) => ({ ...j, id: `${e.id}/${j.id}` })),
+      landmarks: marks ? (parseLandmarks(marks)?.landmarks ?? []) : [],
     };
     view.root.removeFromParent();
     t.pending = { root: view.root, view, data };
@@ -261,6 +269,16 @@ export class WorldStream implements System {
     this.counters.adds++;
     this.unionDirty = true;
     this.unionStep = 0;
+    // its landmarks: the hero models (drawn once per id however many tiles list them) and the names the street label shows
+    const marks = p.data.landmarks ?? [];
+    if (marks.length && !this.base.startsWith('fixture')) {
+      for (const m of marks) if (!this.landmarkById.has(m.id) || m.hero) this.landmarkById.set(m.id, m);
+      if (marks.some((m) => m.hero) && this.game.params.get('landmarks') !== 'off') {
+        if (!this.heroes) this.heroes = this.game.addSystem(new Landmarks(this.game));
+        void this.heroes.load(marks, document.baseURI);
+      }
+      this.hooks.streetName?.setLandmarks([...this.landmarkById.values()]);
+    }
     // its far mesh goes
     const f = this.far.get(t.entry.id);
     if (f) this.dropFar(t.entry.id, f);
@@ -402,6 +420,8 @@ export class WorldStream implements System {
     this.dirtyBlocks.clear();
     this.props?.dispose();
     this.heads?.dispose();
+    this.heroes?.dispose();
+    this.heroes = null;
     this.root.removeFromParent();
     this.farRoot.removeFromParent();
     this.farMat.dispose();

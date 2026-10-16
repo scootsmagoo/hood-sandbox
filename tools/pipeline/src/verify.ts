@@ -7,6 +7,7 @@ import { readCollision, readHeightmap } from './io/binary.js';
 import { decodeGlb } from './io/glb.js';
 import { checkTileGrades } from './check-grades.js';
 import { connectivity, type LanesFile } from './world/lanes.js';
+import { checkTransit } from './world/transitCheck.js';
 
 const cfg = loadTileConfig();
 const dir = cfg.outDir;
@@ -318,6 +319,18 @@ check(total < 14 * 1024 * 1024, `total tile size ${(total / 1048576).toFixed(2)}
     for (const l of lines) console.log(`     ${l.replace(/^\[ground [0-9.]+s\] /, '')}`);
     check(r.status === 0, `ground audit${mode === 'quick' ? ' (quick)' : ''}: no lane or main road into a building; launches, steps, jolts, contacts and give-ups within the gate (a ratchet: docs/ground-audit.md)${r.status === 0 ? '' : ` (exit ${r.status}${r.error ? `: ${r.error.message}` : ''})`}`);
   }
+}
+
+// the transit layer (docs/contracts/m1-tile-format.md, "transit.json")
+if (tile.transit) {
+  const tr = JSON.parse(readFileSync(path.join(dir, tile.transit), 'utf8'));
+  const rep = checkTransit(tr);
+  console.log(`     transit.json: ${rep.routes} routes, ${rep.stations} stations (${tr.stations.map((s: { displayName: string }) => s.displayName).join(', ')}), ${rep.volumes} spaces under the ground, ${rep.collisionTris} collision triangles`);
+  check(rep.routes > 0 && rep.stations > 0, 'transit: routes and stations');
+  check(rep.maxGrade <= 0.045, `transit: grades at most 4.5% over 12 m (worst ${(rep.maxGrade * 100).toFixed(1)}%${rep.worstGradeAt ? ` at ${rep.worstGradeAt.map((v) => v.toFixed(0)).join(', ')}` : ''})`);
+  check(rep.stopsOff.length === 0, `transit: every stop on its platform${rep.stopsOff.length ? ` (${rep.stopsOff.slice(0, 4).join('; ')})` : ''}`);
+  check(rep.unreachable.length === 0, `transit: every platform reached over the walk network (from every entrance under the ground)${rep.unreachable.length ? ` (${rep.unreachable.slice(0, 4).join('; ')})` : ''}`);
+  check(rep.collisionTris > 1000 && existsSync(path.join(dir, tr.collision.file)) && existsSync(path.join(dir, tr.mesh)), 'transit: transit.bin and transit.glb');
 }
 
 if (failures.length) {

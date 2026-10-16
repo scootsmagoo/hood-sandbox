@@ -49,6 +49,8 @@ export class Game {
   private raf = 0;
   private tierListeners: Array<(t: Tier) => void> = [];
   paused = false;
+  /** The full-screen map covers the view: the scene is not drawn (the systems still run). */
+  renderPaused = false;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -141,7 +143,7 @@ export class Game {
     for (const s of this.systems) s.lateUpdate?.(dt);
     // (about twice a second: instanced casters get a depth material of their own kind, see depthMaterials.ts)
     if ((this.frame & 31) === 0 && this.renderer.shadowMap.enabled) ownDepthAll(this.scene);
-    this.renderer.render(this.scene, this.camera);
+    if (!this.renderPaused) this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
     this.cpuMs = performance.now() - cpu0;
 

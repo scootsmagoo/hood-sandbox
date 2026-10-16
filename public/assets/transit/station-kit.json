@@ -1,0 +1,320 @@
+{
+ "asset": "station-kit",
+ "materials": [
+  "tr_steel",
+  "tr_dark",
+  "tr_glass",
+  "tr_interior",
+  "tr_light",
+  "tr_concrete",
+  "tr_tile",
+  "tr_signface",
+  "tr_screen",
+  "tr_lightface"
+ ],
+ "parts": {
+  "column": {
+   "size": [
+    1.36,
+    4.5,
+    1.36
+   ],
+   "min": [
+    -0.68,
+    0,
+    -0.68
+   ],
+   "max": [
+    0.68,
+    4.5,
+    0.68
+   ],
+   "tris": [
+    122,
+    70
+   ],
+   "origin": "floor centre"
+  },
+  "bench": {
+   "size": [
+    2,
+    0.884,
+    0.535
+   ],
+   "min": [
+    -1,
+    0,
+    -0.325
+   ],
+   "max": [
+    1,
+    0.884,
+    0.21
+   ],
+   "tris": [
+    160,
+    62
+   ],
+   "origin": "floor centre"
+  },
+  "sign_name": {
+   "size": [
+    3.1,
+    1.45,
+    0.12
+   ],
+   "min": [
+    -1.55,
+    -0.325,
+    -0.06
+   ],
+   "max": [
+    1.55,
+    1.125,
+    0.06
+   ],
+   "tris": [
+    88
+   ],
+   "origin": "face centre",
+   "face": [
+    3,
+    0.55
+   ]
+  },
+  "screen": {
+   "size": [
+    1.32,
+    1.12,
+    0.32
+   ],
+   "min": [
+    -0.66,
+    -0.26,
+    -0.16
+   ],
+   "max": [
+    0.66,
+    0.86,
+    0.16
+   ],
+   "tris": [
+    112
+   ],
+   "origin": "face centre",
+   "face": [
+    1.2,
+    0.4
+   ]
+  },
+  "fare_gate": {
+   "size": [
+    0.58,
+    0.98,
+    1.61
+   ],
+   "min": [
+    -0.29,
+    0,
+    -0.805
+   ],
+   "max": [
+    0.29,
+    0.98,
+    0.805
+   ],
+   "tris": [
+    96,
+    54
+   ],
+   "origin": "floor centre",
+   "collider": [
+    0.26,
+    0.85,
+    1.6
+   ]
+  },
+  "pylon": {
+   "size": [
+    0.72,
+    4.2,
+    0.72
+   ],
+   "min": [
+    -0.36,
+    0,
+    -0.36
+   ],
+   "max": [
+    0.36,
+    4.2,
+    0.36
+   ],
+   "tris": [
+    116
+   ],
+   "origin": "floor centre",
+   "face": [
+    0.54,
+    0.68
+   ]
+  },
+  "canopy": {
+   "size": [
+    4.04,
+    3.71,
+    10.292
+   ],
+   "min": [
+    -2.02,
+    -0.6,
+    -0.772
+   ],
+   "max": [
+    2.02,
+    3.11,
+    9.52
+   ],
+   "tris": [
+    412,
+    172
+   ],
+   "origin": "top of the stairs, street level, centre"
+  },
+  "railing": {
+   "size": [
+    1,
+    1,
+    0.12
+   ],
+   "min": [
+    -0.5,
+    0,
+    -0.06
+   ],
+   "max": [
+    0.5,
+    1,
+    0.06
+   ],
+   "tris": [
+    82
+   ],
+   "origin": "floor centre"
+  },
+  "lamp_tube": {
+   "size": [
+    1.5,
+    0.12,
+    0.22
+   ],
+   "min": [
+    -0.75,
+    -0.12,
+    -0.11
+   ],
+   "max": [
+    0.75,
+    0,
+    0.11
+   ],
+   "tris": [
+    20
+   ],
+   "origin": "top (hangs below)"
+  },
+  "tunnel_bay": {
+   "size": [
+    0.38,
+    2.64,
+    12
+   ],
+   "min": [
+    0,
+    0.3,
+    -6
+   ],
+   "max": [
+    0.38,
+    2.94,
+    6
+   ],
+   "tris": [
+    490,
+    136
+   ],
+   "origin": "wall plane x = 0, track bed y = 0, bay centre"
+  },
+  "signal": {
+   "size": [
+    0.53,
+    0.9,
+    0.31
+   ],
+   "min": [
+    0,
+    0,
+    -0.09
+   ],
+   "max": [
+    0.53,
+    0.9,
+    0.22
+   ],
+   "tris": [
+    250
+   ],
+   "origin": "bracket's wall foot (wall x = 0)"
+  },
+  "bin": {
+   "size": [
+    0.536,
+    0.9,
+    0.55
+   ],
+   "min": [
+    -0.268,
+    0,
+    -0.275
+   ],
+   "max": [
+    0.268,
+    0.9,
+    0.275
+   ],
+   "tris": [
+    308,
+    80
+   ],
+   "origin": "floor centre"
+  },
+  "map_board": {
+   "size": [
+    2,
+    1.2,
+    0.06
+   ],
+   "min": [
+    -1,
+    0,
+    0
+   ],
+   "max": [
+    1,
+    1.2,
+    0.06
+   ],
+   "tris": [
+    26
+   ],
+   "origin": "bottom centre of the frame, on the wall (z = 0)",
+   "face": [
+    1.9,
+    1.1
+   ]
+  }
+ },
+ "model": "assets/transit/station-kit.glb",
+ "hash": "dbb2fa31d1c8",
+ "bytes": 141500
+}

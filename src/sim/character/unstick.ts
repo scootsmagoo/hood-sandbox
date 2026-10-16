@@ -84,6 +84,14 @@ export class UnstickSystem implements SimSystem {
       return;
     }
     const sitting = ped.amb?.mode === 'scenario';
+    // under the ground (a station, a tunnel): the ground and the buildings are over them, not around them; the transit layer's own
+    // people are walked by their director
+    if (sim.transit && !sim.transit.failed && sim.transit.underground(c.x, c.y, c.z)) {
+      tr.bad = 0;
+      tr.t = 0;
+      if (c.grounded) tr.good = { x: c.x, y: c.y, z: c.z };
+      return;
+    }
     const inside = phys.footprints.inside(c.x, c.y, c.z);
     const fell = c.y < phys.groundHeight(c.x, c.z) - 1.2;
     const overlap = !inside && !fell && phys.overlapsStatic(c.x, c.y, c.z, { props: !sitting });

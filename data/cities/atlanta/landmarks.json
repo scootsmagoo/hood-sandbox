@@ -1610,6 +1610,443 @@
       ]
     },
     {
+      "id": "atl-domestic-terminal",
+      "name": "Domestic Terminal",
+      "displayName": "Domestic Terminal",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6408028,
+      "lon": -84.444634,
+      "x": -5098.0,
+      "z": 12583.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/264678569",
+        "way/44488347",
+        "way/44488346"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The long terminal of the North and South Terminals round a great glass-roofed atrium: ticketing, baggage claim, the security checkpoint, the rail station at its west end and the curbs under deep canopies.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/264678569",
+        "https://www.openstreetmap.org/way/44488347"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-t",
+      "name": "Concourse T",
+      "displayName": "Concourse T",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6408143,
+      "lon": -84.4425105,
+      "x": -4901.0,
+      "z": 12582.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445333"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The concourse joined to the Domestic Terminal: a long two-storey hall of glass gate lounges over the ramp level, with jet bridges.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445333"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-a",
+      "name": "Concourse A",
+      "displayName": "Concourse A",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6405206,
+      "lon": -84.4391793,
+      "x": -4592.0,
+      "z": 12615.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445165"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A long, low two-storey concourse in the middle of the field, glazed gate lounges over the ramp level, a skylit spine and jet bridges down both sides.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445165"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-b",
+      "name": "Concourse B",
+      "displayName": "Concourse B",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6406414,
+      "lon": -84.4359134,
+      "x": -4289.0,
+      "z": 12602.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445168"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A long, low two-storey concourse in the middle of the field, glazed gate lounges over the ramp level, a skylit spine and jet bridges down both sides.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445168"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-c",
+      "name": "Concourse C",
+      "displayName": "Concourse C",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.640609,
+      "lon": -84.4325826,
+      "x": -3980.0,
+      "z": 12606.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445167"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A long, low two-storey concourse in the middle of the field, glazed gate lounges over the ramp level, a skylit spine and jet bridges down both sides.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445167"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-d",
+      "name": "Concourse D",
+      "displayName": "Concourse D",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6405403,
+      "lon": -84.4293272,
+      "x": -3678.0,
+      "z": 12614.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445166"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The narrow concourse of the regional jets: a long two-storey hall with closely spaced jet bridges.",
+      "opened": 1980,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445166"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-e",
+      "name": "Concourse E",
+      "displayName": "Concourse E",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6407071,
+      "lon": -84.4248757,
+      "x": -3265.0,
+      "z": 12596.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/24445175",
+        "way/1375871784",
+        "way/1375871788"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The international concourse built for the 1996 Games: taller, with widebody gates and jet bridges.",
+      "opened": 1994,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/24445175",
+        "https://www.openstreetmap.org/way/1375871784"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-concourse-f",
+      "name": "Concourse F",
+      "displayName": "Concourse F",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6393421,
+      "lon": -84.4194843,
+      "x": -2765.0,
+      "z": 12748.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/169784353"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The international concourse of 2012: a curved roof with deep overhangs over a tall glass wall, widebody gates.",
+      "opened": 2012,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/169784353"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-international-terminal",
+      "name": "Maynard H. Jackson Jr. International Terminal",
+      "displayName": "Maynard H. Jackson Jr. International Terminal",
+      "trademark": false,
+      "kind": "terminal",
+      "district": "Edges",
+      "lat": 33.6403168,
+      "lon": -84.4183754,
+      "x": -2662.0,
+      "z": 12640.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/328278997"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The international terminal on the east side of the field: a long glass hall under a sweeping wing of a roof cantilevered over its curb.",
+      "opened": 2012,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/328278997"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-control-tower",
+      "name": "Atlanta Tower",
+      "displayName": "Atlanta Tower",
+      "trademark": false,
+      "kind": "tower",
+      "district": "Edges",
+      "lat": 33.6417111,
+      "lon": -84.4216865,
+      "x": -2969.0,
+      "z": 12485.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/169785102"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The 121 m (398 ft) air traffic control tower, the tallest in North America when it opened: a slender concrete shaft and a wide cab of outward-leaning dark glass.",
+      "opened": 2006,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/169785102"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-north-hourly-deck",
+      "name": "North Hourly Parking",
+      "displayName": "North Hourly Parking",
+      "trademark": false,
+      "kind": "parking",
+      "district": "Edges",
+      "lat": 33.6425073,
+      "lon": -84.4442488,
+      "x": -5062.0,
+      "z": 12394.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/449350801"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A four-level concrete parking deck by the North Terminal curb.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/449350801"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-north-daily-deck",
+      "name": "North Daily Parking",
+      "displayName": "North Daily Parking",
+      "trademark": false,
+      "kind": "parking",
+      "district": "Edges",
+      "lat": 33.6429304,
+      "lon": -84.4447777,
+      "x": -5111.0,
+      "z": 12347.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/166825340"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A four-level concrete parking deck north of the terminal.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/166825340"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-south-hourly-deck",
+      "name": "South Hourly Parking",
+      "displayName": "South Hourly Parking",
+      "trademark": false,
+      "kind": "parking",
+      "district": "Edges",
+      "lat": 33.6391348,
+      "lon": -84.4446959,
+      "x": -5104.0,
+      "z": 12768.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/144043678"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A four-level concrete parking deck by the South Terminal curb.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/144043678"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-south-daily-deck",
+      "name": "South Daily Parking",
+      "displayName": "South Daily Parking",
+      "trademark": false,
+      "kind": "parking",
+      "district": "Edges",
+      "lat": 33.63799,
+      "lon": -84.4445215,
+      "x": -5088.0,
+      "z": 12895.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/92994684"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A four-level concrete parking deck south of the terminal.",
+      "opened": null,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/92994684"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-west-parking-deck",
+      "name": "ATL West Parking Deck",
+      "displayName": "ATL West Parking Deck",
+      "trademark": false,
+      "kind": "parking",
+      "district": "Edges",
+      "lat": 33.6422635,
+      "lon": -84.4591777,
+      "x": -6447.0,
+      "z": 12419.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/901848459"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "A seven-level parking deck by the Gateway Center on the SkyTrain.",
+      "opened": 2019,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/901848459"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-rental-car-center",
+      "name": "Rental Car Center",
+      "displayName": "Rental Car Center",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Edges",
+      "lat": 33.639895,
+      "lon": -84.4640994,
+      "x": -6904.0,
+      "z": 12681.0,
+      "inM1Tile": false,
+      "osm": [
+        "way/62331392",
+        "way/62331390",
+        "way/575614361",
+        "way/575620089",
+        "way/575620097",
+        "way/575620098",
+        "way/575620103",
+        "way/575620104",
+        "way/561065977"
+      ],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "Two four-level decks of rental cars with brick stair towers, a customer service hall and the SkyTrain station.",
+      "opened": 2009,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport",
+        "https://www.openstreetmap.org/way/62331392",
+        "https://www.openstreetmap.org/way/62331390"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
+      "id": "atl-skytrain",
+      "name": "ATL SkyTrain",
+      "displayName": "ATL SkyTrain",
+      "trademark": false,
+      "kind": "transit",
+      "district": "Edges",
+      "lat": 33.6423481,
+      "lon": -84.4565262,
+      "x": -6201.0,
+      "z": 12410.0,
+      "inM1Tile": false,
+      "osm": [],
+      "priority": "hero",
+      "sensitive": false,
+      "look": "The elevated automated people mover from the Domestic Terminal to the Gateway Center and the Rental Car Center, a concrete guideway on single columns.",
+      "opened": 2009,
+      "sources": [
+        "https://en.wikipedia.org/wiki/Hartsfield%E2%80%93Jackson_Atlanta_International_Airport"
+      ],
+      "airport": "hartsfield-jackson-airport"
+    },
+    {
       "id": "stone-mountain-park",
       "name": "Stone Mountain Park",
       "displayName": "Stone Mountain Park",

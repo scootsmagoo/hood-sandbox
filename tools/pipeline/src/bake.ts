@@ -31,9 +31,11 @@ import { buildRoads, planRoads } from './world/roads.js';
 import { buildLanes } from './world/lanes.js';
 import { addSyntheticSidewalkMesh, buildPaths } from './world/paths.js';
 import { buildScenarios } from './world/scenarios.js';
+import { areaInside, bakeTransit, footprintTest, shareInside, transitOutlines } from './world/transitBake.js';
 import { pickSpawns } from './world/spawns.js';
 import { buildGroundMesh, heightmapFromDem, LAND_CLASSES, minMax, rasterizeAreas, surfaceHeight } from './world/terrain.js';
 import { DEFAULT_DECK_OPTIONS } from './world/decks.js';
+import * as aero from './world/aerowayBake.js';
 
 /** A grid tile builds no junction polygon this close (m) to its edges (see buildRoads). */
 const SEAM_CLEAR = 30;
@@ -48,6 +50,9 @@ const MAT: Record<string, MaterialSpec> = {
   markings: { name: 'road_markings', baseColor: [1, 1, 1, 1], roughness: 0.7 },
   rail: { name: 'road_rail', baseColor: [linear(0.30), linear(0.26), linear(0.22), 1], roughness: 1 },
   concrete: { name: 'road_concrete', baseColor: [1, 1, 1, 1], roughness: 0.9 },
+  // the airport's pavement and paint (world/aerowaySurface.ts)
+  airfield: { name: 'road_airfield', baseColor: [1, 1, 1, 1], roughness: 0.92 },
+  aeromark: { name: 'road_aeromark', baseColor: [1, 1, 1, 1], roughness: 0.75 },
   wall: { name: 'bld_wall', baseColor: [1, 1, 1, 1], roughness: 0.9 },
   roof: { name: 'bld_roof', baseColor: [1, 1, 1, 1], roughness: 0.95 },
   glass: { name: 'bld_glass', baseColor: [1, 1, 1, 1], metallic: 0.35, roughness: 0.25 },
@@ -137,6 +142,12 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const osm = await fetchOsm(cfg);
   used.osm = true;
   log(`osm: ${osm.elements.length} elements`);
+  // an airport in the tile's grid (world/aerowayBake.ts): its roads under overhangs and its freeway under the pavement are opened up
+  const airport = aero.loadAerowayTile(cfg, log);
+  if (airport) {
+    const r = aero.prepareOsm(airport, cfg, osm);
+    log(`aeroway: ${r.passages} roads under building overhangs built at grade, ${r.underPavement} freeway tunnels under the pavement built in their cuts`);
+  }
 
   let dem: Dem | null = null;
   try {
@@ -183,6 +194,11 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   if (pm > 0) {
     planHm = heightmapFromDem(dem, cfg.projector, cfg.origin, cfg.cols + 2 * pm, cfg.rows + 2 * pm, cfg.cellSize, b.minX - pm * cfg.cellSize, b.minZ - pm * cfg.cellSize).hm;
   }
+  if (airport) {
+    // the airfield's ground and the airport buildings' floors, before the roads are designed on it
+    aero.level(airport, cfg, planHm, baseElevation);
+    log(`aeroway: ground levelled ${JSON.stringify(airport.stats.level)}`);
+  }
   const plan = planRoads(world.roads, planHm);
   if (pm > 0) {
     for (let r = 0; r < hm.rows; r++) for (let c = 0; c < hm.cols; c++) hm.data[r * hm.cols + c] = planHm.data[(r + pm) * planHm.cols + c + pm];
@@ -191,6 +207,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`profiles: ${plan.stats.nodes} nodes, ${plan.stats.dipNodes} in dips, ${plan.stats.ties} side-by-side ties, ${plan.stats.clearances} clearances under car decks (short by up to ${plan.stats.clearanceShort.toFixed(2)} m), ${plan.stats.relaxedCurves} vertical curves eased and ${plan.stats.softTies} ties loosened to keep a grade or clearance, ${plan.stats.atGradeBridges} mapped bridges at grade built on the ground, ${plan.stats.deckSpans} bridged spans (${plan.stats.embankedSpans} more with nothing under them are embankments; ${Math.round(plan.stats.deckMetres)} m designed), terrain moved at ${plan.stats.carvedVertices} vertices (cut up to ${plan.stats.maxCut.toFixed(1)} m, fill up to ${plan.stats.maxFill.toFixed(1)} m; ground cut away under decks up to ${plan.stats.underDeckCut.toFixed(1)} m); corridor smoothed at ${plan.stats.smoothedVertices} vertices (up to ${plan.stats.smoothMaxChange.toFixed(2)} m); bridges grown by ${plan.stats.deckNodesExtended} nodes to land, ${plan.stats.deckEndsUnlanded} ends still off the ground`);
 
   const land = rasterizeAreas(world.areas, hm);
+  if (airport) aero.land(airport, land, hm);
   const grid = makeChunkGrid(b, cfg.chunkSize);
   const cellsPerChunk = cfg.chunkSize / hm.cellSize;
   const l1Step = GROUND_LOD1.step * cfg.groundMeshStep;
@@ -216,6 +233,9 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   log(`markings: ${roads.markingStats.lines} lines, ${roads.markingStats.crosswalks} crosswalks (${roads.markingStats.bars} bars), ${roads.markingStats.stopBars} stop bars, ${roads.markings.triangleCount} triangles; ${roads.controls.signals.length} signals, ${roads.controls.stops.length} stop signs, ${roads.controls.junctions.filter((c) => c.control === "signals").length} signalised and ${roads.controls.junctions.filter((c) => c.control === "stop").length} stop-controlled junctions`);
   log(`junctions: ${roads.junctionStats.built} polygons from ${roads.junctionStats.candidates} junction nodes (${roads.junctionStats.clusters} clusters); not built: ${JSON.stringify(roads.junctionStats.rejected)}`);
   log(`roads: ${roads.stats.ways} pieces, ${roads.stats.drivableWays} drivable, ${roads.stats.deckWays} decks (${Math.round(roads.stats.deckMetres)} m), ${roads.stats.piers} piers`);
+  // the airport's pavement and paint, and its decks over cuts (their slabs into the road collision)
+  const airfield = airport ? aero.meshes(airport, hm, b, roads) : null;
+  if (airport) log(`aeroway: pavement ${JSON.stringify(airport.stats.meshes)}`);
 
   // what the sources say of how buildings look beyond their footprints: OSM building parts, Wikidata facts, the known heights and looks
   const osmPartsData = await fetchOsmBuildingParts(cfg);
@@ -235,13 +255,18 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     lanePaths.push({ pts, half: LANE_CLEAR });
   }
   // hero landmarks (world/landmarks.ts): the generic buildings they replace go before anything else sees them
-  const heroes = placeHeroes(loadHeroSidecars(path.join(REPO_ROOT, 'public', 'assets', 'landmarks')), cfg.projector, b);
-  const suppressed = suppressReplaced(built.buildings, heroes);
+  const heroes = placeHeroes([...loadHeroSidecars(path.join(REPO_ROOT, 'public', 'assets', 'landmarks')), ...(airport?.heroes ?? [])], cfg.projector, b);
+  const suppressedHeroes = suppressReplaced(built.buildings, heroes);
+  // the elevated stations' structures (world/transitBake.ts): the generic building the map draws round a platform goes
+  const outlines = transitOutlines(cfg.city.id, cfg.projector, b);
+  const transitDropped = outlines.grown.length ? suppressedHeroes.buildings.filter((bd) => shareInside(bd.rings[0], outlines.grown) >= 0.3 || areaInside(bd.rings[0], outlines.deck) > 4).map((bd) => bd.id) : [];
+  const suppressed = transitDropped.length ? { ...suppressedHeroes, buildings: suppressedHeroes.buildings.filter((bd) => !transitDropped.includes(bd.id)) } : suppressedHeroes;
+  if (transitDropped.length) log(`transit: ${transitDropped.length} buildings over elevated stations left out (${transitDropped.join(', ')})`);
   const clip = clipBuildingsToRoads(suppressed.buildings, world.roads, 0.3, 6, lanePaths);
   // where cars drive (lanes and junction curves, a car's half width and a little either side): no pole, trunk or shelter stands there
   const laneMask = new RoadMask();
   for (const p of lanePaths) laneMask.addPolyline(p.pts, PROP_CLEAR);
-  const heroDatums = heroes.map((h) => heroDatum(h, (x, z) => surfaceHeight(hm, x, z)));
+  const heroDatums = heroes.map((h) => heroDatum(h, (x, z) => surfaceHeight(hm, x, z), baseElevation));
   // a hero's hull is a building of the bake that is not drawn (its model is): collision, occlusion, footprints
   const buildings = [...clip.buildings, ...heroes.flatMap((h, i) => hullBuildings(h, heroDatums[i]))];
   if (heroes.length) log(`heroes: ${heroes.map((h, i) => `${h.side.id} (replaces ${suppressed.replaced.get(h.side.id)!.length} buildings, ${h.hull.length} hull prisms)`).join(', ')}`);
@@ -263,7 +288,8 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const bstat = { kindFromData: 0, eraFromData: 0, withParts: 0, pieces: 0, podiums: 0, pitchedBuildings: 0, pitchedPieces: 0, glass: 0, floating: 0 };
   for (const bd of buildings) {
     const outer = bd.rings[0];
-    if (Math.abs(signedArea(outer)) < 6) { skipped++; continue; }
+    // (a hero's hull prism may be small: a wall, a counter, a post)
+    if (Math.abs(signedArea(outer)) < (bd.hero ? 0.2 : 6)) { skipped++; continue; }
     let minY = Infinity;
     for (const p of outer) minY = Math.min(minY, surfaceHeight(hm, p[0], p[1]));
     const cx = outer.reduce((a, p) => a + p[0], 0) / outer.length;
@@ -377,6 +403,9 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       log(`scenarios: ${before - scenarios.points.length} bus stops and benches in a car's path left out`);
     }
   }
+  // the walk-in heroes' interiors (the airport's terminal and concourse): walk network, scenario points, named places
+  const inside = airport ? aero.interiors(airport, cfg, new Map(heroes.map((h, i) => [h.side.id, heroDatums[i]])), b, paths.file, scenarios, kept.map((r) => r[0])) : null;
+  if (airport) log(`aeroway: interiors ${JSON.stringify(airport.stats.interiors)}`);
   log(`scenarios: ${scenarios.stats.total} points (${scenarios.stats.osm} from OSM, ${scenarios.stats.synth} synthesised${pois ? '' : '; the POI query failed'}) ${JSON.stringify(scenarios.stats.byType)}`);
 
   // tree, street lamp and furniture anchors (props.json): OSM where mapped, synthetic placements elsewhere
@@ -402,6 +431,10 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     ground,
     bounds: b,
   });
+  if (airport) {
+    aero.props(airport, props, ground, b);
+    log(`aeroway: props ${JSON.stringify(airport.stats.props)}`);
+  }
   log(`props: ${props.trees.length} trees ${JSON.stringify(props.stats.trees)}, ${props.lamps.length} lamps ${JSON.stringify(props.stats.lamps)}, ${props.hydrants.length} hydrants, ${props.bins.length} bins, ${props.bollards.length} bollards${osmProps ? '' : '; the OSM props query failed, synthetic only'}`);
 
   // baked ambient occlusion: the alpha of COLOR_0 on the ground and the road meshes
@@ -412,7 +445,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     return out;
   };
   for (const gp of groundParts) gp.alpha = aoOf(gp.positions);
-  for (const mb of [roads.asphalt, roads.sidewalk, roads.crosswalk, roads.rail, roads.markings]) {
+  for (const mb of [roads.asphalt, roads.sidewalk, roads.crosswalk, roads.rail, roads.markings, ...(airfield ? [airfield.surface, airfield.markings] : [])]) {
     const ch = mb.channel('ao', 1, [1]);
     ch.data = aoOf(mb.positions);
   }
@@ -438,6 +471,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
       ...chunked('markings', MAT.markings, roads.markings, grid),
       ...chunked('rail', MAT.rail, roads.rail, grid),
       ...chunked('concrete', MAT.concrete, roads.concrete, grid),
+      ...(airfield ? [...chunked('airfield', MAT.airfield, airfield.surface, grid), ...chunked('aeromarkings', MAT.aeromark, airfield.markings, grid)] : []),
     ]),
   );
   sizes['buildings.glb'] = write(
@@ -460,10 +494,40 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
   const landmarkFile = landmarkPack.length || heroes.length
     ? tileLandmarks(landmarkPack, heroes.map((h, i) => ({ place: h, datum: heroDatums[i], replaced: suppressed.replaced.get(h.side.id)!, hullTris: heroHullTris.get(h.side.id) ?? 0 })), cfg.projector, b)
     : null;
+  if (landmarkFile && inside) {
+    // the interiors' named places, and their indoor zones on their heroes
+    landmarkFile.landmarks.push(...inside.places);
+    for (const l of landmarkFile.landmarks) {
+      const zn = inside.zones.get(l.id);
+      if (zn && l.hero) l.zones = zn;
+    }
+  }
   if (landmarkFile) {
     sizes['landmarks.json'] = write(path.join(out, 'landmarks.json'), JSON.stringify(landmarkFile));
     log(`landmarks: ${landmarkFile.landmarks.length} in the tile, ${heroes.length} with a hero model`);
   }
+
+  // the transit layer (world/transit*.ts): the rail lines, tunnels and stations under and over the tile, in files of their own
+  const kitObstacles: V2[] = [...props.trees, ...props.lamps, ...props.hydrants, ...props.bins, ...props.bollards].map((t) => [t[0], t[2]] as V2);
+  for (const q of scenarios.points) if (q.type === 'busstop' || q.type === 'bench') kitObstacles.push([q.x, q.z]);
+  const transit = await bakeTransit({
+    repoRoot: REPO_ROOT,
+    cityId: cfg.city.id,
+    endpoints: cfg.city.sources.osm.endpoints,
+    projector: cfg.projector,
+    bounds: b,
+    chunkSize: cfg.chunkSize,
+    outDir: out,
+    ground,
+    roads: roads.json,
+    inBuilding: footprintTest(kept),
+    obstacles: kitObstacles,
+    log,
+  }).catch((e) => {
+    console.warn(`transit: failed (${(e as Error).message}); the tile is baked without transit`);
+    return null;
+  });
+  if (transit) Object.assign(sizes, transit.sizes);
 
   const attribution = [cfg.city.sources.osm.attribution];
   if (used.overture) attribution.push(cfg.city.sources.overture.attribution);
@@ -496,6 +560,7 @@ export async function bake(cfg: TileConfig = loadTileConfig()): Promise<BakeRepo
     scenarios: 'scenarios.json',
     props: 'props.json',
     ...(landmarkFile ? { landmarks: 'landmarks.json' } : {}),
+    ...(transit ? { transit: transit.field } : {}),
     meshFormat: 3,
     buildingKinds: [...BUILDING_KINDS],
     buildingMaterials: [...MATERIALS],

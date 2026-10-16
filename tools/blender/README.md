@@ -243,3 +243,50 @@ Adding a landmark: add it to `HEROES` in `footprints.mjs` (an Overture building 
 `landmarks/<name>.py` from the closest existing script; list it in `assets.json` under `"landmarks"` with the id of the city pack
 (`data/cities/<city>/landmarks.json`, which names it); `npm run assets`, bake (`npm run bake` in `tools/pipeline/`), and look at it
 with `scripts/landmark-shots.mjs`.
+
+## Transit (`transit/`)
+
+`npm run assets` also builds the Peach Rapid Transit models into `public/assets/transit/`, each with a `<name>.json` sidecar
+(listed under `"transit"` in `assets.json`; manifest `src/client/render/transitAssets.manifest.json`). Parody brand only: no
+real transit logos, wordmarks or lettering; every sign face is a blank panel with 0..1 UVs (TEXCOORD_0, u to the viewer's
+right, v up) that the game draws its own text on. Checks: `transit/verify.ts`, run by `tests/transitAssets.test.ts`.
+
+```
+node tools/blender/build.mjs --only railcar,station-kit --preview /tmp/p   # Cycles previews: cab, side, rear, front, bogie, interior, window, cabin, lod1, lod2; kit overview, platform, gate, canopy, tunnel, walls, lod1
+```
+
+| Module | What |
+|---|---|
+| `tk.py` | The kit both use, on the landmarks' `lm.Lod`: box UVs inside [0, 1] unless given, `sign_quad`, `prism_x`/`prism_y`, `revolve` (wheels, poles, bins), face `grid`s with holes (sides with windows and doors), `bake_ao` (ray-cast occlusion into COLOR_0 alpha), `emit` (one object per piece, one primitive per material; a moving piece is an empty at its pivot over `<name>_mesh`). |
+| `railcar.py` | The car, every number from `src/shared/data/railcar.json` (the file the sim boards, seats and collides by; the seats drawn are its `seats`). |
+| `kit.py` | The station and tunnel parts. |
+| `preview.py` | Look-alike materials for the previews only (swapped back before the export). |
+
+**railcar.glb** (`transit.railcar`): a 22.86 m stainless metro car in the manner of the Atlanta fleet (fluted lower sides, a peach band
+with a navy pinstripe, a black-masked cab at +Z with the destination sign box, headlights and red markers, a gangway end door and
+couplers at both ends). Car frame: +X the car's left, +Z the cab end, origin on the track centre at rail top, mid-car.
+
+```
+railcar                          extras: asset, lod_tris, lod_from [0, 60, 220], leafTravel
+  lod0  lod0_body, lod0_interior (floor, linings, ceiling with two light strips, 2 + 2 seats, poles, grab rails, draft screens,
+        both end walls, the cab), lod0_bogie_F/_R, lod0_door_{L,R}{0,1,2}_{a,b}
+  lod1  lod1_body (exterior, glass over a dark box), lod1_bogie_F/_R, lod1_door_...
+  lod2  lod2_body (shell, band and windows as materials, doors and bogies merged)
+  anchors  anchor_door_L0..2 / _R0..2 (floor, body side, door centre), anchor_cam_window (extras yaw, seat),
+           anchor_headlight (extras spread), anchor_coupler_F/_R
+```
+
+A door leaf node is an empty on the leaf's closed centre (the mesh is its child `<name>_mesh`); L is the +X side, R the -X side,
+0..2 in `doors.z` order, leaf `a` the -Z half, `b` the +Z half. Opening = moving `a` by -leafTravel and `b` by +leafTravel along z
+(extras `slide`): the leaves run in the cavity between skin and lining, and the doorway is clear. Bogie nodes sit on their pivots
+(0, 0, +-bogieZ). Glass panes are single quads facing out: draw `tr_glass` double-sided.
+Materials: `tr_steel`, `tr_band`, `tr_cab`, `tr_glass`, `tr_dark`, `tr_interior`, `tr_floor`, `tr_light` (emissive strips), `tr_head`,
+`tr_tail`, `tr_sign` (front and side destination faces). Budgets: LOD0 16k, LOD1 3.5k, LOD2 500 triangles; 600 KB.
+Bounds checked against railcar.json: length, half width, roof, floor, skirt, the couplers within half the gap.
+
+**station-kit.glb** (`transit.kit`): each part a top-level node at the origin with `<part>_lod0` (and `_lod1` for column, bench,
+fare_gate, canopy, tunnel_bay, bin): `column`, `bench`, `sign_name`, `screen`, `fare_gate`, `pylon`, `canopy`, `railing`,
+`lamp_tube`, `tunnel_bay`, `signal`, `bin`, `map_board` (frames and origins in `kit.py`'s header; sizes, triangles and origins in
+`station-kit.json`). Materials: `tr_steel`, `tr_dark`, `tr_glass`, `tr_interior`, `tr_light`, `tr_concrete`, `tr_tile`,
+`tr_signface` (blank sign faces), `tr_screen` (the next-train display), `tr_lightface` (lamp and signal lenses, colour in COLOR_0).
+Budgets: canopy 2k / 500, tunnel_bay 600, the rest 800; 400 KB. The fare gate's cabinet is the sim's 0.26 x 0.85 x 1.6 collider.

@@ -148,6 +148,12 @@ export class Law {
         if (perp?.role === 'player') this.crime('discharge', e.x, e.y, e.z, perp, 0, 0, WEAPONS[e.weapon].hearM);
         break;
       }
+      case 'transit:evade': {
+        // jumping a fare gate: a minor crime, seen by whoever is at the gates (the station's transit police officer among them)
+        const perp = sim.registry.get(e.pedId) as PedEntity | undefined;
+        if (perp?.role === 'player') this.crime('fare_evasion', e.x, e.y, e.z, perp, 0, 0);
+        break;
+      }
       case 'vehicle:enter': {
         const ped = sim.registry.get(e.pedId) as PedEntity | undefined;
         const veh = sim.registry.get(e.vehicleId) as VehicleEntity | undefined;

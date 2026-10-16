@@ -21,6 +21,10 @@
  *   wrecks   20  three cars (a sedan, a pickup, a police cruiser) beside the player are crashed (dents, bumpers off, the bonnet, windows,
  *                one blown up) through the client's event path, then removed: their models, dented geometry copies and damage state go
  *                with them, the fallen bumpers stay in a capped pool. Needs the sim on the main thread: `--query transport=loopback`.
+ *   map      24  open the full-screen map, set and clear waypoints on it (the radar route, the world marker, the turn prompt, the road
+ *                graphs and the route searches, the map's own tile paths), close it: nothing may stay behind. The stream phase also runs
+ *                with a waypoint across the tiles that load and drop.
+ *   transit  10  down to the Five Points platform, on a train, the chase and window views, skip a station, off, back up (needs --query transport=loopback)
  *   stream   12  a streamed city (`?tiles=fixture:3`, the sim on the main thread; the page is booted again for it, so it runs last): the
  *                player is sent 1.6 km away and back, so most of the near tiles are dropped and loaded again in the sim (colliders,
  *                graphs, seams) and on the client (tile meshes, far skyline meshes, the city-wide trees, lamps, signal heads and
@@ -44,8 +48,8 @@ const args = parseArgs();
 const scale = Number(args.scale ?? 1);
 const slope = Number(args['heap-slope'] ?? 1.5);
 const profileName = String(args.profile ?? 'desktop-medium');
-const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire,stream').split(',').filter(Boolean);
-const CYCLES = { stream: 12, reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20 };
+const phases = String(args.phases ?? 'reload,vehicle,tiers,drive,crowd,gunfire,map,stream').split(',').filter(Boolean);
+const CYCLES = { map: 24, stream: 12, reload: 24, vehicle: 30, tiers: 18, drive: 6, crowd: 12, gunfire: 30, police: 20, ragdoll: 20, wrecks: 20, transit: 10 };
 const WARM = 2;
 /** Longest a single cycle may take before it is counted as stuck. */
 const CYCLE_LIMIT_S = Number(args['cycle-limit'] ?? 180);
@@ -58,6 +62,8 @@ const TOL = {
   crowd: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   drive: { geometries: 4, textures: 2, programs: 4, materials: 36, objects: 170, entities: 90, listeners: 30, domNodes: 40 },
   stream: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
+  // trains come in and go out at the edge on their timetable, and a station's people with them: the entity count moves by trains
+  transit: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 40, entities: 30, listeners: 30, domNodes: 40 },
   default: { geometries: 4, textures: 2, programs: 4, materials: 6, objects: 25, entities: 12, listeners: 30, domNodes: 40 },
 };
 const COUNTERS = ['geometries', 'textures', 'programs', 'materials', 'objects', 'entities', 'listeners', 'domNodes'];
@@ -159,6 +165,58 @@ const ACTIVITIES = {
       await window.__h.sleep(300);
     });
   },
+  /**
+   * Down to the Five Points platform, on the first train with its doors open, the chase view and the window view, skip to the next
+   * station, off, and back up to the street: trains come and go, the station's people and its officer appear and leave, the
+   * camera takes the ride and gives it back (needs `--query transport=loopback`).
+   */
+  async transit() {
+    const ok = await page.evaluate(async () => {
+      const g = window.__hood.game;
+      const S = g.transport.host?.simulation;
+      if (!S?.transit) throw new Error('the transit phase needs the sim on the main thread and a tile with trains: --query transport=loopback');
+      const T = S.transit;
+      const fp = T.data.stations.findIndex((s) => s.name === 'Five Points');
+      const p = S.registry.get(S.playerPedId);
+      if (p.vehicleId) S.ejectPed(p);
+      const pl = T.data.stations[fp].platforms[0];
+      p.controller.teleport(pl.c[0], pl.y + 0.1, pl.c[1]);
+      let tr = null;
+      for (let i = 0; i < 600 && !tr; i++) {
+        tr = T.model.trains.find((t) => t.phase === 'open' && T.data.routes[t.route].stops[t.stop]?.station === fp) ?? null;
+        if (!tr) await window.__h.sleep(100);
+      }
+      if (!tr) return false;
+      const o = T.doorOutside(tr, 2, 1, 0.5);
+      p.controller.teleport(o.x, o.y + 0.05, o.z);
+      await window.__h.sleep(300);
+      T.board(p, tr, 2, 1);
+      g.transitCamera.mode = 'chase';
+      await window.__h.sleep(900);
+      g.transitCamera.mode = 'window';
+      await window.__h.sleep(900);
+      return true;
+    });
+    if (!ok) throw new Error('no train opened its doors at Five Points');
+    await page.keyboard.press('KeyN');
+    await page.waitForTimeout(2500);
+    await page.evaluate(async () => {
+      const g = window.__hood.game;
+      const S = g.transport.host.simulation;
+      const T = S.transit;
+      const p = S.registry.get(S.playerPedId);
+      for (let i = 0; i < 300 && p.ride; i++) {
+        const tr = T.byId.get(p.ride.trainId);
+        if (tr && (tr.phase === 'open' || tr.phase === 'opening') && tr.doors > 0.6) T.alight(p);
+        else await window.__h.sleep(100);
+      }
+      if (p.ride) { p.ride = null; p.controller.setEnabled(true); }
+      await window.__h.sleep(600);
+      const sp = S.tile.manifest.spawns.player;
+      p.controller.teleport(sp.x, S.groundAt(sp.x, sp.z) + 0.2, sp.z);
+      await window.__h.sleep(1200);
+    });
+  },
   /** A helicopter (heat 3) and a spike strip come into the world and go again; the client makes a model for each and must drop it. */
   async police() {
     await page.evaluate(async () => {
@@ -243,6 +301,34 @@ const ACTIVITIES = {
     if (counts.left !== 0) throw new Error(`ragdolls left behind: ${counts.left}`);
     ragdollWorld.push(counts);
   },
+  /**
+   * The map: opened with Tab, a few waypoints set and cleared on the nav API (the route search and the radar line run for each), the
+   * pin and the marker come and go, closed again. Walking and driving routes both: the player gets in the car on every other cycle.
+   */
+  async map(i) {
+    await page.evaluate(async (i) => {
+      const h = window.__hood;
+      const g = h.game;
+      const sleep = window.__h.sleep;
+      const tap = async (code) => { g.input.simulate(code, true); await sleep(60); g.input.simulate(code, false); };
+      await tap('Tab');
+      await sleep(350);
+      const p = g.view.controlled;
+      for (let k = 0; k < 3; k++) {
+        const a = (i * 3 + k) * 1.3;
+        h.nav.toggleWaypointAt(p.x + Math.cos(a) * 160, p.z + Math.sin(a) * 160);
+        await sleep(220);
+      }
+      // zoom and pan a little: the paths of tiles come and go
+      h.bigMap.view.scale = 0.12 + (i % 4) * 0.12;
+      h.bigMap.dirty = true;
+      await sleep(250);
+      h.nav.clearWaypoint();
+      await sleep(120);
+      await tap('Tab');
+      await sleep(250);
+    }, i);
+  },
   async drive() {
     await page.evaluate(async () => {
       const b = window.__h.bot;
@@ -271,8 +357,11 @@ const ACTIVITIES = {
         await settle();
       };
       const home = S.tile.manifest.spawns.player;
+      // a waypoint over in the next tile: the GPS joins the graphs of the tiles that load and drops them with the tiles
+      h.nav.toggleWaypointAt(home.x + 300, home.z + 90);
       await go(1300, -900);
       await go(home.x, home.z);
+      h.nav.clearWaypoint();
       await window.__h.sleep(400);
       let live = 0;
       for (let e = 0; e < S.stream.lanes.count; e++) live += S.stream.lanes.alive[e];
@@ -295,7 +384,7 @@ async function bootStream() {
 // `traffic` are fixed in the URL); each phase sets it, then waits for it to settle.
 const FROZEN = { pedBudget: 0, traffic: 0 };
 const LIVE = { pedBudget: 40, traffic: 0.75 };
-const POPULATION = { stream: FROZEN, reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN, wrecks: FROZEN };
+const POPULATION = { map: FROZEN, stream: FROZEN, reload: FROZEN, vehicle: FROZEN, tiers: FROZEN, drive: LIVE, crowd: LIVE, gunfire: FROZEN, police: FROZEN, ragdoll: FROZEN, wrecks: FROZEN, transit: FROZEN };
 /** The ragdoll phase's physics world after each cycle: its bodies and joints must come back to the same count. */
 const ragdollWorld = [];
 // (the people drawn as skinned actors are held as they are too, so a walker crossing the near range is not counted as growth)

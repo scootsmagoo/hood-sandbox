@@ -50,15 +50,19 @@ async function main() {
       });
   console.log(`browser: ${browserName} ${browser.version()}`);
   let failures = 0;
-  if (args.only === 'traffic') failures += await trafficSuite();
+  if (args.only === 'map') failures += await mapSuite();
+  else if (args.only === 'traffic') failures += await trafficSuite();
   else if (args.only === 'guns') failures += await gunSuite();
   else if (args.only === 'police') failures += await policeSuite();
+  else if (args.only === 'transit') failures += await transitSuite();
   else {
   for (const t of transports) failures += await suite(t);
   if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/tile.json'))) failures += await realTile();
   else console.log('\n(no baked tile in public/tiles: skipping the real-tile check)');
   failures += await gunSuite();
   failures += await policeSuite();
+  failures += await mapSuite();
+  if (existsSync(resolve(root, 'public/tiles/atlanta/m1-five-points/transit.json'))) failures += await transitSuite();
   }
   await browser.close();
   if (server) await server.close();
@@ -1794,3 +1798,593 @@ async function policeSuite() {
 }
 
 await main();
+
+// ------------------------------------------------------------------------------------------------
+// The full-screen map and the GPS: on the procedural streamed city (?tiles=fixture, a 3 x 3 grid of 384 m tiles with a street grid
+// across every seam), the sim on the main thread so a car can be put where the check wants it.
+
+/** Runs in the page. The map, the waypoint and the route as the player sees them. */
+function NAV() {
+  const h = window.__hood;
+  const n = h.nav, c = n.core, m = h.bigMap;
+  const radar = document.querySelector('.hud-radar');
+  return {
+    open: m.isOpen,
+    enabled: h.game.input.enabled,
+    brake: h.game.input.parkBrake,
+    visible: !document.querySelector('.bigmap').hidden,
+    wp: c.waypoint && { x: c.waypoint.x, z: c.waypoint.z, name: c.waypoint.name, snapped: c.waypoint.snapped },
+    status: c.status,
+    mode: c.route?.mode ?? null,
+    routeId: c.route?.id ?? 0,
+    len: c.route?.length ?? 0,
+    partial: c.route?.partial ?? false,
+    xs: c.route ? [Math.min(...c.route.xs), Math.max(...c.route.xs)] : null,
+    first: c.route && c.route.count ? [c.route.xs[0], c.route.zs[0]] : null,
+    remaining: n.distanceLeft(),
+    progress: c.track?.s ?? 0,
+    reroutes: c.stats.reroutes,
+    routes: c.stats.routes,
+    tiles: c.drive.tileIds.length,
+    stitched: c.drive.stitched,
+    marker: n.marker.visible,
+    prompt: document.querySelector('.hud-nav')?.style.display !== 'none' ? (document.querySelector('.hud-nav')?.textContent ?? '') : '',
+    view: { cx: m.view.cx, cz: m.view.cz, scale: m.view.scale, w: m.view.w, h: m.view.h },
+    radarRect: radar ? (({ x, y, width, height }) => ({ x, y, width, height }))(radar.getBoundingClientRect()) : null,
+  };
+}
+
+/** Runs in the page. Pixels of the route's colour on the radar. */
+function RADAR_ROUTE_PIXELS() {
+  const cv = document.querySelector('.hud-radar');
+  const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 230 && d[i + 1] < 110 && d[i + 2] > 170 && d[i + 3] > 200) n++;
+  return n;
+}
+
+async function mapSuite() {
+  console.log('\n=== map and GPS ===');
+  const { page, errors, ctx } = await open('tiles=fixture&graphics=low&start=car&ambient=0&traffic=0&parked=0&time=14:00&timescale=0&transport=loopback', true);
+  const c = makeChecker(page, 'map');
+  const { check, hold, tap, wait, expect, k } = c;
+  const nav = () => page.evaluate(NAV);
+  const sim = (fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  const mapRect = () => page.evaluate(() => { const r = document.querySelector('.bigmap canvas').getBoundingClientRect(); return { x: r.x, y: r.y }; });
+  /** Screen position of a world point on the open map. */
+  const screenOf = async (x, z) => {
+    const n = await nav();
+    const r = await mapRect();
+    return { x: r.x + n.view.w / 2 + (x - n.view.cx) * n.view.scale, y: r.y + n.view.h / 2 + (z - n.view.cz) * n.view.scale };
+  };
+  const player = () => page.evaluate(() => { const p = window.__hood.game.view.controlled; return { x: p.x, z: p.z }; });
+  const settle = async (ms = 1200) => { await wait(ms); await page.evaluate(() => window.__hood.nav.data.settled()); };
+  const chimes = () => page.evaluate(() => window.__chimes.slice());
+  const padPress = (i, on) => page.evaluate(([i, on]) => { window.__pad.buttons[i] = { pressed: on, touched: on, value: on ? 1 : 0 }; }, [i, on]);
+  await wait(1500);
+  await page.evaluate(() => {
+    window.__chimes = [];
+    const a = window.__hood.game.audio;
+    if (a) { const f = a.chime.bind(a); a.chime = (kind) => { window.__chimes.push(kind); f(kind); }; }
+  });
+
+  // ---- opening and closing
+  await check('Tab opens the map: the game waits, the handbrake is on', async () => {
+    await tap('Tab');
+    await wait(300);
+    const n = await nav();
+    expect(n.open && n.visible, 'not open');
+    expect(!n.enabled, 'the controls are still on');
+    expect(n.brake, 'no handbrake');
+    expect(!(await page.evaluate(() => window.__hood.game.input.pointerLocked)), 'the mouse is still captured');
+  });
+  await check('the map draws roads', async () => {
+    await page.waitForFunction(() => [...window.__hood.bigMap.data.tiles.values()].some((t) => t.state === 'ready' && t.groups.length), null, { timeout: 15000 });
+    await wait(300);
+    const lit = await page.evaluate(() => {
+      const cv = document.querySelector('.bigmap canvas');
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 70) n++;
+      return n;
+    });
+    expect(lit > 800, `only ${lit} bright samples`);
+    return `${lit} bright samples`;
+  });
+  await check('Tab closes it and the controls come back', async () => {
+    await tap('Tab');
+    await wait(300);
+    const n = await nav();
+    expect(!n.open && !n.visible && n.enabled && !n.brake, JSON.stringify({ open: n.open, enabled: n.enabled, brake: n.brake }));
+  });
+  await check('P opens it and Esc closes it', async () => {
+    await tap('KeyP');
+    await wait(250);
+    expect((await nav()).open, 'P did not open');
+    await tap('Escape');
+    await wait(250);
+    expect(!(await nav()).open, 'Esc did not close');
+  });
+  await check('a click on the radar opens it (a one-button mouse needs no key), the X button closes it', async () => {
+    const r = (await nav()).radarRect;
+    await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
+    await wait(300);
+    expect((await nav()).open, 'the radar click did not open the map');
+    await page.click('.bigmap button[aria-label="Close the map"]');
+    await wait(250);
+    expect(!(await nav()).open, 'the X did not close it');
+  });
+
+  // ---- pan and zoom
+  await check('drag pans, the wheel and a pinch zoom, keys pan and zoom', async () => {
+    await tap('Tab');
+    await wait(300);
+    const a = await nav();
+    const r = await mapRect();
+    const cx = r.x + a.view.w / 2, cy = r.y + a.view.h / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 120, cy + 60, { steps: 6 });
+    await page.mouse.up();
+    const b = await nav();
+    expect(b.view.cx < a.view.cx - 20 && b.view.cz < a.view.cz - 10, `drag: ${a.view.cx.toFixed(0)},${a.view.cz.toFixed(0)} -> ${b.view.cx.toFixed(0)},${b.view.cz.toFixed(0)}`);
+    expect(!b.wp, 'a drag set a waypoint');
+    await page.mouse.wheel(0, -300);
+    await wait(150);
+    const z1 = await nav();
+    expect(z1.view.scale > b.view.scale * 1.2, `wheel in ${b.view.scale.toFixed(3)} -> ${z1.view.scale.toFixed(3)}`);
+    await k.down('Control');
+    await page.mouse.wheel(0, 40);
+    await k.up('Control');
+    await wait(150);
+    const z2 = await nav();
+    expect(z2.view.scale < z1.view.scale * 0.85, `pinch out ${z1.view.scale.toFixed(3)} -> ${z2.view.scale.toFixed(3)}`);
+    await hold(['ArrowRight'], 400);
+    const p1 = await nav();
+    expect(p1.view.cx > z2.view.cx + 20, `arrow right ${z2.view.cx.toFixed(0)} -> ${p1.view.cx.toFixed(0)}`);
+    await hold(['KeyS'], 300);
+    const p2 = await nav();
+    expect(p2.view.cz > p1.view.cz + 10, 'S did not pan south');
+    await hold(['KeyE'], 300);
+    const q1 = await nav();
+    expect(q1.view.scale > p2.view.scale * 1.2, 'E did not zoom in');
+    await tap('Minus');
+    const q2 = await nav();
+    expect(q2.view.scale < q1.view.scale, '- did not zoom out');
+    await tap('KeyC');
+    const home = await nav();
+    const pl = await player();
+    expect(Math.hypot(home.view.cx - pl.x, home.view.cz - pl.z) < 5, 'C did not centre on the player');
+  });
+
+  // ---- a waypoint by one click
+  let wp1 = null;
+  await check('one click sets a waypoint on the nearest road and finds the route', async () => {
+    const pl = await player();
+    // somewhere in a block, off the streets, a way from the player
+    const pos = await screenOf(pl.x + 130, pl.z + 120);
+    await page.mouse.click(pos.x, pos.y);
+    await settle(900);
+    const n = await nav();
+    expect(n.wp && n.wp.snapped, `not snapped ${JSON.stringify(n.wp)}`);
+    expect(n.wp.name.length > 0, 'no street name');
+    expect(n.status === 'ok' && n.len > 100, `route ${n.status} ${n.len}`);
+    expect(n.mode === 'walk', `mode ${n.mode}`);
+    expect(n.marker, 'no marker in the world');
+    expect((await chimes()).includes('set'), 'no chime');
+    wp1 = n.wp;
+    return `${n.wp.name}, ${n.len.toFixed(0)} m on foot`;
+  });
+  await check('the route and the waypoint are on the radar', async () => {
+    await tap('Tab');
+    await wait(400);
+    const px = await page.evaluate(RADAR_ROUTE_PIXELS);
+    expect(px > 25, `${px} route pixels on the radar`);
+    const n = await nav();
+    expect(n.prompt.length > 0, 'no turn prompt');
+    return `${px} px, "${n.prompt.slice(0, 50)}"`;
+  });
+  await check('clicking the waypoint again clears it', async () => {
+    await tap('Tab');
+    await wait(300);
+    const pos = await screenOf(wp1.x, wp1.z);
+    await page.mouse.click(pos.x + 4, pos.y - 3);
+    await wait(300);
+    const n = await nav();
+    expect(!n.wp && n.status === 'none' && !n.marker, JSON.stringify(n.wp));
+    expect((await chimes()).includes('clear'), 'no clear chime');
+  });
+  await check('without the mouse: the cross in the middle sets a waypoint with Enter and clears it with Enter', async () => {
+    await tap('KeyC');
+    await hold(['ArrowRight'], 500);
+    await hold(['ArrowDown'], 350);
+    const n0 = await nav();
+    await tap('Enter');
+    await settle(700);
+    const n1 = await nav();
+    expect(n1.wp, 'Enter set nothing');
+    expect(Math.hypot(n1.wp.x - n0.view.cx, n1.wp.z - n0.view.cz) < 160, 'the waypoint is not where the cross is');
+    expect(n1.status === 'ok' || n1.status === 'partial', `route ${n1.status}`);
+    await tap('Enter');
+    await wait(250);
+    expect(!(await nav()).wp, 'Enter did not clear it');
+    await tap('Enter');
+    await wait(300);
+    expect((await nav()).wp, 'Enter did not set it again');
+    await tap('Delete');
+    await wait(250);
+    expect(!(await nav()).wp, 'Delete did not clear it');
+  });
+  await check('a plain click is all a one-button mouse needs: set, clear, and Ctrl-click does the same', async () => {
+    const pl = await player();
+    let pos = await screenOf(pl.x - 100, pl.z + 60);
+    await page.mouse.click(pos.x, pos.y);
+    await wait(300);
+    const a = await nav();
+    expect(a.wp, 'click set nothing');
+    pos = await screenOf(a.wp.x, a.wp.z);
+    await k.down('Control');
+    await page.mouse.click(pos.x, pos.y);
+    await k.up('Control');
+    await wait(250);
+    expect(!(await nav()).wp, 'Ctrl-click did not clear it');
+  });
+
+  // ---- driving
+  await check('in the car the route is a driving one; driving along it brings the distance down', async () => {
+    await tap('Tab');
+    await wait(300);
+    await tap('KeyE');
+    await wait(800);
+    expect((await page.evaluate(() => window.__hood.game.view.inVehicle)), 'not in the car');
+    await tap('Tab');
+    await wait(300);
+    const pl = await player();
+    const pos = await screenOf(pl.x + 320, pl.z + 20);
+    await page.mouse.click(pos.x, pos.y);
+    await settle(900);
+    const a = await nav();
+    expect(a.wp && a.mode === 'drive' && a.status === 'ok', `mode ${a.mode} ${a.status}`);
+    await tap('Tab');
+    await wait(300);
+    await hold(['KeyW'], 3200);
+    const b = await nav();
+    expect(b.remaining < a.remaining - 15, `remaining ${a.remaining.toFixed(0)} -> ${b.remaining.toFixed(0)}`);
+    return `${a.remaining.toFixed(0)} m -> ${b.remaining.toFixed(0)} m, prompt "${b.prompt.slice(0, 44)}"`;
+  });
+  await check('a wrong turn finds a new route', async () => {
+    const before = await nav();
+    // the car to a street well off the route
+    const at = await sim((S) => {
+      const car = S.registry.get(S.vehicleId).car;
+      const p = car.pose();
+      const x = p.x - 60, z = p.z + 192;
+      car.teleport(x, S.groundAt(x, z) + 0.7, z, 0);
+      return { x, z };
+    });
+    await wait(4200);
+    const after = await nav();
+    expect(after.reroutes > before.reroutes, `reroutes ${before.reroutes} -> ${after.reroutes}`);
+    expect(after.routeId !== before.routeId, 'the route did not change');
+    expect(Math.hypot(after.first[0] - at.x, after.first[1] - at.z) < 60, `the new route starts ${Math.hypot(after.first[0] - at.x, after.first[1] - at.z).toFixed(0)} m from the car`);
+    expect(after.status === 'ok', after.status);
+  });
+  await check('getting out finds a walking route', async () => {
+    await sim((S) => { S.registry.get(S.vehicleId).car.setHandbrake?.(true); });
+    await hold(['Space'], 100);
+    await wait(2200);
+    await tap('KeyE');
+    await wait(1200);
+    const n = await nav();
+    if (n.mode === 'drive') {
+      // (the car may still have been moving: stop it first and try again)
+      await hold(['KeyS'], 1500);
+      await tap('KeyE');
+      await wait(1200);
+    }
+    const m = await nav();
+    expect(!(await page.evaluate(() => window.__hood.game.view.inVehicle)), 'still in the car');
+    expect(m.mode === 'walk' && m.wp, `mode ${m.mode}`);
+  });
+  await check('arriving within 15 m clears the waypoint with a chime', async () => {
+    const n = await nav();
+    await sim((S, w) => { S.registry.get(S.playerPedId).controller.teleport(w.x + 6, S.groundAt(w.x + 6, w.z) + 0.2, w.z); }, n.wp);
+    await wait(600);
+    const m = await nav();
+    expect(!m.wp && m.status === 'none' && !m.marker, JSON.stringify(m.wp));
+    expect((await chimes()).includes('arrive'), `chimes ${(await chimes()).join(',')}`);
+    expect(await page.evaluate(() => document.querySelector('.hud-toast')?.textContent === 'You have arrived'), 'no toast');
+  });
+
+  // ---- across a seam
+  await check('a waypoint two tiles away routes over the seams', async () => {
+    await sim((S) => { S.registry.get(S.playerPedId).controller.teleport(60, S.groundAt(60, 96) + 0.2, 98); });
+    await wait(900);
+    await tap('Tab');
+    await wait(300);
+    await page.evaluate(() => window.__hood.nav.ensureLoaded());
+    await settle(600);
+    const pos = await screenOf(700, 96);
+    await page.mouse.click(pos.x, pos.y);
+    await settle(900);
+    const n = await nav();
+    expect(n.tiles >= 4 && n.stitched > 0, `tiles ${n.tiles} stitched ${n.stitched}`);
+    expect(n.wp && n.wp.x > 600, `waypoint ${JSON.stringify(n.wp)}`);
+    expect(n.status === 'ok' && !n.partial, `status ${n.status}`);
+    expect(n.xs[0] < 384 && n.xs[1] > 600, `route spans x ${n.xs.map((v) => v.toFixed(0)).join('..')}`);
+    await tap('Tab');
+    await wait(200);
+  });
+
+  // ---- the pad and the touch screen
+  await check('the last waypoint is remembered across a reload (and a cleared one stays cleared)', async () => {
+    await page.evaluate(() => window.__hood.nav.clearWaypoint());
+    const pl = await player();
+    await tap('Tab');
+    await wait(300);
+    const pos = await screenOf(pl.x + 100, pl.z + 90);
+    await page.mouse.click(pos.x, pos.y);
+    await settle(500);
+    const before = await nav();
+    expect(before.wp, 'no waypoint to remember');
+    await page.reload();
+    await page.waitForFunction(() => window.__hood?.ready || window.__hood?.error, null, { timeout: 120000 });
+    await wait(1500);
+    const after = await nav();
+    expect(after.wp, 'the waypoint was not restored');
+    expect(Math.hypot(after.wp.x - before.wp.x, after.wp.z - before.wp.z) < 25, `restored ${after.wp.x.toFixed(0)},${after.wp.z.toFixed(0)} vs ${before.wp.x.toFixed(0)},${before.wp.z.toFixed(0)}`);
+    // clearing it forgets it
+    await page.evaluate(() => window.__hood.nav.clearWaypoint());
+    await page.reload();
+    await page.waitForFunction(() => window.__hood?.ready || window.__hood?.error, null, { timeout: 120000 });
+    await wait(1200);
+    expect(!(await nav()).wp, 'a cleared waypoint came back');
+  });
+  await check('D-pad down opens the map; A sets a waypoint at the cross, B closes', async () => {
+    await page.evaluate(() => window.__hood.nav.clearWaypoint());
+    await padPress(13, true);
+    await wait(150);
+    await padPress(13, false);
+    await wait(300);
+    expect((await nav()).open, 'D-pad down did not open it');
+    // the left stick moves the cross (a waypoint under your own feet is reached at once)
+    const x0 = (await nav()).view.cx;
+    await page.evaluate(() => { window.__pad.axes[0] = 1; });
+    await wait(500);
+    await page.evaluate(() => { window.__pad.axes[0] = 0; });
+    expect((await nav()).view.cx > x0 + 40, 'the stick did not pan the map');
+    await padPress(0, true);
+    await wait(150);
+    await padPress(0, false);
+    await settle(500);
+    expect((await nav()).wp, 'A set nothing');
+    await padPress(1, true);
+    await wait(150);
+    await padPress(1, false);
+    await wait(300);
+    expect(!(await nav()).open, 'B did not close it');
+    await page.evaluate(() => window.__hood.nav.clearWaypoint());
+  });
+  await check('the Map button on a touch screen opens it', async () => {
+    await page.evaluate(() => window.__hood.game.touch.show(true));
+    await wait(200);
+    await page.click('.touch .b-map', { timeout: 5000 });
+    await wait(400);
+    expect((await nav()).open, 'the Map button did not open it');
+    await page.click('.bigmap button[aria-label="Close the map"]');
+    await wait(250);
+    await page.evaluate(() => window.__hood.game.touch.show(false));
+  });
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails() + (await mapTouch());
+}
+
+/** Real touch events (CDP): a tap sets a waypoint, two fingers pinch and a drag pans. */
+async function mapTouch() {
+  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto(`${base}?tiles=fixture&graphics=low&start=car&ambient=0&traffic=0&parked=0&time=14:00&timescale=0&transport=loopback`);
+  await page.waitForFunction(() => window.__hood?.ready || window.__hood?.error, null, { timeout: 120000 });
+  const cdp = await ctx.newCDPSession(page);
+  const c = makeChecker(page, 'map-touch');
+  const { check, wait, expect } = c;
+  const nav = () => page.evaluate(NAV);
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
+  await wait(2500);
+  console.log('--- on a phone-sized touch screen');
+  await check('tap the Map button, drag to pan, pinch to zoom, tap to set a waypoint and tap it to clear', async () => {
+    const mb = await page.evaluate(() => { const r = document.querySelector('.touch .b-map').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+    await touch('touchStart', [mb]);
+    await wait(60);
+    await touch('touchEnd', []);
+    await wait(500);
+    let n = await nav();
+    expect(n.open, 'the Map button did not open it');
+    await page.waitForFunction(() => [...window.__hood.bigMap.data.tiles.values()].some((t) => t.state === 'ready'), null, { timeout: 15000 });
+    // pan
+    const a = n.view;
+    await touch('touchStart', [[400, 200]]);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [[400 + i * 20, 200 + i * 10]]); await wait(16); }
+    await touch('touchEnd', []);
+    await wait(150);
+    n = await nav();
+    expect(n.view.cx < a.cx - 10, `pan ${a.cx.toFixed(0)} -> ${n.view.cx.toFixed(0)}`);
+    expect(!n.wp, 'a drag set a waypoint');
+    // pinch out and in
+    const s0 = n.view.scale;
+    await touch('touchStart', [[360, 200], [480, 200]]);
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [[360 - i * 20, 200], [480 + i * 20, 200]]); await wait(16); }
+    await touch('touchEnd', []);
+    await wait(150);
+    n = await nav();
+    expect(n.view.scale > s0 * 1.5, `pinch ${s0.toFixed(3)} -> ${n.view.scale.toFixed(3)}`);
+    // tap
+    await touch('touchStart', [[300, 250]]);
+    await wait(50);
+    await touch('touchEnd', []);
+    await page.evaluate(() => window.__hood.nav.data.settled());
+    await wait(500);
+    n = await nav();
+    expect(n.wp, 'a tap set no waypoint');
+    const wp = n.wp;
+    const sx = n.view.w / 2 + (wp.x - n.view.cx) * n.view.scale, sy = n.view.h / 2 + (wp.z - n.view.cz) * n.view.scale;
+    await touch('touchStart', [[sx, sy]]);
+    await wait(50);
+    await touch('touchEnd', []);
+    await wait(300);
+    expect(!(await nav()).wp, 'a tap on the pin did not clear it');
+  });
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails();
+}
+
+
+/**
+ * The trains, GTA IV style, with real keys: from the street down a Five Points entrance to the East-West platform (walking the
+ * station's way: stairs, corridor, fare gates, escalators), the departures board, to an open door, E to get on, V for the chase
+ * view and back, N to skip to the next station (the fade), E to get off there, standing on its platform.
+ */
+async function transitSuite() {
+  console.log('\n=== transit (the Five Points tile) ===');
+  const { page, errors, ctx } = await open('graphics=low&ambient=0&traffic=0&parked=0&time=13:00&timescale=0&transport=loopback', true);
+  const c = makeChecker(page, 'transit');
+  const { check, tap, wait, expect } = c;
+  const sim = (fn, arg) => page.evaluate(`(${fn.toString()})(window.__hood.game.transport.host.simulation, ${JSON.stringify(arg ?? null)})`);
+  const header = () => page.evaluate(() => { const b = window.__hood.game.view.sample.b; return { train: b.u32[24], info: b.u32[25], flags: b.u32[4] }; });
+  await wait(1500);
+  await tap('KeyH');
+
+  await check('walks into Five Points from the street', async () => {
+    // the street end of an entrance, then the station's walk network down to the East-West platform
+    const path = await sim((S) => {
+      const T = S.transit;
+      const st = T.data.stations.find((s) => s.name === 'Five Points');
+      const e = st.entrances[0];
+      const pl = st.platforms[0];
+      const W = T.data.walk;
+      const near = (x, y, z) => { let b = -1, bd = 1e9; W.nodes.forEach((n, i) => { const d = Math.hypot(n[0] - x, (n[1] - y) * 3, n[2] - z); if (d < bd) { bd = d; b = i; } }); return b; };
+      const from = near(e.x - Math.sin(e.yaw) * 1.5, e.y, e.z - Math.cos(e.yaw) * 1.5), to = near(pl.c[0], pl.y, pl.c[1]);
+      const adj = W.nodes.map(() => []);
+      for (let i = 0; i < W.edges.length; i += 3) { adj[W.edges[i]].push(W.edges[i + 1]); adj[W.edges[i + 1]].push(W.edges[i]); }
+      const dist = W.nodes.map(() => Infinity), prev = W.nodes.map(() => -1);
+      dist[from] = 0;
+      const open = new Set([from]);
+      while (open.size) {
+        let u = -1;
+        for (const k of open) if (u < 0 || dist[k] < dist[u]) u = k;
+        open.delete(u);
+        for (const v of adj[u]) {
+          const d = dist[u] + Math.hypot(W.nodes[u][0] - W.nodes[v][0], W.nodes[u][1] - W.nodes[v][1], W.nodes[u][2] - W.nodes[v][2]);
+          if (d < dist[v]) { dist[v] = d; prev[v] = u; open.add(v); }
+        }
+      }
+      const out = [];
+      for (let v = to; v >= 0; v = prev[v]) out.push(W.nodes[v]);
+      out.reverse();
+      const p = S.registry.get(S.playerPedId).controller;
+      p.teleport(out[0][0], out[0][1] + 0.2, out[0][2]);
+      return { nodes: out, platformY: pl.y };
+    });
+    await wait(600);
+    for (const [i, n] of path.nodes.entries()) {
+      const r = await walkTo(page, () => ({ x: n[0], z: n[2] }), { tol: 0.8, timeoutMs: 45000, sprint: true });
+      expect(r.ok, `stuck before node ${i} of ${path.nodes.length} at ${r.state.ped.x.toFixed(1)}, ${r.state.ped.y.toFixed(1)}, ${r.state.ped.z.toFixed(1)}`);
+    }
+    const s = await page.evaluate(STATE);
+    expect(Math.abs(s.ped.y - path.platformY) < 0.7, `at y ${s.ped.y.toFixed(2)}, the platform is ${path.platformY}`);
+    const h = await header();
+    expect(((h.info & 0xff) - 1) >= 0, 'not in a station');
+    return `${path.nodes.length} waypoints down to y ${s.ped.y.toFixed(1)}`;
+  });
+
+  await check('the platform shows the next trains', async () => {
+    await wait(1200);
+    const board = await page.evaluate(() => { const b = document.querySelector('.transit-board'); return { on: b?.classList.contains('on'), text: b?.textContent ?? '' }; });
+    expect(board.on && /Five Points/.test(board.text), `board ${JSON.stringify(board)}`);
+    return board.text.replace(/\s+/g, ' ').slice(0, 80);
+  });
+
+  let trainId = 0;
+  await check('E gets on a train with its doors open', async () => {
+    // the next train to open its doors at this platform: walk to its nearest door
+    let door = null;
+    for (let i = 0; i < 400 && !door; i++) {
+      door = await sim((S) => {
+        const T = S.transit;
+        const p = S.registry.get(S.playerPedId).controller;
+        let best = null, bd = 1e9;
+        for (const tr of T.model.trains) {
+          if (tr.phase !== 'open' || tr.t > 6) continue;
+          for (let k = 0; k < 6; k++) for (let d = 0; d < 3; d++) {
+            const o = T.doorOutside(tr, k, d, 0.5);
+            const dd = Math.hypot(o.x - p.x, o.z - p.z);
+            if (Math.abs(o.y - p.y) < 1 && dd < bd) { bd = dd; best = { x: o.x, z: o.z, id: tr.id }; }
+          }
+        }
+        return best && bd < 60 ? best : null;
+      });
+      if (!door) await wait(150);
+    }
+    expect(door, 'no train opened its doors here');
+    const r = await walkTo(page, () => door, { tol: 0.6, timeoutMs: 30000, sprint: true });
+    expect(r.ok, 'did not reach the door');
+    const prompt = await page.evaluate(() => document.querySelector('.transit-prompt')?.textContent ?? '');
+    expect(/Board/.test(prompt), `prompt "${prompt}"`);
+    await tap('KeyE');
+    await wait(600);
+    const h = await header();
+    expect(h.train === door.id && (h.flags & 2) !== 0, `not on the train (train ${h.train}, flags ${h.flags})`);
+    trainId = h.train;
+    return `train ${trainId}`;
+  });
+
+  await check('V switches the window and the chase view', async () => {
+    const mode = () => page.evaluate(() => window.__hood.game.transitCamera.mode);
+    expect((await mode()) === 'window', `starts in ${await mode()}`);
+    await tap('KeyV');
+    expect((await mode()) === 'chase', 'V did not switch to the chase view');
+    await wait(700);
+    await tap('KeyV');
+    expect((await mode()) === 'window', 'V did not switch back');
+  });
+
+  await check('N skips to the next station (a fade), E gets off there', async () => {
+    await tap('KeyN');
+    await wait(400);
+    const dark = await page.evaluate(() => Number(getComputedStyle(document.querySelector('.transit-fade')).opacity));
+    expect(dark > 0.2, `no fade (${dark})`);
+    // there: the doors open
+    let at = null;
+    for (let i = 0; i < 80 && (!at || at === 'Five Points'); i++) {
+      at = await sim((S, id) => { const tr = S.transit.byId.get(id); if (!tr || (tr.phase !== 'open' && tr.phase !== 'opening') || tr.doors < 0.8) return null; return S.transit.data.stations[S.transit.data.routes[tr.route].stops[tr.stop].station].name; }, trainId);
+      if (!at || at === 'Five Points') await wait(150);
+    }
+    expect(at && at !== 'Five Points', `at ${at}`);
+    await wait(300);
+    const prompt = await page.evaluate(() => document.querySelector('.transit-prompt')?.textContent ?? '');
+    expect(/Get off/.test(prompt), `prompt "${prompt}"`);
+    await tap('KeyE');
+    await wait(900);
+    const h = await header();
+    expect(h.train === 0 && (h.flags & 2) === 0, 'still on the train');
+    const s = await page.evaluate(STATE);
+    const ok = await sim((S, y) => S.transit.data.stations.some((st) => st.platforms.some((p) => Math.abs(p.y - y) < 0.6)), s.ped.y);
+    expect(ok, `not on a platform (y ${s.ped.y.toFixed(2)})`);
+    return `off at ${at}`;
+  });
+
+  await check('no console errors', async () => {
+    expect(errors.length === 0, errors.join(' | '));
+  });
+  await ctx.close();
+  return c.fails();
+}

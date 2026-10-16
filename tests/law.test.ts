@@ -10,7 +10,9 @@ import { addNpc, Button, cmd, everyoneCalls, flatTile, makeSim, ofType, ped, run
 
 describe('the crime table', () => {
   it('matches the contract and validates', () => {
-    expect(Object.keys(CRIMES).sort()).toEqual(['assault', 'assault_officer', 'carjack', 'discharge', 'hit_ped', 'kill_ped', 'shoot_ped', 'vehicle_theft']);
+    expect(Object.keys(CRIMES).sort()).toEqual(['assault', 'assault_officer', 'carjack', 'discharge', 'fare_evasion', 'hit_ped', 'kill_ped', 'shoot_ped', 'vehicle_theft']);
+    // jumping a fare gate is the least of them (src/sim/transit)
+    expect(CRIMES.fare_evasion).toMatchObject({ severity: 1, heat: 1 });
     expect(CRIMES.carjack).toEqual({ severity: 2, heat: 1, witnessRadius: 35, points: 2, violent: false });
     expect(CRIMES.hit_ped.heat).toBe(2);
     // A single kill is two stars; three needs sustained violence (see the heat model) or an attack on police.

@@ -38,6 +38,7 @@ import { U } from './look/uniforms';
 import { nightFactor } from './timeOfDay';
 import { freezeStatic } from './freeze';
 import assetManifest from './landmarkAssets.manifest.json';
+import airportManifest from './airportAssets.manifest.json';
 
 /** Shared with every lm_glow / lm_flood / lm_gold material: 0 by day, 1 at night. */
 const NIGHT = { value: 0 };
@@ -193,6 +194,25 @@ function makeMaterial(name: string, game: Game): THREE.Material {
     }
     case 'lm_dark':
       return new THREE.MeshStandardMaterial({ ...base, roughness: 0.35, metalness: 0.1 });
+    // the interiors (the airport's walk-in halls): lit from within day and night, so a hall under its roof is not in the dark
+    case 'lm_interior':
+    case 'lm_floor': {
+      const floor = name === 'lm_floor';
+      const m = new THREE.MeshStandardMaterial({ ...base, roughness: floor ? 0.32 : 0.78, metalness: 0 });
+      m.customProgramCacheKey = () => `${LIFT}-${name}`;
+      m.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * ${floor ? '0.2' : '0.26'} * vec3(1.0, 0.97, 0.9);`);
+      };
+      return m;
+    }
+    case 'lm_window': {
+      // see-through glazing: the apron and the aircraft show through it (drawn both sides, after the opaque world)
+      const m = new THREE.MeshStandardMaterial({ ...base, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+      return m;
+    }
+    case 'lm_screen':
+      // screens and sign panels: their own light, day and night
+      return new THREE.MeshBasicMaterial({ vertexColors: true, name, toneMapped: true });
     default: {
       // lm_stone and anything unknown
       const m = new THREE.MeshStandardMaterial({ ...base, roughness: 0.88, metalness: 0 });
@@ -326,7 +346,7 @@ export class Landmarks implements System {
           const h = e.hero!;
           try {
             // the manifest's hash is the file's (the tile's may be older: a model is rebuilt without a re-bake)
-            const built = (assetManifest.landmarks as Record<string, { hash: string }>)[e.id];
+            const built = (assetManifest.landmarks as Record<string, { hash: string }>)[e.id] ?? (airportManifest.airport as Record<string, { hash: string }>)[e.id];
             const gltf = await loader.loadAsync(new URL(`${h.model}?v=${built?.hash ?? h.hash}`, base).href, undefined);
             if (this.disposed) return;
             const root = new THREE.Group();
@@ -354,8 +374,8 @@ export class Landmarks implements System {
               mesh.material = m;
               if (name === 'bld_wall' || name === 'bld_glass') prepareWallGeometry(mesh);
               if (name === 'bld_roof') prepareSurfaceGeometry(mesh);
-              mesh.castShadow = name !== 'lm_glow' && name !== 'lm_water';
-              mesh.receiveShadow = name !== 'lm_glow' && name !== 'lm_water';
+              mesh.castShadow = name !== 'lm_glow' && name !== 'lm_water' && name !== 'lm_window' && name !== 'lm_screen';
+              mesh.receiveShadow = name !== 'lm_glow' && name !== 'lm_water' && name !== 'lm_screen';
             });
             for (let i = 0; i < h.lods.length; i++) {
               const obj = gltf.scene.getObjectByName(`lod${i}`);

@@ -100,8 +100,9 @@ export function landmarkAt(list: readonly LandmarkEntry[], x: number, z: number)
       reach = e.radius;
     }
     if (d > reach) continue;
-    // inside the footprint is 0; otherwise how far into the reach it is, so the nearer of two overlapping landmarks wins
-    const score = d / reach - (e.ring ? 0.25 : 0);
+    // inside the footprint is 0; otherwise how far into the reach it is, so the nearer of two overlapping landmarks wins (a named
+    // place inside a building, a gate in a concourse, beats the building)
+    const score = d / reach - (e.kind === 'place' ? 0.5 : e.ring ? 0.25 : 0);
     if (score < bestScore) {
       bestScore = score;
       best = e;

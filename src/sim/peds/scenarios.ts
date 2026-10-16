@@ -95,7 +95,7 @@ export function slotPosition(p: ScenarioPoint, slot: number, n: number, chat: bo
     const r = 0.5 + 0.18 * n;
     return { x: cx + Math.sin(a) * r, z: cz + Math.cos(a) * r, yaw: a + Math.PI };
   }
-  const spacing = p.type === 'bench' ? 0.7 : p.type === 'busstop' ? 1.1 : p.type === 'lawn' ? 1.6 : 0.95;
+  const spacing = p.type === 'bench' ? 0.7 : p.type === 'seat' ? 0.62 : p.type === 'busstop' ? 1.1 : p.type === 'lawn' ? 1.6 : 0.95;
   const off = (slot - (n - 1) / 2) * spacing;
   // The right-hand side of someone facing yaw.
   const rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);

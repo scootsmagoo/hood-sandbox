@@ -8,6 +8,7 @@
  *
  * Guns: on foot LT aims and RT fires; X reloads while LT is held (the sim turns a punch into a reload while aiming); the D-pad
  * left and right change weapon; B takes cover. In a car LT and RT stay brake and throttle, so a drive-by aims with RB and fires with X.
+ * D-pad down opens the map (the map reads the pad itself while it is open: sticks pan and zoom, A sets a waypoint, B closes).
  */
 import type { Action } from './bindings';
 import type { Input, InputSource } from './Input';
@@ -29,6 +30,7 @@ export const PAD_ACTIONS: Readonly<Partial<Record<number, Action>>> = {
   [PAD.L3]: 'sprint',
   [PAD.R3]: 'lookBack',
   [PAD.UP]: 'toggleView',
+  [PAD.DOWN]: 'map',
   [PAD.LEFT]: 'weaponPrev',
   [PAD.RIGHT]: 'weaponNext',
   [PAD.VIEW]: 'debug',
@@ -38,6 +40,8 @@ export const PAD_ACTIONS: Readonly<Partial<Record<number, Action>>> = {
 /** Buttons that hold a second action besides the one in `PAD_ACTIONS`. */
 export const PAD_ALSO: Readonly<Partial<Record<number, Action>>> = {
   [PAD.B]: 'cover',
+  // the punch on foot; on a train (no punching there) the skip to the next station
+  [PAD.X]: 'skip',
 };
 
 export const STICK = { moveDead: 0.16, lookDead: 0.12, lookCurve: 2, steerCurve: 1.4, yawRate: 3.2, pitchRate: 2.0 };

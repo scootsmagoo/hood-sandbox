@@ -25,11 +25,13 @@
     "deploy:dry": "npm run build && npm run deploy:check && wrangler deploy --dry-run",
     "deploy": "npm run build && npm run deploy:check && wrangler deploy",
     "audit:collision": "vitest run --config vitest.audit.config.ts",
-    "assets": "node tools/blender/build.mjs && node tools/blender/characters/build.mjs && vitest run tests/carAssets.test.ts tests/anchorProps.test.ts tests/characterAssets.test.ts tests/landmarkAssets.test.ts",
+    "assets": "node tools/blender/build.mjs && node tools/blender/characters/build.mjs && vitest run tests/carAssets.test.ts tests/anchorProps.test.ts tests/characterAssets.test.ts tests/landmarkAssets.test.ts tests/transitAssets.test.ts tests/airportAircraft.test.ts tests/airportHeroes.test.ts",
     "audit:ground": "node scripts/ground-audit.mjs",
     "bake:m2": "cd tools/pipeline && npm run bake:m2 --",
     "prefetch:m2": "cd tools/pipeline && npm run prefetch:m2 --",
     "shots:stream": "node scripts/stream-shots.mjs",
+    "shots:map": "node scripts/map-shots.mjs",
+    "perf:nav": "node scripts/nav-cost.mjs",
     "perf:stream": "node scripts/stream-perf.mjs"
   },
   "dependencies": {

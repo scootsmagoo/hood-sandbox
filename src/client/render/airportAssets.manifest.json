@@ -1,0 +1,256 @@
+{
+  "_comment": "Written by tools/blender/build.mjs (npm run assets). Do not edit.",
+  "airport": {
+    "ac-ground": {
+      "file": "assets/airport/ac-ground.glb",
+      "sidecar": "assets/airport/ac-ground.json",
+      "kind": "ground",
+      "hash": "4d272e98a199",
+      "bytes": 92628,
+      "tris": [
+        0,
+        0
+      ]
+    },
+    "ac-narrowbody": {
+      "file": "assets/airport/ac-narrowbody.glb",
+      "sidecar": "assets/airport/ac-narrowbody.json",
+      "kind": "aircraft",
+      "hash": "bf0baad7b06f",
+      "bytes": 201372,
+      "tris": [
+        9868,
+        2196,
+        410
+      ]
+    },
+    "ac-regional": {
+      "file": "assets/airport/ac-regional.glb",
+      "sidecar": "assets/airport/ac-regional.json",
+      "kind": "aircraft",
+      "hash": "b8080e5cc9c4",
+      "bytes": 189500,
+      "tris": [
+        8772,
+        2124,
+        430
+      ]
+    },
+    "ac-widebody": {
+      "file": "assets/airport/ac-widebody.glb",
+      "sidecar": "assets/airport/ac-widebody.json",
+      "kind": "aircraft",
+      "hash": "b2f350a3b0d1",
+      "bytes": 225136,
+      "tris": [
+        12876,
+        2524,
+        434
+      ]
+    },
+    "atl-concourse-a": {
+      "file": "assets/airport/atl-concourse-a.glb",
+      "sidecar": "assets/airport/atl-concourse-a.json",
+      "kind": "hero",
+      "hash": "34a5797e5c9f",
+      "bytes": 247724,
+      "tris": [
+        13196,
+        3397,
+        202
+      ]
+    },
+    "atl-concourse-b": {
+      "file": "assets/airport/atl-concourse-b.glb",
+      "sidecar": "assets/airport/atl-concourse-b.json",
+      "kind": "hero",
+      "hash": "f7031d4fc051",
+      "bytes": 281600,
+      "tris": [
+        14752,
+        4035,
+        479
+      ]
+    },
+    "atl-concourse-c": {
+      "file": "assets/airport/atl-concourse-c.glb",
+      "sidecar": "assets/airport/atl-concourse-c.json",
+      "kind": "hero",
+      "hash": "68efdbc664de",
+      "bytes": 285112,
+      "tris": [
+        14822,
+        3812,
+        324
+      ]
+    },
+    "atl-concourse-d": {
+      "file": "assets/airport/atl-concourse-d.glb",
+      "sidecar": "assets/airport/atl-concourse-d.json",
+      "kind": "hero",
+      "hash": "5d47f7aa945d",
+      "bytes": 307436,
+      "tris": [
+        15938,
+        4191,
+        199
+      ]
+    },
+    "atl-concourse-e": {
+      "file": "assets/airport/atl-concourse-e.glb",
+      "sidecar": "assets/airport/atl-concourse-e.json",
+      "kind": "hero",
+      "hash": "f76ecd27d4cc",
+      "bytes": 243932,
+      "tris": [
+        11865,
+        3377,
+        196
+      ]
+    },
+    "atl-concourse-f": {
+      "file": "assets/airport/atl-concourse-f.glb",
+      "sidecar": "assets/airport/atl-concourse-f.json",
+      "kind": "hero",
+      "hash": "513f6c62d334",
+      "bytes": 151556,
+      "tris": [
+        6173,
+        1785,
+        115
+      ]
+    },
+    "atl-concourse-t": {
+      "file": "assets/airport/atl-concourse-t.glb",
+      "sidecar": "assets/airport/atl-concourse-t.json",
+      "kind": "hero",
+      "hash": "7c38cede0009",
+      "bytes": 500752,
+      "tris": [
+        37993,
+        3119,
+        285
+      ]
+    },
+    "atl-control-tower": {
+      "file": "assets/airport/atl-control-tower.glb",
+      "sidecar": "assets/airport/atl-control-tower.json",
+      "kind": "hero",
+      "hash": "04ab058c46c6",
+      "bytes": 68656,
+      "tris": [
+        1731,
+        428,
+        204
+      ]
+    },
+    "atl-domestic-terminal": {
+      "file": "assets/airport/atl-domestic-terminal.glb",
+      "sidecar": "assets/airport/atl-domestic-terminal.json",
+      "kind": "hero",
+      "hash": "115246cfb81a",
+      "bytes": 418384,
+      "tris": [
+        28794,
+        2696,
+        276
+      ]
+    },
+    "atl-international-terminal": {
+      "file": "assets/airport/atl-international-terminal.glb",
+      "sidecar": "assets/airport/atl-international-terminal.json",
+      "kind": "hero",
+      "hash": "a1de74bf4dfd",
+      "bytes": 94280,
+      "tris": [
+        4060,
+        374,
+        101
+      ]
+    },
+    "atl-north-daily-deck": {
+      "file": "assets/airport/atl-north-daily-deck.glb",
+      "sidecar": "assets/airport/atl-north-daily-deck.json",
+      "kind": "hero",
+      "hash": "095f3d71f0e3",
+      "bytes": 81924,
+      "tris": [
+        4835,
+        551,
+        19
+      ]
+    },
+    "atl-north-hourly-deck": {
+      "file": "assets/airport/atl-north-hourly-deck.glb",
+      "sidecar": "assets/airport/atl-north-hourly-deck.json",
+      "kind": "hero",
+      "hash": "0da85fbae16f",
+      "bytes": 84884,
+      "tris": [
+        5430,
+        436,
+        10
+      ]
+    },
+    "atl-rental-car-center": {
+      "file": "assets/airport/atl-rental-car-center.glb",
+      "sidecar": "assets/airport/atl-rental-car-center.json",
+      "kind": "hero",
+      "hash": "65435d5c294b",
+      "bytes": 256476,
+      "tris": [
+        17211,
+        1603,
+        261
+      ]
+    },
+    "atl-skytrain": {
+      "file": "assets/airport/atl-skytrain.glb",
+      "sidecar": "assets/airport/atl-skytrain.json",
+      "kind": "hero",
+      "hash": "a7958f5482ed",
+      "bytes": 439924,
+      "tris": [
+        26120,
+        4456,
+        806
+      ]
+    },
+    "atl-south-daily-deck": {
+      "file": "assets/airport/atl-south-daily-deck.glb",
+      "sidecar": "assets/airport/atl-south-daily-deck.json",
+      "kind": "hero",
+      "hash": "6c713e8ae75b",
+      "bytes": 90212,
+      "tris": [
+        5805,
+        537,
+        19
+      ]
+    },
+    "atl-south-hourly-deck": {
+      "file": "assets/airport/atl-south-hourly-deck.glb",
+      "sidecar": "assets/airport/atl-south-hourly-deck.json",
+      "kind": "hero",
+      "hash": "376a6aa54ebc",
+      "bytes": 103272,
+      "tris": [
+        6720,
+        675,
+        40
+      ]
+    },
+    "atl-west-parking-deck": {
+      "file": "assets/airport/atl-west-parking-deck.glb",
+      "sidecar": "assets/airport/atl-west-parking-deck.json",
+      "kind": "hero",
+      "hash": "b1e3ee228f48",
+      "bytes": 100604,
+      "tris": [
+        5664,
+        508,
+        10
+      ]
+    }
+  }
+}

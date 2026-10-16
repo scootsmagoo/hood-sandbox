@@ -39,6 +39,8 @@ export const Button = {
   Slot2: 1 << 14,
   Slot3: 1 << 15,
   Slot4: 1 << 16,
+  /** On a train: fade to the next station. */
+  Skip: 1 << 17,
 } as const;
 
 /** Indices into `InputCommand.axes`. */
@@ -181,7 +183,24 @@ export type SimEvent =
   | { type: 'cover:exit'; tick: number; pedId: EntityId }
   | { type: 'player:wasted'; tick: number; pedId: EntityId; x: number; y: number; z: number }
   | { type: 'player:busted'; tick: number; pedId: EntityId; officerId: EntityId }
-  | { type: 'player:respawn'; tick: number; pedId: EntityId; reason: 'wasted' | 'busted'; x: number; y: number; z: number };
+  | { type: 'player:respawn'; tick: number; pedId: EntityId; reason: 'wasted' | 'busted'; x: number; y: number; z: number }
+  /** A train came in from the edge of the loaded area (or left it). */
+  | { type: 'transit:train'; tick: number; trainId: EntityId; route: number; state: 'in' | 'out' }
+  /** A train stopped at a station (its doors open next), or left one. `station` indexes `transit.json` stations. */
+  | { type: 'transit:arrive'; tick: number; trainId: EntityId; route: number; station: number; platform: number }
+  | { type: 'transit:depart'; tick: number; trainId: EntityId; route: number; station: number }
+  /** Doors opening, or the chime before they close. */
+  | { type: 'transit:doors'; tick: number; trainId: EntityId; state: 'open' | 'closing' | 'closed' }
+  /** Someone got on or off a train (the player, or a station's people). */
+  | { type: 'transit:board'; tick: number; pedId: EntityId; trainId: EntityId; car: number; seat: number }
+  | { type: 'transit:alight'; tick: number; pedId: EntityId; trainId: EntityId; station: number }
+  /** The player paid at a fare gate (walked through it), or jumped one: fare evasion, a crime the transit police care about. */
+  | { type: 'transit:fare'; tick: number; pedId: EntityId; station: number }
+  | { type: 'transit:evade'; tick: number; pedId: EntityId; station: number; x: number; y: number; z: number }
+  /** Fading to the next station: `out` when the screen should go dark, `in` when the train is there. */
+  | { type: 'transit:skip'; tick: number; trainId: EntityId; phase: 'out' | 'in'; station: number }
+  /** A train hit someone on the track. */
+  | { type: 'transit:hit'; tick: number; trainId: EntityId; pedId: EntityId; speed: number };
 
 export type PedReaction = 'flee' | 'cower' | 'film' | 'look' | 'startle';
 export type PedCause = 'violence' | 'carjack' | 'explosion' | 'crash' | 'wreck' | 'car-on-sidewalk' | 'fast-car' | 'gunfire';
@@ -257,6 +276,10 @@ export interface SimInit {
   traffic?: number;
   /** Game clock start and pace (`?time=`, `?day=`, `?timescale=`). Left out: Wednesday 14:00 at 0.5 game minutes per second. */
   clock?: { minutes?: number; day?: number; scale?: number };
+  /** The tile's trains (`transit.json`; default on: `?transit=0` leaves them out). */
+  transit?: boolean;
+  /** The airport's AI aircraft (a city with `aeroway.json`; default on: `?aircraft=0` leaves them out). */
+  aircraft?: boolean;
   /** Run the clock by itself. Tests turn this off and call `advance`. */
   autoRun: boolean;
 }

@@ -54,6 +54,7 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
   "scenarios": "scenarios.json",             // optional: where pedestrians sit, wait, queue and chat (see below)
   "props": "props.json",                     // optional: tree, street lamp and street furniture anchors (see below)
   "landmarks": "landmarks.json",             // optional: the city pack's landmarks in the tile, and the hand-built hero models (see "Hero landmarks")
+  "transit": "transit.json",                 // optional: the rail lines, stations, tunnels and viaducts (see "transit.json"); it names its own transit.glb and transit.bin
   "meshFormat": 3,                           // optional: 2 when the .glb meshes carry the attributes of "Mesh attributes (meshFormat 2)", 3 when the buildings also carry `_LOOK` ("Building appearance (meshFormat 3)"); absent in an older bake
   "buildingKinds": ["generic", "office", ...],   // optional: the names of the building kind ids, in id order (see below)
   "buildingMaterials": ["unknown", "brick", ...], // optional (meshFormat 3): the names of the facade material ids (`_LOOK.x` on walls), in id order
@@ -94,7 +95,7 @@ The tile lives in `public/tiles/atlanta/m1-five-points/` and is served at `/tile
 - At-grade road meshes sit 4–14 cm above the ground mesh (sidewalks 10 cm, motorways 10 cm, residential streets 6 cm; junction surfaces take the lift of their biggest road), so the sim can treat the heightmap as the road surface. Add `polygonOffset` to the road materials to hide depth fighting at distance, and a stronger one to `road_markings` (the client uses -2 for the roads and -4 for the markings).
 - **Markings** lie 3 cm over the road they are on (14 cm over the ground for crosswalks, which may also lie on a sidewalk). They are one merged mesh per chunk. Centre lines are double yellow on two-way primary, secondary, tertiary and unclassified roads with an even number of lanes (a pair of solid yellow lines round the middle lane when the number of lanes is odd); white dashed lane dividers come from `lanes`; motorways and trunk roads (and their links) get solid white edge lines. Lines stop 5 m short of a junction. Zebra crosswalks are laid on every OSM crossing way (only where it lies on the road) and across every leg of a signalised junction that has no crossing within about 9 m; stop bars are laid on the approaches of signalised and stop-controlled junctions.
 - **Junctions**: wherever three or more at-grade roads meet (nodes closer than 14 m along a road count as one junction) the surface is one polygon with rounded corners, and the road ribbons stop at its edge (`trim` in `junctions.json`). Roundabouts, motorway merges and junctions with legs less than 17 degrees apart keep the old overlapping ribbons and have no polygon. `roads.json` centrelines still run through junctions untrimmed.
-- Tunnels (`tunnel=*`, negative `layer`) are not in the tile.
+- Road tunnels (`tunnel=*`, negative `layer`) are not in the tile. The subway (tunnels, trenches, viaducts and stations) is never in the roads: it is the transit layer (`transit.json`).
 
 ### Road profiles (the heightmap under the roads is not the raw 3DEP)
 
@@ -377,3 +378,104 @@ Places where a pedestrian stands about doing something, so the sim can spawn peo
 - `type`: `bench` (sit; the client draws a bench there), `busstop` (wait; the client draws a stop), `atm` (one person at the machine, facing the building), `shopfront` (browse a window; a pair chats), `eatery` (wait or chat at a restaurant, cafe or bar), `lawn` (sit or chat in a park, away from the paths), `plaza` (chat, or photograph), `corner` (wait at the kerb of a signalised crossing, on the phone or chatting).
 - `yaw` is the way people face, as a ped's yaw: forward is `(sin yaw, cos yaw)` in `(x, z)`. `cap` is how many people use it at once. `src` is `osm` (from the map) or `synth`.
 - Points on a sidewalk are on the walk network (snapped to it), clear of footprints by 0.4 m. POIs inside a building are moved out to the nearest sidewalk and face the building.
+
+
+### `transit.json` (the transit layer)
+
+The city's rail transit, in files of its own so the roads are untouched: `transit.json` (data), `transit.glb` (meshes) and
+`transit.bin` (collision). Written by `tools/pipeline/src/world/transit*.ts`, as a step of `npm run bake` or alone over a baked
+tile with `npm run transit` (both under `flock /tmp/hood-bake.lock`). Optional: a tile without `transit` in `tile.json` has no
+trains, and a city without `data/cities/<city>/transit.json` bakes none.
+
+**Inputs.** One Overpass query over the city pack's `box` (the whole network: route relations with their ordered members,
+every `railway=subway` way with its geometry, tunnels and bridges included, platforms, stations, stop positions and entrances),
+cached once per city under `tools/pipeline/cache/<city>/transit/` and fetched with the grid prefetch's polite client (one request,
+backoff with jitter, validated before it is cached). The pack (`data/cities/<city>/transit.json`) adds what OSM does not say: the
+brand the game shows (a parody; the real agency's name and marks never appear), the lines' colours and the route relations they
+run on (one per direction), the stations' depths below the street by OSM layer (Peachtree Center 37 m, Five Points 10 and 18 m:
+see its comment for the sources), in-game names for stations whose real names are brands (SEC District is Stadium District),
+and the synthetic timetable. No GTFS data is used (its terms are in `docs/tools-wishlist.md`).
+
+**What the bake does.**
+1. Each route relation is chained into one run of nodes and cut to the tile plus 420 m (the design needs the track beyond the edge).
+2. **Stations** are the OSM station nodes in the tile; their platforms (OSM, `subway=yes`, within 190 m) grouped into **levels**
+   by layer, each with a frame along its tracks (the platforms' principal axis), a platform at least 152 m long (a six-car train is
+   141.7 m) and a height: an underground platform's top is the street level (the highest ground at the node and its entrances)
+   less the pack's depth, and never closer than a concourse and a slab under the lowest ground over the concourse and the way to
+   its entrances; an elevated one stands the pack's height over the middle of the ground under it and 6.4 m plus the platform
+   over any road under it. Levels under each other are kept a slab apart.
+3. **The tracks' heights** are designed on the union of the routes' ways, densified to 6 m: held level at each platform (rail =
+   platform top - 1.1 m) through the hall and 18 m past it, pulled toward a target for what OSM says each way is (a tunnel 12 m
+   down, a trench 6 m down, a viaduct over the roads it crosses, the ground), inside its bounds (bounds give way over 260 m round a
+   change of structure: the portal ramps), smoothed, and at most 4% steep (every vertex inside the band the held vertices allow,
+   then relaxed). The structure is then read back from the design: a **tunnel** where the rail is 6.3 m or more under the ground
+   (a roofed box), an open **trench** where it is under the ground but not that deep, the **ground**, or a **viaduct**.
+4. An island the map draws too narrow (the two tracks drawn close) is widened to 9 m: its two tracks part through the station,
+   eased back over 90 m either side.
+5. **Station layout** (all boxes, slabs and ramps in a level's frame): the hall round the tracks and platforms (walls 2.4 m past a
+   track, 4.5 m to the ceiling, tunnel mouths in the end walls); for an underground station a concourse (pack size, grown to hold
+   the shafts) with a paid area inside it ringed by railings and two banks of four fare gates (0.86 m gaps between 0.26 m
+   cabinets 0.85 m tall: a player can just jump one), a shaft of stairs and two escalators down to each level (30 degrees, clear of
+   the other halls, a 2.2 m walk either side of it on the island); for each OSM entrance a stairwell from the street (placed clear
+   of buildings, carriageways, poles, trees and other wells, along the most natural way down) and a corridor to the concourse. An
+   elevated platform gets a stair down to the street with three gates across its foot (a side platform's from a landing beside
+   it). Elevated stations' own structures, which the map draws as buildings round the platforms, are left out of the tile's
+   buildings (the bake's `transitCutouts`: generic buildings 30% or more inside an elevated platform's outline grown 4 m along and
+   8 m across).
+
+```jsonc
+{ "format": "hood-transit", "version": 1,
+  "brand": "Peach Rapid Transit", "brandShort": "PRT", "agency": "tap",          // the agency (jurisdictions.json) of the stations
+  "lines": [ { "id": "red", "ref": "Red", "name": "Red Line", "colour": "#d4202c" } ],
+  "routes": [ {                                                                   // one line, one direction, cut at the tile's edge
+      "id": "red-0", "line": 0, "osm": 304619, "towards": "Airport",               // the whole line's terminus
+      "pts": [x, y, z, ...], "cum": [0, 2.9, ...], "len": 2336.2,                  // rail top, about 3 m apart; cumulative distance
+      "stops": [ { "station": 1, "platform": 0, "s": 492.4, "side": 1 } ],        // s: where the HEAD stops; side +1: platform on the left
+      "enter": "n", "exit": "s",                                                   // the tile side it comes in and goes out at (null: starts/ends inside)
+      "speed": [[0, 15.5], [120.3, 12], ...],                                      // limit (m/s) from s on: OSM maxspeed, 0.9 m/s2 on curves
+      "reverse": 1 } ],                                                            // the same line's other direction
+  "tracks": [ { "id": 0, "osm": 0, "pts": [x, y, z, ...], "runs": [[0, "tunnel"], [57, "station"], ...] } ],   // physical tracks, for drawing
+  "stations": [ {
+      "id": "five-points", "name": "Five Points", "displayName": "Five Points", "osm": 318451223,
+      "x": -166.2, "y": 5.2, "z": 45.3, "underground": true, "lines": [0, 1, 2, 3],   // y: street level
+      "platforms": [ { "kind": "island", "y": -7.3, "c": [x, z], "axis": [ax, az], "halfLen": 76, "halfWidth": 4.5, "layer": -1,
+                       "routes": [4, 5, 6, 7], "waits": [[x, y, z, yaw], ...] } ],  // waits: where people wait (the layer's scenario points)
+      "concourse": { "c": [x, yFloor, z], "axis": [ax, az], "halfLen": 34, "halfWidth": 26 },  "paid": { ... },   // null for elevated stations
+      "entrances": [ { "x": .., "y": .., "z": .., "yaw": 2.54, "foot": [x, y, z], "osm": 7489920943 } ],      // top of the stairs at the street, the way down
+      "gates": [[x, z, nx, nz], ...] } ],                                           // each gate gap's middle and the unit normal INTO the paid area
+  "volumes": [ { "c": [x, y, z], "h": [hx, hy, hz], "yaw": 0.97, "kind": "interior" | "open", "station": 0 } ],   // the spaces under the ground
+  "holes": [[x, z, hx, hz, yaw], ...],                                              // stairwells: where the ground and street meshes are not drawn
+  "anchors": [ { "kind": "column", "x": .., "y": .., "z": .., "yaw": .., "station": 0, "platform": 0 } ],        // station kit instances
+  "walk": { "nodes": [[x, y, z], ...], "edges": [a, b, kind, ...] },                // kinds: 0 floor, 1 stairs, 2 fare gate, 4 street link
+  "timetable": { "secondsPerMinute": 20, "headways": [{ "from": "06:30", "to": "09:30", "minutes": 6 }, ...], "dwellS": 22, "transferDwellS": 30,
+                 "cars": 6, "accel": 1.0, "brake": 1.1, "maxSpeed": 31.3 },
+  "collision": { "file": "transit.bin", "vertexCount": 31140, "indexCount": 46884 },
+  "mesh": "transit.glb",
+  "stats": { ... } }                                                                // what the bake found (stations, profile, metres by structure)
+```
+
+- **Coordinates** are the tile's; every `y` is a height in the tile's frame. A box's `yaw` turns its local +Z to `(sin yaw, cos yaw)`
+  in (x, z) (as a ped's yaw); its local +X is `(cos yaw, -sin yaw)`. Platform `axis` is the unit direction of the tracks.
+- **Volumes** are the spaces under the ground (halls, concourses, corridors, stairwells and shafts in 3 m pieces, tunnels and
+  trenches in pieces of track): inside one, a person's character controller meets only the transit layer (`GROUPS.undergroundQuery`),
+  not the ground or the buildings over them; `interior` ones are out of the sun (the client's light), `open` ones (trenches) are not.
+- **Kit anchors** (`kind`): `column`, `bench`, `sign_name` (the station's name), `screen` (next trains, `platform`), `lamp_tube`,
+  `fare_gate` (a cabinet: two per gap), `railing` (1 m sections), `canopy` and `pylon` (entrances), `map_board`, `bin`, `tunnel_bay`
+  (tunnel wall details, lamps every 12 m). The models are `public/assets/transit/station-kit.glb` (tools/blender/transit/kit.py).
+- **`transit.glb`**: one node per 256 m chunk and material, `transit_int_<cx>_<cz>` (material `tr_int`: under the ground; `COLOR_0`
+  rgb is the albedo and **alpha the light baked from the station's lamps and the tunnels' lights**, not occlusion: the client draws it
+  unlit by the sun) and `transit_ext_<cx>_<cz>` (`tr_ext`: viaducts, piers, open stairs; alpha 1). Tunnels are a box round a track
+  (5.0 m over the rail, 2.6 m either side), one box round two tracks within 9 m of each other; viaducts a girder with parapets
+  and piers clear of carriageways; rails, plinths and a third rail with its cover board everywhere.
+- **`transit.bin`**: like `collision.bin` (float32 positions, then uint32 indices): halls, platforms and their edges, concourses,
+  corridors, shafts and stairs (a stair is a smooth ramp through its nosings), tunnel tubes, trench walls, viaducts, parapets and
+  piers, and boxes for the columns, benches, gate cabinets, railings, bins and pylons. The sim builds it as one fixed trimesh in
+  `Group.Transit` (solid to everything).
+- **Trains** are the sim's (`src/sim/transit`): the file only gives routes, stops and the timetable. The headway is the
+  timetable's minutes for the game clock's time of day times `secondsPerMinute` sim seconds (the game clock runs 30 times real
+  time; real minutes would leave a platform empty for game hours), the lines of a shared track taking turns.
+- **Checked** by `tools/pipeline` `npm test` (test/transit.test.ts) and `npm run verify` (grades at most 4%, every station
+  reachable on its walk network from each entrance, every stop on its platform, collision present), and in the sim by
+  tests/transit/*.test.ts (a walker gets from every entrance to every underground platform on the real tile).
+- **For the M2 grid** (docs/contracts/city-tiles.md): the query is city-wide already and each tile cuts the network to its cell;
+  what a streamed city still needs is in that file, section 15.

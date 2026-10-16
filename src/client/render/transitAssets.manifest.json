@@ -1,0 +1,26 @@
+{
+  "_comment": "Written by tools/blender/build.mjs (npm run assets). Do not edit.",
+  "transit": {
+    "railcar": {
+      "file": "assets/transit/railcar.glb",
+      "sidecar": "assets/transit/railcar.json",
+      "hash": "ae57eb7efb3e",
+      "bytes": 410764,
+      "tris": [
+        15146,
+        2528,
+        412
+      ]
+    },
+    "station-kit": {
+      "file": "assets/transit/station-kit.glb",
+      "sidecar": "assets/transit/station-kit.json",
+      "hash": "dbb2fa31d1c8",
+      "bytes": 141500,
+      "tris": [
+        2282,
+        1268
+      ]
+    }
+  }
+}

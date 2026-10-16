@@ -240,6 +240,8 @@ export class EntityViews implements System {
         this.peds.frame(id, st, defs.get(id), dt);
         continue;
       }
+      // (trains are drawn by the transit layer: render/transit/TrainViews.ts)
+      if (st.kind === EntityKind.Train) continue;
       let v = this.views.get(id);
       let instanced = st.kind === EntityKind.Vehicle && (st.flags & VehicleFlag.Traffic) !== 0;
       if (!instanced && this.parkedFar && st.kind === EntityKind.Vehicle && !(st.flags & (VehicleFlag.Occupied | VehicleFlag.Police | VehicleFlag.Roadblock)) && id !== this.game.view.controlled?.id) {

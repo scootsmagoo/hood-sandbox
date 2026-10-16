@@ -60,6 +60,10 @@ export class PedEntity implements EntityBase {
   stumbleT = 0;
   /** How far through a 911 call this witness is, 0 to 1; -1 when they are not calling (the law sets it; the snapshot shows it). */
   dial = -1;
+  /** Riding a train (src/sim/transit): which, the car, and the seat (or a standing spot when `stand`). Null when not. */
+  ride: { trainId: EntityId; car: number; seat: number; stand: boolean } | null = null;
+  /** A station's person (src/sim/transit/stationPeds.ts): what they are doing there. */
+  transit: { mode: number; path: number[]; at: number; t: number; target: [number, number, number] | null; trainId: EntityId; station: number; wait: number } | null = null;
 
   constructor(
     readonly id: EntityId,
@@ -186,7 +190,20 @@ export class SpikeStripEntity implements EntityBase {
   ) {}
 }
 
-export type SimEntity = PedEntity | VehicleEntity | HelicopterEntity | SpikeStripEntity;
+/** A metro train (src/sim/transit/Transit.ts holds its state and its cars' bodies). */
+export class TrainEntity implements EntityBase {
+  readonly kind = EntityKind.Train;
+  owner = 0;
+  authority: Authority = Authority.Local;
+  health = 1;
+  constructor(
+    readonly id: EntityId,
+    /** Index into the transit layer's trains. */
+    readonly slot: number,
+  ) {}
+}
+
+export type SimEntity = PedEntity | VehicleEntity | HelicopterEntity | SpikeStripEntity | TrainEntity;
 
 /** One human player: their latest input and the edges (presses) accumulated since the last tick. */
 export class PlayerSlot {

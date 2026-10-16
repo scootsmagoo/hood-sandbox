@@ -141,3 +141,18 @@ Everything else is installable without sudo, so the owner does not need to do it
 - **Coqui XTTS** (CPML, non-commercial).
 - **Piper `ryan-high`** and **`lessac`** voices (non-commercial, or research-only).
 - Any asset marked **CC BY-NC** or **CC BY-SA** without a decision on share-alike.
+
+## Transit data: the real agency's GTFS (checked 2026-10-16)
+
+The rail transit (`docs/contracts/m1-tile-format.md`, "transit.json") is built from **OpenStreetMap only** (ODbL, like the rest of
+the map): track geometry, route relations, stations, platforms and entrances. The timetable is **synthetic** (headways by time
+of day in `data/cities/atlanta/transit.json`). No GTFS file is fetched, cached or committed.
+
+- MARTA publishes its GTFS feed on its developer resources page (itsmarta.com, "App Developer Resources"). That page gives **no
+  licence for the feed itself** (nothing on redistribution, derived works or attribution); it links to the site's general Terms
+  and Conditions, and its real-time API needs a key under terms it does not state.
+- It does say that MARTA's **trademarks and logos may not be used** for any commercial or non-commercial purpose without prior
+  written consent. Hence the parody brand ("Peach Rapid Transit") and no logos or wordmarks on any model, sign or HUD.
+- **Decision:** until MARTA's terms are confirmed in writing to allow redistributing derived data, GTFS stays out of the repo
+  and out of the baked tiles. If it is ever used, only at bake time and only for timing (headways, dwell, run times), with the
+  terms recorded here first.

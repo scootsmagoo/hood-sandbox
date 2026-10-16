@@ -65,6 +65,16 @@ function styleMaterial(mat: THREE.Material) {
     m.polygonOffsetFactor = -2;
     m.polygonOffsetUnits = -2;
   }
+  if (name === 'road_airfield') {
+    // the airport's pavement: under the roads that cross an apron (they win where the two meet)
+    m.polygonOffsetFactor = -1;
+    m.polygonOffsetUnits = -1;
+  }
+  if (name === 'road_aeromark') {
+    // its paint: over the pavement, under the roads' own markings
+    m.polygonOffsetFactor = -3;
+    m.polygonOffsetUnits = -3;
+  }
   if (name === 'road_markings') {
     // Lane lines, crosswalks and stop bars lie 3 cm over the asphalt (14 cm over the ground for crosswalks):
     // pull them further towards the camera than the road itself so they never z-fight with it at distance.

@@ -15,6 +15,7 @@ import { parseRoads, type RoadData } from '../../shared/tile';
 import { officerCone } from '../../shared/policeRules';
 import { HeatPhase, HeliFlag, PedFlag, VehicleFlag } from '../../shared/snapshot';
 import type { Game, System } from '../Game';
+import { mapLayers, type RadarView } from './map/layers';
 import {
   flashPhase,
   facingVector,
@@ -113,6 +114,9 @@ export class Minimap implements System {
   private lastFacing = 0;
   private lastDraw = 0;
   private disposed = false;
+  /** What map layers (the GPS route, the waypoint, transit lines) are handed to draw with; refilled every frame. */
+  private readonly radarView: RadarView;
+  private layersRev = -1;
 
   constructor(
     private readonly game: Game,
@@ -136,6 +140,10 @@ export class Minimap implements System {
     this.ctx.font = `bold ${Math.round(11 * this.dpr)}px system-ui, sans-serif`;
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
+    this.radarView = { ctx: this.ctx, cx: 0, cy: 0, R: 0, dpr: this.dpr, pxPerM: 1, span: SPAN_REST_M, ox: 0, oz: 0, place: (x, z, out) => (this.place(x, z), (out.x = tmp.x), (out.y = tmp.y), out) };
+    // A click on the radar opens the full-screen map (a one-button mouse needs no key for it).
+    Object.assign(this.canvas.style, { pointerEvents: 'auto', cursor: 'pointer' });
+    this.canvas.addEventListener("click", () => this.game.bigMap?.open());
 
     void this.loadRoads(tileBase);
   }
@@ -211,7 +219,8 @@ export class Minimap implements System {
       Math.abs(st.z - this.lastZ) < 0.02 &&
       Math.abs(g.cameraArm.yaw - this.lastYaw) < 0.0004 &&
       Math.abs(facing - this.lastFacing) < 0.0004 &&
-      Math.abs(zoomForSpeed(Math.hypot(st.vx, st.vz)) - this.span) < 0.05;
+      Math.abs(zoomForSpeed(Math.hypot(st.vx, st.vz)) - this.span) < 0.05 &&
+      this.layersRev === mapLayers(g).revision;
     if (still && now - this.lastDraw < 250) return;
     this.lastX = st.x;
     this.lastZ = st.z;
@@ -286,6 +295,19 @@ export class Minimap implements System {
       ctx.drawImage(t.canvas, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
+
+    // Map layers (the GPS route and waypoint, transit lines): over the roads, under the police.
+    const rv = this.radarView;
+    rv.cx = cx;
+    rv.cy = cy;
+    rv.R = R;
+    rv.pxPerM = pxPerM;
+    rv.span = span;
+    rv.ox = st.x;
+    rv.oz = st.z;
+    const layers = mapLayers(g);
+    this.layersRev = layers.revision;
+    layers.drawRadar(rv);
 
     const heatOn = v.heat >= 1;
     const flash = flashPhase(performance.now());
@@ -394,6 +416,11 @@ export class Minimap implements System {
     const ny = cy + tmp.y * (R - 9 * dpr);
     ctx.fillStyle = '#ff6b5e';
     ctx.fillText('N', nx, ny);
+  }
+
+  /** Redraws on the next frame even if nothing on the radar moved (a layer changed). */
+  invalidate() {
+    this.drawn = false;
   }
 
   private clear() {

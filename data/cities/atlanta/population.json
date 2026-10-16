@@ -170,6 +170,762 @@
   },
   "zones": [
     {
+      "id": "hartsfield-jackson",
+      "name": "Hartsfield-Jackson Airport",
+      "kind": "transit",
+      "default": false,
+      "polygon": [
+        [
+          -5409,
+          13281
+        ],
+        [
+          -5409,
+          13235
+        ],
+        [
+          -4998,
+          12070
+        ],
+        [
+          -4142,
+          10934
+        ],
+        [
+          -4073,
+          10858
+        ],
+        [
+          -4002,
+          10780
+        ],
+        [
+          -3986,
+          10770
+        ],
+        [
+          -2645,
+          10858
+        ],
+        [
+          -2446,
+          10981
+        ],
+        [
+          -2235,
+          11120
+        ],
+        [
+          -2032,
+          11256
+        ],
+        [
+          -1468,
+          11899
+        ],
+        [
+          -1468,
+          11945
+        ],
+        [
+          -1631,
+          13286
+        ],
+        [
+          -2660,
+          14885
+        ],
+        [
+          -5397,
+          14882
+        ],
+        [
+          -5409,
+          13602
+        ]
+      ],
+      "weekday": [
+        {
+          "peds": 2,
+          "cars": 2,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 2,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 2,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 4,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        }
+      ],
+      "weekend": [
+        {
+          "peds": 2,
+          "cars": 1,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 1,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 1,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 9,
+          "cars": 3,
+          "pedGroups": {
+            "tourists": 0.45,
+            "business": 0.3,
+            "locals": 0.15,
+            "workers": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "id": "college-park",
+      "name": "College Park",
+      "kind": "residential",
+      "default": false,
+      "polygon": [
+        [
+          -7168,
+          10240
+        ],
+        [
+          -1024,
+          10240
+        ],
+        [
+          -1024,
+          15360
+        ],
+        [
+          -7168,
+          15360
+        ]
+      ],
+      "weekday": [
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.6,
+            "workers": 0.3,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        }
+      ],
+      "weekend": [
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 1,
+          "cars": 1,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        },
+        {
+          "peds": 2,
+          "cars": 3,
+          "pedGroups": {
+            "locals": 0.7,
+            "workers": 0.2,
+            "students": 0.1
+          },
+          "vehicleGroups": {
+            "city": 0.7,
+            "commercial": 0.3
+          }
+        }
+      ]
+    },
+    {
       "id": "transit",
       "name": "Five Points",
       "kind": "transit",

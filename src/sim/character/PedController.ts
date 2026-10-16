@@ -41,6 +41,11 @@ export class PedController {
   grounded = false;
   sprinting = false;
   enabled = true;
+  /**
+   * What the character controller's queries meet (`GROUPS.actorQuery`): the transit layer swaps it for `undergroundQuery` while
+   * the character is in the spaces under the ground, so the ground and the buildings over a station do not catch them.
+   */
+  queryGroups: number = GROUPS.actorQuery;
   private coyote = 0;
   private jumpBuffered = 0;
   private jumpWasDown = false;
@@ -105,7 +110,7 @@ export class PedController {
       this.collider,
       { x: (this.vel.x + this.ext.x) * dt, y: this.vy * dt, z: (this.vel.z + this.ext.z) * dt },
       undefined,
-      GROUPS.actorQuery,
+      this.queryGroups,
     );
     const m = this.kcc.computedMovement();
     this.grounded = this.kcc.computedGrounded() && this.vy <= 0.01;

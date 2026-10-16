@@ -1,5 +1,5 @@
 {
-  "_comment": "Every asset `npm run assets` builds (tools/blender/build.mjs). module: the Python module under tools/blender with build(asset); type: the handling.json entry it is built to; police: has the police kit. Output: public/assets/vehicles/<name>.glb (props: public/assets/props, landmarks: public/assets/landmarks together with <name>.json, the placement and collision sidecar).",
+  "_comment": "Every asset `npm run assets` builds (tools/blender/build.mjs). module: the Python module under tools/blender with build(asset); type: the handling.json entry it is built to; police: has the police kit. Output: public/assets/vehicles/<name>.glb (props: public/assets/props, landmarks: public/assets/landmarks together with <name>.json, the placement and collision sidecar; transit: public/assets/transit together with <name>.json, dimensions, levels of detail and node names).",
   "vehicles": [
     { "name": "sedan", "module": "cars.sedan", "type": "sedan" },
     { "name": "coupe", "module": "cars.coupe", "type": "coupe" },
@@ -39,5 +39,32 @@
     { "name": "peachtree-center-north-tower", "module": "landmarks.peachtree_center" },
     { "name": "peachtree-center-south-tower", "module": "landmarks.peachtree_center" },
     { "name": "rialto-center-for-the-arts", "module": "landmarks.rialto" }
+  ],
+  "transit": [
+    { "name": "railcar", "module": "transit.railcar" },
+    { "name": "station-kit", "module": "transit.kit" }
+  ],
+  "airport": [
+    { "name": "ac-narrowbody", "module": "airport.aircraft", "kind": "aircraft" },
+    { "name": "ac-widebody", "module": "airport.aircraft", "kind": "aircraft" },
+    { "name": "ac-regional", "module": "airport.aircraft", "kind": "aircraft" },
+    { "name": "ac-ground", "module": "airport.ground", "kind": "ground" },
+    { "name": "atl-domestic-terminal", "module": "airport.domestic", "kind": "hero" },
+    { "name": "atl-concourse-t", "module": "airport.concourse_t", "kind": "hero" },
+    { "name": "atl-concourse-a", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-concourse-b", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-concourse-c", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-concourse-d", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-concourse-e", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-concourse-f", "module": "airport.concourse", "kind": "hero" },
+    { "name": "atl-international-terminal", "module": "airport.terminal_intl", "kind": "hero" },
+    { "name": "atl-control-tower", "module": "airport.tower", "kind": "hero" },
+    { "name": "atl-north-hourly-deck", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-north-daily-deck", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-south-hourly-deck", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-south-daily-deck", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-west-parking-deck", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-rental-car-center", "module": "airport.decks", "kind": "hero" },
+    { "name": "atl-skytrain", "module": "airport.skytrain", "kind": "hero" }
   ]
 }

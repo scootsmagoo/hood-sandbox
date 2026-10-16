@@ -48,7 +48,17 @@ export interface SpikeStripDef {
   readonly depth: number;
 }
 
-export type EntityDef = VehicleDef | PedDef | HelicopterDef | SpikeStripDef;
+/** A metro train of `cars` cars on a route of the tile's `transit.json` (its line gives the colour). */
+export interface TrainDef {
+  readonly id: EntityId;
+  readonly kind: typeof EntityKind.Train;
+  /** Index into `transit.json` routes and lines. */
+  readonly route: number;
+  readonly line: number;
+  readonly cars: number;
+}
+
+export type EntityDef = VehicleDef | PedDef | HelicopterDef | SpikeStripDef | TrainDef;
 
 /** Paint colours the sim picks from for parked cars, 0xRRGGBB. */
 export const PAINTS = [0xb23a2e, 0x2f5d8a, 0xd9d6cf, 0x1f2326, 0x6b7a4a, 0xc79a2a, 0x7a2f55, 0x8d949b] as const;

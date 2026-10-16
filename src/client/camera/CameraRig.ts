@@ -75,6 +75,22 @@ export class CameraRig implements System {
     const st = v.controlled;
     if (!st) return;
     const camera = g.camera;
+    // a scripted shot's fixed camera, or on a train: the window or chase view (TransitCamera.ts) has the camera
+    if (g.transitCamera && !g.transit?.broken) {
+      try {
+        if (g.transitCamera.applyOverride()) return;
+        if (g.transitCamera.active()) {
+          g.transitCamera.apply(dt, this.look);
+          this.initialised = true;
+          return;
+        }
+      } catch (e) {
+        // the train camera failed: this rig's camera instead (the game goes on)
+        console.warn('transit camera failed', e);
+        g.transitCamera = undefined;
+      }
+      g.transitCamera?.release();
+    }
 
     if (!this.initialised) {
       // Start behind the character, looking the way it faces.

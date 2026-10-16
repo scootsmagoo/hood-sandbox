@@ -36,7 +36,8 @@ export interface PathsData {
   edges: number[];
 }
 
-export type ScenarioType = 'bench' | 'busstop' | 'atm' | 'shopfront' | 'eatery' | 'lawn' | 'plaza' | 'corner';
+/** `seat`: sit on a seat a model draws (an airport holdroom's): no bench is drawn there and nothing is made solid. */
+export type ScenarioType = 'bench' | 'busstop' | 'atm' | 'shopfront' | 'eatery' | 'lawn' | 'plaza' | 'corner' | 'seat';
 
 export interface ScenarioPoint {
   id: string;
@@ -56,7 +57,7 @@ export interface ScenariosData {
 }
 
 const KINDS = new Set<string>(['sidewalk', 'synthetic', 'footway', 'pedestrian', 'crossing', 'island', 'link', 'steps']);
-const TYPES = new Set<string>(['bench', 'busstop', 'atm', 'shopfront', 'eatery', 'lawn', 'plaza', 'corner']);
+const TYPES = new Set<string>(['bench', 'busstop', 'atm', 'shopfront', 'eatery', 'lawn', 'plaza', 'corner', 'seat']);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** Reads `paths.json`. Anything malformed means no network (the sim then has no ambient walkers), not no tile. */

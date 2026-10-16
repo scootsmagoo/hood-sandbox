@@ -50,6 +50,13 @@ export interface CityGridSpec {
   out: string;
   /** inclusive cell rects [[iMin, jMin], [iMax, jMax]], in bake order; a cell in two regions belongs to the first */
   regions: { id: string; name: string; cells: [[number, number], [number, number]] }[];
+  /**
+   * An airport in the grid (world/aeroway*.ts): the lon/lat box its aeroway extract is fetched for, once for the whole airport
+   * (world/aerowayFetch.ts). Its tiles then bake runways, taxiways and aprons, and the grid gets `aeroway.json`.
+   */
+  aeroway?: { icao: string; box: { south: number; west: number; north: number; east: number } };
+  /** Where the grid's index puts the player (a game point; default: the M1 spawn at Five Points, or the first tile's own). */
+  spawn?: { x: number; z: number };
 }
 
 export interface TileConfig {

@@ -26,6 +26,8 @@ import {
   overtureRelease,
 } from '../sources/overture.js';
 import { fetchWikidataFacts } from '../sources/wikidata.js';
+import { aerowayCacheFile, aerowayQuery } from '../world/aerowayFetch.js';
+import type { OsmElement } from '../sources/osm.js';
 import { cellBakeConfig, listArg, loadGrid, selectCells, type Grid, type GridCell } from './grid.js';
 import { AttemptError, DEM_POLICY, fetchOverpassToCache, OVERPASS_POLICY, PoliteClient, realDeps, retryableStatus, retryAfterMs, USER_AGENT, writeAtomic, type HttpDeps } from './http.js';
 
@@ -59,7 +61,7 @@ export interface PrefetchReport {
   started: string;
   finished?: string;
   tiles: string[];
-  sources: { overpass: SourceReport; dem: SourceReport; overture: SourceReport; wikidata: SourceReport };
+  sources: { overpass: SourceReport; dem: SourceReport; overture: SourceReport; wikidata: SourceReport; aeroway?: SourceReport };
 }
 
 /** The lon/lat box of the whole grid (every cell plus the query margin): the box of the one Overture query. */
@@ -147,6 +149,99 @@ async function wikidataFor(cfg: TileConfig, osmFile: string, rep: SourceReport):
   } catch (e) {
     rep.failures.push({ tile: cfg.tileId, what: 'wikidata', error: (e as Error).message });
   }
+}
+
+/** An Overpass element's lon/lat box (`out geom`: a way's or relation's `bounds`, else its geometry; a node's point). */
+export function elementBox(e: OsmElement & { bounds?: { minlat: number; minlon: number; maxlat: number; maxlon: number } }): [number, number, number, number] | null {
+  if (e.bounds) return [e.bounds.minlon, e.bounds.minlat, e.bounds.maxlon, e.bounds.maxlat];
+  if (e.lat != null && e.lon != null) return [e.lon, e.lat, e.lon, e.lat];
+  let w = Infinity, s = Infinity, ea = -Infinity, n = -Infinity;
+  const add = (g?: { lat: number; lon: number }[]) => {
+    for (const p of g ?? []) {
+      if (!p) continue;
+      w = Math.min(w, p.lon); ea = Math.max(ea, p.lon); s = Math.min(s, p.lat); n = Math.max(n, p.lat);
+    }
+  };
+  add(e.geometry);
+  for (const m of e.members ?? []) add(m.geometry);
+  return Number.isFinite(w) ? [w, s, ea, n] : null;
+}
+
+/** Does an element's box touch a query box (edges included: Overpass's bbox filter keeps a way that touches it)? */
+const touches = (b: [number, number, number, number], q: TileConfig['queryBox']) => b[0] <= q.east && b[2] >= q.west && b[1] <= q.north && b[3] >= q.south;
+
+/** The timeout of a merged query (it covers many tiles at once), s. */
+const MERGED_TIMEOUT_S = 900;
+
+/**
+ * Overpass, merged (`--merged`, for a sparse grid such as the airport's): each of the five tile queries is asked **once** for the
+ * box of every selected cell, and the answer is cut per tile into the very files the tile bakes read (an element goes to every
+ * tile whose query box its box touches, in the order Overpass gave them). Five requests for the whole grid instead of five a
+ * tile, one at a time on the same polite client. A tile whose files are all there already is left alone.
+ */
+export async function overpassMergedLane(grid: Grid, cells: GridCell[], rep: SourceReport, wiki: SourceReport, deps: HttpDeps, save: () => void, opts: { endpoints?: string[] } = {}): Promise<void> {
+  const client = new PoliteClient({ ...OVERPASS_POLICY, timeoutMs: (MERGED_TIMEOUT_S + 60) * 1000 }, deps);
+  const endpoints = opts.endpoints?.length ? opts.endpoints : grid.city.sources.osm.endpoints;
+  const cfgs = cells.map((c) => cellBakeConfig(grid, c).cfg);
+  let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
+  for (const c of cfgs) {
+    south = Math.min(south, c.queryBox.south); west = Math.min(west, c.queryBox.west);
+    north = Math.max(north, c.queryBox.north); east = Math.max(east, c.queryBox.east);
+  }
+  const box = { south, west, north, east };
+  const kinds = overpassJobs(box);
+  for (let k = 0; k < kinds.length; k++) {
+    const job = kinds[k];
+    const files = cfgs.map((c) => overpassCacheFile(c.cacheDir, job.prefix, overpassJobs(c.queryBox)[k].query));
+    if (files.every((f) => existsSync(f))) {
+      for (const f of files) { rep.files++; rep.cached++; rep.bytes += sizeOf(f); }
+      continue;
+    }
+    const query = job.query.replace(/\[timeout:\d+\]/, `[timeout:${MERGED_TIMEOUT_S}]`);
+    const merged = overpassCacheFile(path.join(grid.cacheRoot, 'merged'), job.prefix, query);
+    const r = await fetchOverpassToCache(client, endpoints, query, merged, `overpass (merged, ${cells.length} tiles) ${job.what}`);
+    if (r.status === 'failed') {
+      rep.failures.push({ what: `merged ${job.prefix}`, error: r.error ?? 'failed' });
+      save();
+      continue;
+    }
+    if (r.status === 'fetched') deps.log(`overpass merged ${job.what}: ${(r.bytes / 1e6).toFixed(2)} MB`);
+    const all = JSON.parse(readFileSync(merged, 'utf8')) as { elements: OsmElement[]; [k: string]: unknown };
+    const boxes = all.elements.map((e) => elementBox(e));
+    cfgs.forEach((c, i) => {
+      const f = files[i];
+      if (!existsSync(f)) {
+        const q = c.queryBox;
+        const elements = all.elements.filter((_, j) => boxes[j] != null && touches(boxes[j]!, q));
+        writeAtomic(f, JSON.stringify({ ...all, elements }));
+        rep.fetched++;
+      } else rep.cached++;
+      rep.files++;
+      rep.bytes += sizeOf(f);
+    });
+    deps.log(`overpass merged ${job.what}: cut into ${cfgs.length} tiles`);
+    if (job.prefix === 'osm-overpass') for (const c of cfgs) await wikidataFor(c, overpassCacheFile(c.cacheDir, job.prefix, overpassJobs(c.queryBox)[k].query), wiki);
+    save();
+  }
+}
+
+/** The grid's airport extract (world/aerowayFetch.ts): one request for its box. */
+export async function aerowayLane(grid: Grid, rep: SourceReport, deps: HttpDeps, save: () => void, opts: { endpoints?: string[] } = {}): Promise<void> {
+  const a = grid.spec.aeroway;
+  if (!a) return;
+  const client = new PoliteClient({ ...OVERPASS_POLICY, timeoutMs: 660_000 }, deps);
+  const endpoints = opts.endpoints?.length ? opts.endpoints : grid.city.sources.osm.endpoints;
+  const query = aerowayQuery(a.box);
+  const file = aerowayCacheFile(grid.cacheRoot, query);
+  const r = await fetchOverpassToCache(client, endpoints, query, file, `overpass aeroway ${a.icao}`);
+  if (r.status === 'failed') rep.failures.push({ what: 'aeroway', error: r.error ?? 'failed' });
+  else {
+    rep.files++;
+    rep.bytes += r.bytes;
+    if (r.status === 'fetched') { rep.fetched++; deps.log(`overpass aeroway ${a.icao}: ${(r.bytes / 1e6).toFixed(2)} MB`); }
+    else rep.cached++;
+  }
+  save();
 }
 
 export async function demLane(grid: Grid, cells: GridCell[], rep: SourceReport, deps: HttpDeps, save: () => void): Promise<void> {
@@ -299,16 +394,16 @@ export async function overtureLane(grid: Grid, cells: GridCell[], rep: SourceRep
   }
 }
 
-export async function prefetch(opts: { regions?: string[]; only?: string[]; deps?: HttpDeps; lanes?: ('overpass' | 'dem' | 'overture')[]; passes?: number; pauseMs?: number; endpoints?: string[] } = {}): Promise<PrefetchReport> {
-  const grid = loadGrid();
+export async function prefetch(opts: { grid?: string; regions?: string[]; only?: string[]; deps?: HttpDeps; lanes?: ('overpass' | 'dem' | 'overture' | 'aeroway')[]; passes?: number; pauseMs?: number; endpoints?: string[]; merged?: boolean } = {}): Promise<PrefetchReport> {
+  const grid = loadGrid('atlanta', opts.grid ?? 'm2');
   const cells = selectCells(grid, opts);
   const deps = opts.deps ?? realDeps();
-  const lanes = new Set(opts.lanes ?? ['overpass', 'dem', 'overture']);
+  const lanes = new Set(opts.lanes ?? ['overpass', 'dem', 'overture', 'aeroway']);
   const report: PrefetchReport = {
     grid: `${grid.city.id}/${grid.spec.id}`,
     started: new Date().toISOString(),
     tiles: cells.map((c) => c.id),
-    sources: { overpass: emptySource(), dem: emptySource(), overture: emptySource(), wikidata: emptySource() },
+    sources: { overpass: emptySource(), dem: emptySource(), overture: emptySource(), wikidata: emptySource(), ...(grid.spec.aeroway ? { aeroway: emptySource() } : {}) },
   };
   const file = path.join(grid.cacheRoot, 'prefetch-report.json');
   const save = () => writeAtomic(file, JSON.stringify(report, null, 2));
@@ -316,7 +411,16 @@ export async function prefetch(opts: { regions?: string[]; only?: string[]; deps
   const t0 = Date.now();
   const w = report.sources.wikidata;
   await Promise.all([
-    lanes.has('overpass') ? lanePromise(report.sources.overpass, () => overpassLane(grid, cells, report.sources.overpass, w, deps, save, { passes: opts.passes ?? 3, pauseMs: opts.pauseMs ?? 300_000, endpoints: opts.endpoints })) : null,
+    // (the airport's extract and the tiles' queries go to the same Overpass servers: one after the other, never side by side)
+    lanes.has('overpass') || (lanes.has('aeroway') && grid.spec.aeroway)
+      ? lanePromise(report.sources.overpass, async () => {
+          if (lanes.has('aeroway') && report.sources.aeroway) await aerowayLane(grid, report.sources.aeroway, deps, save, { endpoints: opts.endpoints });
+          if (!lanes.has('overpass')) return;
+          // (merged: five requests for the selection; a re-run without --merged fills, tile by tile, whatever they could not)
+          if (opts.merged) await overpassMergedLane(grid, cells, report.sources.overpass, w, deps, save, { endpoints: opts.endpoints });
+          else await overpassLane(grid, cells, report.sources.overpass, w, deps, save, { passes: opts.passes ?? 3, pauseMs: opts.pauseMs ?? 300_000, endpoints: opts.endpoints });
+        })
+      : null,
     lanes.has('dem') ? lanePromise(report.sources.dem, () => demLane(grid, cells, report.sources.dem, deps, save)) : null,
     lanes.has('overture') ? lanePromise(report.sources.overture, () => overtureLane(grid, cells, report.sources.overture, deps, save)) : null,
   ]);
@@ -332,13 +436,14 @@ export async function prefetch(opts: { regions?: string[]; only?: string[]; deps
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
-  const lanes = listArg(argv, 'lanes') as ('overpass' | 'dem' | 'overture')[] | undefined;
+  const lanes = listArg(argv, 'lanes') as ('overpass' | 'dem' | 'overture' | 'aeroway')[] | undefined;
   const num = (k: string) => {
     const i = argv.indexOf(`--${k}`);
     return i >= 0 ? Number(argv[i + 1]) : undefined;
   };
   // --passes 3: retry the tiles whose Overpass queries failed, after --pause 300 s; --endpoints a,b: other Overpass mirrors
-  prefetch({ regions: listArg(argv, 'region'), only: listArg(argv, 'only'), lanes, passes: num('passes'), pauseMs: num('pause') != null ? num('pause')! * 1000 : undefined, endpoints: listArg(argv, 'endpoints') }).then(
+  // --grid airport: another grid of city.json (default m2); --merged: one Overpass request per query for the whole selection, cut per tile
+  prefetch({ grid: listArg(argv, 'grid')?.[0], merged: argv.includes('--merged'), regions: listArg(argv, 'region'), only: listArg(argv, 'only'), lanes, passes: num('passes'), pauseMs: num('pause') != null ? num('pause')! * 1000 : undefined, endpoints: listArg(argv, 'endpoints') }).then(
     (r) => process.exit(Object.values(r.sources).some((s) => s.failures.length) ? 2 : 0),
     (e) => {
       console.error(e);

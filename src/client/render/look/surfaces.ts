@@ -19,7 +19,7 @@ import { AO_FRAGMENT } from './facade';
 import { GLSL_NOISE } from './glsl';
 import { U } from './uniforms';
 
-type Kind = 'asphalt' | 'sidewalk' | 'ground' | 'roof' | 'markings' | 'concrete' | 'rail';
+type Kind = 'asphalt' | 'sidewalk' | 'ground' | 'roof' | 'markings' | 'concrete' | 'rail' | 'airfield';
 
 const KIND_BY_NAME: Record<string, Kind> = {
   road_asphalt: 'asphalt',
@@ -30,6 +30,9 @@ const KIND_BY_NAME: Record<string, Kind> = {
   road_concrete: 'concrete',
   road_rail: 'rail',
   road_crosswalk: 'markings',
+  // the airport's pavement (concrete slabs) and its paint (tools/pipeline/src/world/aerowaySurface.ts)
+  road_airfield: 'airfield',
+  road_aeromark: 'markings',
 };
 
 export function surfaceKind(materialName: string): Kind | null {
@@ -309,6 +312,24 @@ const BODY: Record<Kind, string> = {
   }`,
   rail: /* glsl */ `
   {
+  }`,
+  airfield: /* glsl */ `
+  {
+    // runway, taxiway and apron concrete: 7.5 m slabs with sealed joints, a little weathering, oil under the stands
+    vec2 p = vFW.xz;
+    float d = distance(vFW, cameraPosition);
+    float near = 1.0 - smoothstep(40.0, 240.0, d);
+    float n = gfxVn(p * 0.08) * 0.6 + gfxVn(p * 0.9) * 0.4;
+    diffuseColor.rgb *= (0.92 + 0.14 * n) * vec3(1.0, 0.99, 0.96);
+    vec2 g = abs(fract(p / 7.5) - 0.5);
+    float w = 0.006 + 0.0025 * smoothstep(0.0, 150.0, d);
+    float joint = smoothstep(0.5 - w * 2.0, 0.5 - w, max(g.x, g.y));
+    diffuseColor.rgb *= 1.0 - 0.34 * joint * near;
+    #ifndef GFX_LITE
+      float stain = smoothstep(0.62, 0.86, gfxVn(p * 0.13 + 7.0));
+      float spot = smoothstep(0.7, 0.95, gfxVn(p * 0.7 + 3.0)) * near;
+      diffuseColor.rgb *= (1.0 - 0.1 * stain) * (1.0 - 0.18 * spot);
+    #endif
   }`,
   concrete: /* glsl */ `
   {

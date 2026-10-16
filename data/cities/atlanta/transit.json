@@ -1,0 +1,59 @@
+{
+  "_comment": "The city's rail transit for the transit layer of the bake (tools/pipeline/src/world/transit*.ts; docs/contracts/m1-tile-format.md, 'transit.json'). Geometry, stations, platforms and entrances come from OpenStreetMap (ODbL, one cached Overpass query over `box`); this file adds what OSM does not say: the brand the game shows (a parody: the real agency's name and marks are trademarks and never appear), the line colours as the game draws them, the depths of the stations, the timetable (synthetic headways: no GTFS data is used, see docs/tools-wishlist.md) and the in-game names of stations whose real names are brands.",
+  "brand": "Peach Rapid Transit",
+  "brandShort": "PRT",
+  "agency": "tap",
+  "box": [33.6, -84.5, 33.97, -84.2],
+  "routeTypes": ["subway"],
+  "lines": [
+    { "id": "red", "ref": "Red", "name": "Red Line", "colour": "#d4202c" },
+    { "id": "gold", "ref": "Gold", "name": "Gold Line", "colour": "#e1a21c" },
+    { "id": "blue", "ref": "Blue", "name": "Blue Line", "colour": "#1f6fc2" },
+    { "id": "green", "ref": "Green", "name": "Green Line", "colour": "#1b9a4a" }
+  ],
+  "_routes": "The OSM route relations the lines run on, one per direction (the full-length service patterns; the short turns are left out).",
+  "routes": [
+    { "line": "red", "osm": 304619 },
+    { "line": "red", "osm": 4439531 },
+    { "line": "gold", "osm": 304620 },
+    { "line": "gold", "osm": 4439528 },
+    { "line": "blue", "osm": 239510 },
+    { "line": "blue", "osm": 4439527 },
+    { "line": "green", "osm": 304604 },
+    { "line": "green", "osm": 4439530 }
+  ],
+  "_stations": "Depth: how far the top of each platform level lies below street level (m; negative is above the street, an elevated platform), by the platform's OSM layer. Street level is the highest ground at the station node and its entrances. Sources: Peachtree Center's platform is 120 ft (37 m) below Peachtree Street, the deepest in the system (Wikipedia, 'Peachtree Center station'); Five Points has a concourse under the street, the East-West platform below it and the North-South platform on the lowest level (Wikipedia, 'Five Points station'); the others are estimates from the OSM layers and the terrain. `name` renames a station whose real name is a brand (the brands policy: data/cities/atlanta/brands.json).",
+  "stations": {
+    "Five Points": { "depth": { "-1": 10, "-2": 18 }, "concourse": [56, 40], "transfer": true },
+    "Peachtree Center": { "depth": { "-2": 37 }, "concourse": [36, 24] },
+    "SEC District": { "name": "Stadium District", "depth": { "-3": 12 }, "concourse": [36, 22] },
+    "Georgia State": { "depth": { "2": -7.5 } },
+    "Garnett": { "depth": { "1": -6.5 } }
+  },
+  "defaults": {
+    "depthUnderground": 11,
+    "depthElevated": -6.5,
+    "concourse": [34, 22],
+    "minPlatformM": 152,
+    "platformHeight": 1.1,
+    "hallHeight": 4.5
+  },
+  "timetable": {
+    "_comment": "Synthetic headways in timetable minutes by the game clock's time of day, per line and direction; `secondsPerMinute` is how many sim seconds a timetable minute lasts (the game clock runs 30 times faster than real time, so real minutes would be 30 game minutes apart: a 10-minute headway is 200 s here). Dwell at a station in sim seconds; the transfer station dwells longer.",
+    "secondsPerMinute": 20,
+    "headways": [
+      { "from": "00:00", "to": "05:00", "minutes": 20 },
+      { "from": "05:00", "to": "06:30", "minutes": 12 },
+      { "from": "06:30", "to": "09:30", "minutes": 6 },
+      { "from": "09:30", "to": "15:30", "minutes": 10 },
+      { "from": "15:30", "to": "19:00", "minutes": 6 },
+      { "from": "19:00", "to": "24:00", "minutes": 12 }
+    ],
+    "dwellS": 22,
+    "transferDwellS": 30,
+    "cars": 6,
+    "accel": 1.0,
+    "brake": 1.1,
+    "maxSpeed": 31.3
+  }
+}

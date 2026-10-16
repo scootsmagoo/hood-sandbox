@@ -58,7 +58,7 @@ export const AMBIENT = {
 } as const;
 
 /** Scenario types, how likely each is to be picked, and the zone kinds that favour them. */
-const TYPE_WEIGHT: Record<ScenarioType, number> = { bench: 3, busstop: 4, atm: 1, shopfront: 3, eatery: 3, lawn: 2, plaza: 2, corner: 2 };
+const TYPE_WEIGHT: Record<ScenarioType, number> = { bench: 3, busstop: 4, atm: 1, shopfront: 3, eatery: 3, lawn: 2, plaza: 2, corner: 2, seat: 4 };
 const KIND_BOOST: Record<string, Partial<Record<ScenarioType, number>>> = {
   park: { lawn: 4, bench: 2, plaza: 2 },
   transit: { busstop: 4, corner: 1.5 },
@@ -501,7 +501,7 @@ export class AmbientPeds {
   spawnScenario(i: number, gid: string, group: PedGroup): number {
     const pt = this.scenarios.points[i];
     const free = this.scenarios.free(i);
-    const cap = Math.min(free, pt.type === 'atm' ? 1 : pt.type === 'bench' ? 2 : pt.type === 'shopfront' ? 2 : 3);
+    const cap = Math.min(free, pt.type === 'atm' ? 1 : pt.type === 'bench' || pt.type === 'seat' ? 2 : pt.type === 'shopfront' ? 2 : 3);
     const n = Math.max(1, this.rng.int(1, Math.max(1, cap)));
     const action = this.actionFor(pt.type, n, gid);
     const chat = action === 'chat';
@@ -545,6 +545,7 @@ export class AmbientPeds {
     const r = this.rng.next();
     switch (type) {
       case 'bench': return 'sit';
+      case 'seat': return 'sit';
       case 'busstop': return r < 0.55 ? 'phone' : 'wait';
       case 'atm': return 'atm';
       case 'shopfront': return n > 1 ? 'chat' : 'browse';

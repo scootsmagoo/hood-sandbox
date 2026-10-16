@@ -22,6 +22,7 @@ import { TrafficManager } from './traffic/TrafficManager';
 import { UnstickSystem } from './character/unstick';
 import type { Simulation } from './Simulation';
 import { IDLE_INPUT } from './vehicles/RaycastCar';
+import { TransitPeopleSystem, TransitSystem, TransitZoneSystem } from './transit/Transit';
 
 export interface SimSystem {
   readonly name: string;
@@ -57,6 +58,13 @@ export class PlayerControlSystem implements SimSystem {
         p.edges = 0;
         continue;
       }
+      if (ped.ride) {
+        // on a train: the use button gets off at a station, the skip button fades to the next one; nothing else
+        const t = sim.transit;
+        if (ped.life === 'alive' && sim.lifeOf(p.slot).mode === 'alive') t?.safe('riding', () => t.rideInput(p, ped));
+        p.edges = 0;
+        continue;
+      }
       if (ped.life !== 'alive' || sim.lifeOf(p.slot).mode !== 'alive') {
         // Knocked down, dead, or being booked: no control. (A car keeps rolling with the pedals released.)
         p.edges = 0;
@@ -74,8 +82,8 @@ export class PlayerControlSystem implements SimSystem {
       if (p.edges & Button.Interact) {
         if (veh) {
           if (this.tryExit(sim, ped, veh)) veh = null;
-        } else {
-          // At an occupied car's driver door: pull the driver out. Otherwise get into an empty car.
+        } else if (!(sim.transit?.safe('boarding', () => sim.transit!.interact(p, ped)) ?? false)) {
+          // At a train's open door: get on (above). At an occupied car's driver door: pull the driver out. Otherwise get into an empty car.
           const target = findJackable(sim, ped);
           if (target) startCarjack(sim, ped, target);
           else veh = this.tryEnter(sim, ped, p);
@@ -288,7 +296,7 @@ export class CameraProbeSystem implements SimSystem {
         len,
         true,
         undefined,
-        GROUPS.cameraQuery,
+        sim.transit && !sim.transit.failed ? sim.transit.cameraGroups(ped) : GROUPS.cameraQuery,
       );
       p.camClear = hit ? hit.time_of_impact : len;
     }
@@ -375,8 +383,17 @@ export class TrafficSystem implements SimSystem {
   }
 }
 
+/** The airport's AI aircraft (src/sim/aircraft): their schedule and poses, and their bodies near the player, before the physics step. */
+export class AircraftSystem implements SimSystem {
+  readonly name = 'aircraft';
+  readonly priority = 45;
+  fixedUpdate(sim: Simulation, dt: number) {
+    sim.aircraft?.step(sim, dt);
+  }
+}
+
 export function defaultSystems(): SimSystem[] {
-  return [new PlayerControlSystem(), new WeaponSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new AimPoseSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem(), new UnstickSystem(), new RagdollSystem(), new BalanceSystem()].sort(
+  return [new PlayerControlSystem(), new WeaponSystem(), new CarjackSystem(), new MeleeSystem(), new NpcSystem(), new AmbientPedSystem(), new PoliceSystem(), new TrafficSystem(), new PedSystem(), new AimPoseSystem(), new VehicleSystem(), new PhysicsSystem(), new VehicleDamageSystem(), new VehicleHitSystem(), new FallSystem(), new DownedSystem(), new BoundsSystem(), new CameraProbeSystem(), new LawSystem(), new LifeSystem(), new UnstickSystem(), new RagdollSystem(), new BalanceSystem(), new TransitZoneSystem(), new TransitPeopleSystem(), new TransitSystem(), new AircraftSystem()].sort(
     (a, b) => a.priority - b.priority,
   );
 }

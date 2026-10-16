@@ -25,13 +25,19 @@ import { LawHud } from './client/ui/LawHud';
 import { GunFx } from './client/render/GunFx';
 import { AimSystem } from './client/weapons/AimSystem';
 import { Minimap } from './client/ui/minimap';
+import { TransitView } from './client/render/transit/TransitView';
+import { TransitCamera } from './client/camera/TransitCamera';
+import { TransitHud } from './client/ui/TransitHud';
 import { StreetName } from './client/ui/streetName';
+import { Navigator } from './client/nav/Navigator';
+import { bakedSource, cityDirs, emptySource, fixtureSource, type NavSource } from './client/nav/source';
+import { BigMap } from './client/ui/map/BigMap';
 import { createWorldView, type WorldView } from './world/WorldView';
 
 declare global {
   interface Window {
     /** Test and debugging hooks. */
-    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ; world?: WorldView; reloadWorld?: () => Promise<void>; doors: (typeId: string) => DoorGeometry; stream?: import('./world/stream/WorldStream').WorldStream };
+    __hood?: { game: Game; ready: boolean; error?: string; sim: typeof SIM_HZ; world?: WorldView; reloadWorld?: () => Promise<void>; doors: (typeId: string) => DoorGeometry; stream?: import('./world/stream/WorldStream').WorldStream; nav?: Navigator; bigMap?: BigMap; transit?: TransitView; airport?: import('./client/render/aircraft/AirportView').Airport };
   }
 }
 
@@ -55,7 +61,8 @@ async function main() {
     // The sim (in a worker) fetches the tile itself, so give it an absolute URL.
     const tileParam = params.get('tile');
     // ?tiles=fixture: the streamed test city; ?tiles=tiles/atlanta/m2/: a baked city's index (docs/contracts/city-tiles.md)
-    const tilesParam = params.get('tiles');
+    // ?spawn=airport: start at Hartsfield-Jackson (its own grid of tiles until the M3 warp joins it to the city)
+    const tilesParam = params.get('tiles') ?? (params.get('spawn') === 'airport' ? 'tiles/atlanta/airport/' : null);
     const cityUrl = tilesParam ? (tilesParam.startsWith('fixture') ? tilesParam : new URL(tilesParam.endsWith('.json') || tilesParam.endsWith('/') ? tilesParam : `${tilesParam}/`, document.baseURI).href) : null;
     const tileBase = cityUrl || tileParam === 'none' ? null : new URL(tileParam ?? DEFAULT_TILE, document.baseURI).href;
     const seed = Number(params.get('seed') ?? 1) || 1;
@@ -86,6 +93,10 @@ async function main() {
       traffic: params.has('traffic') ? Math.max(0, Math.min(1, Number(params.get('traffic')) || 0)) : game.tier.trafficDensity,
       // ?ambient=0 turns the pedestrians of the sidewalks off; ?pedbudget=N overrides the tier's number.
       ambientPeds: params.get('ambient') !== '0',
+      // ?transit=0 leaves the trains out
+      transit: params.get('transit') !== '0',
+      // ?aircraft=0 leaves the airport's aircraft out
+      aircraft: params.get('aircraft') !== '0',
       pedBudget: params.has('pedbudget') ? Math.max(0, Math.min(150, Number(params.get('pedbudget')) || 0)) : game.tier.pedBudget,
       autoRun: true,
     });
@@ -136,7 +147,20 @@ async function main() {
       const landmarks = await loadLandmarks(game, tileBase);
       if (landmarks) game.addSystem(landmarks.system);
     }
+    // the rail transit layer: stations, tunnels, trains (src/client/render/transit); ?transit=0 leaves it out
+    if (tileBase && !city && params.get('transit') !== '0') {
+      const transit = await TransitView.load(game, tileBase).catch((e) => {
+        console.warn('transit: not loaded', e);
+        return null;
+      });
+      if (transit) {
+        game.addSystem(transit);
+        hooks.transit = transit;
+        new TransitCamera(game);
+      }
+    }
     game.addSystem(new Hud(game));
+    game.addSystem(new TransitHud(game));
     game.addSystem(new GunHud(game));
     game.addSystem(new LawHud(game));
     const minimap = game.addSystem(new Minimap(game, tileBase));
@@ -144,9 +168,14 @@ async function main() {
     if (city) {
       // the streamed city's tiles, drawn round the camera (loaded lazily: the default single-tile build does not carry it)
       const { WorldStream } = await import('./world/stream/WorldStream');
-      const base = cityUrl!.startsWith('fixture') ? cityUrl! : new URL('.', cityUrl!.endsWith('.json') ? cityUrl! : `${cityUrl}index.json`).href;
+      const base = cityBase(cityUrl!);
       let stream = game.addSystem(new WorldStream(game, city, base, { look, minimap, streetName }));
       hooks.stream = stream;
+      // the city's airport (aeroway.json): the aircraft, the airfield lights, the airport on the radar and the map
+      if (city.aeroway && !cityUrl!.startsWith('fixture')) {
+        const { loadAirport } = await import('./client/render/aircraft/AirportView');
+        hooks.airport = (await loadAirport(game, base, city.aeroway)) ?? undefined;
+      }
       hooks.reloadWorld = async () => {
         stream.dispose();
         stream = new WorldStream(game, city, base, { look, minimap, streetName });
@@ -155,6 +184,14 @@ async function main() {
         game.addSystem(stream);
       };
     }
+    // The GPS and the full-screen map: where the data of each tile comes from depends on the world (one baked tile, a streamed city, the fixture).
+    let navSource: NavSource;
+    if (city) navSource = cityUrl!.startsWith('fixture') ? fixtureSource(city, cityUrl!) : bakedSource(cityDirs(city, cityBase(cityUrl!)));
+    else if (tileBase) navSource = bakedSource([{ id: game.ready.tile.id, bounds: game.ready.tile.bounds, url: tileBase }]);
+    else navSource = emptySource({ id: game.ready.tile.id, bounds: game.ready.tile.bounds });
+    const loadedIds = city ? () => hooks.stream?.builtIds() ?? [] : () => [game.ready.tile.id];
+    hooks.nav = game.addSystem(new Navigator(game, navSource, loadedIds, city ? city.id : game.ready.tile.id));
+    hooks.bigMap = game.addSystem(new BigMap(game, hooks.nav));
     game.addSystem(new AudioSystem(game));
     game.gamepad = new GamepadSource();
     game.input.addSource(game.gamepad);
@@ -175,6 +212,11 @@ async function main() {
     boot.className = 'error';
     boot.textContent = `Could not start\n\n${hooks.error}`;
   }
+}
+
+/** The directory of a streamed city's index.json (or `fixture`). */
+function cityBase(cityUrl: string): string {
+  return cityUrl.startsWith('fixture') ? cityUrl : new URL('.', cityUrl.endsWith('.json') ? cityUrl : `${cityUrl}index.json`).href;
 }
 
 void main();

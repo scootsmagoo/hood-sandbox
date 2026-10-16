@@ -13,7 +13,7 @@
  */
 import type { EntityId } from './entities';
 
-export const HEADER_WORDS = 24;
+export const HEADER_WORDS = 29;
 export const ENTITY_WORDS = 36;
 export const MAX_ENTITIES = 256;
 /**
@@ -24,7 +24,16 @@ export const MAX_ENTITIES = 256;
 export const RAG_WORDS = 26;
 export const MAX_RAGDOLL_RECORDS = 16;
 export const RG = { Id: 0, Px: 1, Py: 2, Pz: 3, Rot: 4 } as const;
-export const SNAPSHOT_BYTES = (HEADER_WORDS + ENTITY_WORDS * MAX_ENTITIES + RAG_WORDS * MAX_RAGDOLL_RECORDS) * 4;
+/**
+ * The airport's aircraft (src/sim/aircraft) follow the ragdoll records: a block of two counts (the moving aircraft, the stands),
+ * `AC_WORDS` words per moving aircraft (see `AC`), then one word per stand of the city's `aeroway.json` (see `StandWord`): a parked
+ * aircraft stands still, so it is a stand's word, not a record. Empty (two zero counts) in a city with no airport.
+ */
+export const AC_WORDS = 11;
+export const MAX_AIRCRAFT = 48;
+export const MAX_STANDS = 320;
+export const AIRCRAFT_BLOCK_WORDS = 2 + AC_WORDS * MAX_AIRCRAFT + MAX_STANDS;
+export const SNAPSHOT_BYTES = (HEADER_WORDS + ENTITY_WORDS * MAX_ENTITIES + RAG_WORDS * MAX_RAGDOLL_RECORDS + AIRCRAFT_BLOCK_WORDS) * 4;
 
 const E_WHEELS = 16;
 
@@ -61,6 +70,32 @@ export const H = {
   Chasers: 22,
   /** u32: how many ragdoll records follow the entity records (see `RAG_WORDS`). */
   Ragdolls: 23,
+  /** u32: the train the player rides (an entity id), or 0. */
+  Train: 24,
+  /**
+   * u32, the player and the transit (`TransitInfo`): bits 0-7 the station they are in (index + 1, 0 none), bits 8-9 how they
+   * ride (1 seated, 2 standing), bits 10-11 the skip ("fade to the next station": 1 fading out, 2 just arrived), bits 12-13 a door
+   * in reach (1 the train's doors are open by them: board; 2 off at this station), bits 16-23 the car they are in.
+   */
+  TransitInfo: 25,
+  /**
+   * f32: when the next trains are due at the platform the player is at (or nearest, in their station), seconds, for its first two
+   * streams (the two directions of an island); -1 when none is known. u32 `EtaRoutes`: those trains' routes, route + 1 in bits 0-7
+   * and 8-15 (0 none).
+   */
+  Eta0: 26,
+  Eta1: 27,
+  EtaRoutes: 28,
+} as const;
+
+/** Packing of `H.TransitInfo`. */
+export const TransitInfo = {
+  station: (w: number) => (w & 0xff) - 1,
+  ride: (w: number) => (w >>> 8) & 3,
+  skip: (w: number) => (w >>> 10) & 3,
+  door: (w: number) => (w >>> 12) & 3,
+  car: (w: number) => (w >>> 16) & 0xff,
+  pack: (station: number, ride: number, skip: number, door: number, car: number) => (((station + 1) & 0xff) | ((ride & 3) << 8) | ((skip & 3) << 10) | ((door & 3) << 12) | ((car & 0xff) << 16)) >>> 0,
 } as const;
 
 export const HeatPhase = { None: 0, Reported: 1, Seen: 2, Lost: 3 } as const;
@@ -70,6 +105,10 @@ export const Overlay = { None: 0, Wasted: 1, Busted: 2 } as const;
 export const SnapFlag = {
   /** The controlled entity is a vehicle the player is driving. */
   InVehicle: 1 << 0,
+  /** The player rides a train (`H.Train`). */
+  OnTrain: 1 << 1,
+  /** The player is in the spaces under the ground (a station, a tunnel): the outdoor light does not reach them. */
+  Underground: 1 << 2,
 } as const;
 
 /** Offsets inside an entity record. Ped: `Aux1` is a swing/progress 0..1; vehicle: `Aux1` is the throttle. */
@@ -253,6 +292,38 @@ export const HeliFlag = {
   Leaving: 1 << 2,
 } as const;
 
+/**
+ * A train's record: the pose and velocity of its head car; `Speed` its speed along the route, `Aux0` where its head is along the
+ * route (m: the client lays the cars out on the route from `transit.json`), `Aux1` how far its doors are open (0 to 1), `Aux2`
+ * the route index. The wheel block holds `TR`.
+ */
+export const TrainFlag = {
+  /** Doors on the left of the route's direction (looking along it) are the ones that open at this stop. */
+  DoorsLeft: 1 << 0,
+  DoorsRight: 1 << 1,
+  /** Standing at a stop. */
+  Dwelling: 1 << 2,
+  /** Braking for the next stop (within its last 250 m). */
+  Arriving: 1 << 3,
+  /** The player rides it. */
+  PlayerAboard: 1 << 4,
+  /** Sounding its horn (entering a station, or at someone on the track). */
+  Horn: 1 << 5,
+  /** The door-closing chime is sounding. */
+  Closing: 1 << 6,
+} as const;
+
+/** A train's words in the wheel block of its record. */
+export const TR = {
+  /** u32: the index of the next stop in the route's `stops` (its length when there is none). */
+  NextStop: E_WHEELS,
+  /** f32: seconds until it leaves the stop it stands at, or (running) the time it expects to reach the next one. */
+  Eta: E_WHEELS + 1,
+  /** u32: the line's index, and how many cars. */
+  Line: E_WHEELS + 2,
+  Cars: E_WHEELS + 3,
+} as const;
+
 /** A spike strip's record: pose; `Aux0` its length across the lane (m), `Aux1` the share of its life left. */
 export const StripFlag = {
   /** A wheel has been flattened on it. */
@@ -329,6 +400,13 @@ export class SnapshotView {
   get strips(): number {
     return this.u32[H.Strips];
   }
+  /** The train the player rides, or 0. */
+  get train(): number {
+    return this.u32[H.Train];
+  }
+  get transitInfo(): number {
+    return this.u32[H.TransitInfo];
+  }
 
   /** Word offset of record `i`. */
   at(i: number): number {
@@ -350,9 +428,34 @@ export class SnapshotView {
     return -1;
   }
 
-  /** Bytes in use: the header, the entity records and the ragdoll records (what a transport needs to send). */
+  /** Bytes in use: the header, the entity records, the ragdoll records and the aircraft block (what a transport needs to send). */
   get usedBytes(): number {
-    return (HEADER_WORDS + this.count * ENTITY_WORDS + this.ragdollCount * RAG_WORDS) * 4;
+    const ac = this.aircraftBase;
+    return (ac + 2 + this.u32[ac] * AC_WORDS + this.u32[ac + 1]) * 4;
+  }
+
+  /** Word offset of the aircraft block (after the ragdoll records). */
+  get aircraftBase(): number {
+    return HEADER_WORDS + this.count * ENTITY_WORDS + this.ragdollCount * RAG_WORDS;
+  }
+
+  /** How many moving aircraft records, and stand words, the block holds. */
+  get aircraftCount(): number {
+    return this.u32[this.aircraftBase];
+  }
+  get standCount(): number {
+    return this.u32[this.aircraftBase + 1];
+  }
+
+  /** Word offset of moving aircraft record `i`. */
+  aircraftAt(i: number): number {
+    return this.aircraftBase + 2 + i * AC_WORDS;
+  }
+
+  /** The word of stand `i` (`StandWord`). */
+  standWord(i: number): number {
+    const b = this.aircraftBase;
+    return this.u32[b + 2 + this.u32[b] * AC_WORDS + i];
   }
 
   /** Index of the record for an entity, or -1. */
@@ -365,3 +468,43 @@ export class SnapshotView {
     this.f32.set(other.f32);
   }
 }
+
+/**
+ * A moving aircraft's record (the aircraft block, see `AC_WORDS`): its id (stable while it moves), the packed `Info` word, the
+ * position of the main gear's centre on the ground (or in the air), its yaw (as a ped's: the nose (sin, cos)), pitch (nose up
+ * positive) and roll (radians), its speed (m/s along its path), how far its gear is down (0 up, 1 down) and its thrust (0 to 1).
+ */
+export const AC = { Id: 0, Info: 1, Px: 2, Py: 3, Pz: 4, Yaw: 5, Pitch: 6, Roll: 7, Speed: 8, Gear: 9, Thrust: 10 } as const;
+
+/** What an aircraft is doing, in bits 8 to 11 of its `Info` word. */
+export const AircraftPhase = { Parked: 0, Approach: 1, Rollout: 2, TaxiIn: 3, Pushback: 4, TaxiOut: 5, Hold: 6, Takeoff: 7, Climb: 8 } as const;
+export type AircraftPhase = (typeof AircraftPhase)[keyof typeof AircraftPhase];
+
+/** Light and equipment bits of an aircraft's `Info` word (bits 12 and up), and of a stand word (bits 12 and up). */
+export const AircraftFlag = {
+  Nav: 1 << 12,
+  Beacon: 1 << 13,
+  Strobe: 1 << 14,
+  Landing: 1 << 15,
+  Taxi: 1 << 16,
+  /** A tug pushes it (pushback): the nose faces away from the way it moves. */
+  Tug: 1 << 17,
+  /** Its cabin lights show (night, or parked at a gate). */
+  Cabin: 1 << 18,
+} as const;
+
+/** Packs and reads an aircraft's `Info` word: class (0 narrowbody, 1 widebody, 2 regional) in bits 0-1, livery in bits 2-7. */
+export const AircraftInfo = {
+  pack: (cls: number, livery: number, phase: number, flags: number) => ((cls & 3) | ((livery & 63) << 2) | ((phase & 15) << 8) | flags) >>> 0,
+  cls: (w: number) => w & 3,
+  livery: (w: number) => (w >>> 2) & 63,
+  phase: (w: number) => (w >>> 8) & 15,
+} as const;
+
+/** A stand's word: 0 empty, else class + 1 in bits 0-1 (1..3), the livery in bits 2-7, and `AircraftFlag` bits (beacon when it is about to push back). */
+export const StandWord = {
+  pack: (cls: number, livery: number, flags: number) => (((cls + 1) & 3) | ((livery & 63) << 2) | flags) >>> 0,
+  occupied: (w: number) => (w & 3) !== 0,
+  cls: (w: number) => (w & 3) - 1,
+  livery: (w: number) => (w >>> 2) & 63,
+} as const;

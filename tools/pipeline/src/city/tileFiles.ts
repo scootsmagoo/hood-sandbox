@@ -13,7 +13,7 @@
  *   paths.json      nodes
  *   scenarios.json  points[] x/y/z
  *   props.json      the first three numbers of every tuple of trees, lamps, hydrants, bins, bollards
- *   landmarks.json  landmarks[] x/z, ring [x, z], hero.y (the model's datum, at the landmark's x/z)
+ *   landmarks.json  landmarks[] x/z, ring [x, z], zones[].ring [x, z], hero.y (the model's datum, at the landmark's x/z)
  *   *.glb           every vertex position (the rebase moves the nodes instead); TEXCOORD_0 of junction surfaces in roads.glb
  *                   (the world x/z there; see rebase.ts)
  */
@@ -136,6 +136,8 @@ export function mapJsonPoints(t: Pick<TileFiles, 'tile' | 'json'>, p3: P3, p2: P
       l.z = r3(z);
     }
     for (const p of l.ring ?? []) arr2(p);
+    // a walk-in hero's indoor zones (the airport's terminal and concourse: world/aerowayBake.ts)
+    for (const zn of l.zones ?? []) for (const p of zn.ring ?? []) arr2(p);
   }
 }
 

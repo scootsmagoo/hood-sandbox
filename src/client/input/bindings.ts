@@ -32,9 +32,12 @@ export type Action =
   | 'zoomIn'
   | 'zoomOut'
   | 'toggleView'
+  /** On a train: fade to the next station. */
+  | 'skip'
   | 'pause'
   | 'debug'
-  | 'help';
+  | 'help'
+  | 'map';
 
 /** Binding codes are `KeyboardEvent.code` values plus `Mouse0..4`, `WheelUp` and `WheelDown`. */
 export type Bindings = Record<Action, string[]>;
@@ -71,9 +74,13 @@ export const DEFAULT_BINDINGS: Bindings = {
   zoomIn: ['WheelUp', 'Equal'],
   zoomOut: ['WheelDown', 'Minus'],
   toggleView: ['KeyV'],
+  // N for the next station (only on a train)
+  skip: ['KeyN'],
   pause: ['Escape'],
   debug: ['Backquote', 'IntlBackslash'],
   help: ['KeyH', 'Slash'],
+  // The full-screen map: Tab, or P (one key a one-button mouse can reach). Clicking the radar opens it too.
+  map: ['Tab', 'KeyP'],
 };
 
 /** The code a source holds to press an action directly (`@jump`), whatever its key bindings. */
@@ -131,6 +138,7 @@ export function codeLabel(code: string): string {
     ShiftLeft: 'Shift',
     ShiftRight: 'Shift',
     Escape: 'Esc',
+    Tab: 'Tab',
     Backquote: '`',
     Equal: '=',
     Minus: '-',
