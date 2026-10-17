@@ -13,7 +13,3 @@ public/tiles/
 # Python bytecode from the Blender build scripts
 __pycache__/
 *.pyc
-
-# m1-five-points tile is committed so the nightly soak can load it
-!public/tiles/atlanta/
-!public/tiles/atlanta/m1-five-points/
