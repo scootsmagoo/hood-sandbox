@@ -100,3 +100,17 @@ describe('the police road graph across tiles', () => {
     expect(Math.max(...(r2 ?? []).map((p) => p.x))).toBeLessThanOrEqual(384.5);
   });
 });
+
+describe('seam ports', () => {
+  it('join by key in the same place with headings up to 40 degrees apart (a lane only centimetres long: way 1040543348 at x = 0)', () => {
+    const port = (end: 'in' | 'out', z: number, dir: [number, number]) => ({ key: 'L|x0|osm:way/1040543348|1|0|0', edge: 0, end, p: [0, -1.4, z] as [number, number, number], dir, road: 'osm:way/1040543348', ldir: 1, k: 0 });
+    // the 0.33 m lane in tile -1_-1 heads 27 degrees off west, the 6.5 m one in 0_-1 due west
+    const out = port('out', -599.2, [-1, 0]);
+    const th = (27 * Math.PI) / 180;
+    expect(matchLanePorts([out], [port('in', -599.15, [-Math.cos(th), -Math.sin(th)])]).pairs.length).toBe(1);
+    // not when the in port is half a metre off along the line (the plain match's 20 degrees then), nor 60 degrees off
+    expect(matchLanePorts([out], [port('in', -598.7, [-Math.cos(th), -Math.sin(th)])]).pairs.length).toBe(0);
+    const t60 = Math.PI / 3;
+    expect(matchLanePorts([out], [port('in', -599.15, [-Math.cos(t60), -Math.sin(t60)])]).pairs.length).toBe(0);
+  });
+});

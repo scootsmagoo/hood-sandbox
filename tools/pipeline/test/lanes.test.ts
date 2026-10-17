@@ -207,6 +207,42 @@ describe('where roads meet without a junction polygon', () => {
   });
 });
 
+describe('a piece of road only centimetres long that ends on a seam', () => {
+  // way 1040543348 in M2 tile -1_-1: 0.21 m from the seam at x = 0 to its next node, where the next one-way way goes on west
+  const bounds = { minX: -1024, minZ: -1024, maxX: 0, maxZ: 0 };
+  const stub = road('stub', [[0, -600.89], [-0.21, -600.9]], { oneway: true, class: 'tertiary', width: 6.6 });
+  const next = road('next', [[-0.21, -600.9], [-13.4, -600.8]], { oneway: true, class: 'tertiary', width: 6.6 });
+
+  it('keeps its lanes from the seam line, joined to the next road (without a junction polygon)', () => {
+    const f = buildLanes([stub, next], { junctions: [] }, { bounds });
+    const ls = lanes(f).filter((l) => l.road === 'stub');
+    expect(ls.length).toBe(2);
+    for (const l of ls) {
+      expect(l.pts[0]).toBe(0); // starts on the seam, where the neighbour's lanes end
+      expect(l.next.length).toBe(1);
+      const c = f.edges[l.next[0]] as ConnectorEdge;
+      expect((f.edges[c.to] as LaneEdge).road).toBe('next');
+    }
+  });
+
+  it('takes the leg of a junction at its inner end on the right side', () => {
+    const j: JunctionsInput = {
+      junctions: [{
+        id: 'j0', x: -0.21, y: 0, z: -600.9, control: 'none',
+        legs: [leg('stub', [1, 0], { at: [-0.21, -600.9], trim: 4 }), leg('next', [-1, 0], { at: [-0.21, -600.9], trim: 4 })],
+      }],
+    };
+    const f = buildLanes([stub, next], j, { bounds });
+    const ls = lanes(f).filter((l) => l.road === 'stub');
+    expect(ls.length).toBe(2);
+    for (const l of ls) {
+      expect(l.pts[0]).toBe(0);
+      expect(l.next.length).toBe(1);
+      expect((f.edges[(f.edges[l.next[0]] as ConnectorEdge).to] as LaneEdge).road).toBe('next');
+    }
+  });
+});
+
 describe('connectivity', () => {
   it('reports a one-way street leaving the map as outside the loop', () => {
     const f = buildLanes([road('a', [[0, 0], [100, 0]], { oneway: true, lanes: 1, width: 4 }), road('b', [[0, 50], [100, 50]])], { junctions: [] });

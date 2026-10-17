@@ -345,7 +345,72 @@ the car's footprint at a wide carriageway's edge), (-562, 195) 6 (Northside Driv
 The sim step on the real tile with 40 traffic cars and 40 people (Node, 1800 ticks, seeds 7, 11 and 23, twice): 1.40 ms mean with the
 guard, 1.37 without.
 
+## Round five: deck stubs, dead deck ends, draped junctions, M2 seams (2026-10-17)
+
+The owner's P1 reports (`docs/fixes/ROADMAP.md`). The same audit (24 workers: the routes depend on the worker count, so compare runs
+with the same `--workers`) on the round-four tile and on this one, both with today's physics:
+
+| | Round four's tile | Round five's tile |
+|---|---|---|
+| Driven (all three speeds) | 1104 km | 1249 km |
+| Launches and airborne | 128 (1 on smooth road) | 132 (0 on smooth road); 24 / 54 / 54 at 15 / 25 / 35 m/s |
+| Lanes with a step over 4 cm | 123 | 121 |
+| Jolts and kicks; hull pushes, per 10 km | 11.9; 2.01 | 11.7; 2.00 |
+| Routes given up | 7.7% (over the gate's 7.5%) | 6.9% |
+| Gate | failed (the smooth launch, the give-ups) | passed |
+
+The 145 km more are the decks a car can now drive off: lanes that were stranded on deck stubs are on the main network.
+`npm run audit:ground` (30 threads) on the tile: 138 launches (0 on smooth road), 121 steps, 11.1 jolts and 1.96 pushes per 10 km,
+6.5% given up: passed.
+
+- **Traffic on deck junctions** (`LaneGraph.ts`, the vehicles side): with those lanes on the network, traffic drives them, and a
+  car off the player's physics on a junction curve between two deck lanes took the ground's height under the deck (a curve's
+  `bridge` flag was always 0): on Memorial Drive over I-20 one was put on the freeway's link below at (255, 820), hit a car there
+  at 11 m/s and rolled, and its driver walked on the Connector (`tests/freeway.test.ts` failed). A curve that leaves or enters a
+  deck lane is on the deck now.
+
+- **Barriers open where a road leaves the deck** (`RoadCrossIndex` and the probes in `addBarriers`, `roads.ts`): a barrier is
+  left out where any car road's centreline (a deck or a road on the ground, with its width) leaves the deck through its side or
+  meets its end at its level, not only at deck-to-deck forks. The Capitol Square SW stub over I-20 (227, 739), boxed in on three
+  sides, is open to the service road it joins. A deck end where no road goes on, off the ground and not on the tile's edge, is
+  closed across by the same barrier (a wall, not a drop). `roads.json` lists the barriers (`barriers`), and `npm run verify`
+  checks them against the lanes: 268 runs, 0 lanes or turns through one, 0 lanes ending against one, 253 deck lanes, 0 off the
+  main network.
+- **The GPS from a deck stub** (`DriveNet.leads`, the `going` filter in `planner.ts`): a route starts on a lane from which the main
+  network can be reached, so on the stub over I-20 it no longer starts on the freeway under it (which only runs off the map). The
+  Capitol stub test in `realNav.test.ts` finds a route at all four headings.
+- **Dead deck ends brought down** (`deckWish` in `planRoads`): a car deck's end where no other road goes on is designed toward
+  the ground with a strong wish (weight 50; the other deck nodes keep 0.3), where it climbed to its clearance and stopped in the
+  air; a mapped bridge whose end the carving leaves more than 0.3 m over the ground is carried on along the road it lands on, like a
+  bridge the pipeline made (`mappedEndsExtended`); a mapped bridge within 2 m of the terrain (was 1 m) that clears nothing is
+  built on the ground. Deck ends that meet nothing and stand off the ground: 6 to 4 (561694954 at (166, 915) 10.0 to 4.5 m,
+  562648391 at (-394, -111) 8.0 to 7.4 m, 1266333950 at (-598, 73) 3.1 to 1.2 m, 1280097288 at (-384, -114) 2.9 to 1.7 m; all
+  four are walled; 800878283 and 1451206644 now land).
+- **Large junctions draped** (`gridPieces` in `junctions.ts`): a junction polygon is cut by the heightmap's cells and every piece
+  follows the ground, where its fan's long triangles cut straight across it and the ground rose through them (the grey blobs; at
+  (-738, -406) a grey triangle in the middle of the junction is gone).
+- **M2 seams**: see `docs/contracts/city-tiles.md` (lane ends snapped to the seam over up to 6 m, the seam end only; short pieces
+  on a seam kept, and out of the junction at their other end; ports matched along the lane and, by key, with a looser heading).
+  The full M2 bake: lane ports 1792 matched and 194 not before the key match, 1796 and 186 after; walk ports 459 and 44; the
+  largest port step 0.25 m on lanes, 0.54 m on walks. Ways 631611892, 1040543348 and 9245347 match.
+
+Measured and dropped:
+
+- **A fade where a lesser deck joins a greater one** (the lesser deck's vertices past the greater one's kerb carrying the move
+  the blend made over 15 m): Capitol Avenue onto Memorial Drive over I-20 (200, 812) then climbs 0.65 m over 12 m instead of
+  0.7 m over 6 m, and the audit gave 116 launches, 116 steps, 11.2 jolts and 1.88 pushes per 10 km against 132, 121, 11.7 and 2.00,
+  but one launch on smooth road (a hull ghost on Pryor Street's deck at (720, -851), where the fade moved the deck by 1 cm), so the
+  gate failed. Not kept; worth another look with the ghost understood.
+
+**The M2 tiles** (the same audit per tile, the four that cover downtown; the gate is the M1 tile's): `-1_-1` 12 launches, 7 steps,
+8.2 jolts and 1.9 pushes per 10 km; `0_-1` 46, 35, 9.7, 1.5; `-1_0` 34, 22, 8.2, 1.9; `0_0` 66, 61, 14.8, 2.8, and 2 on smooth road
+(hull ghosts on Memorial Drive's deck 1110029487 at (202, 811) at 35 m/s): `0_0` fails the M1 gate (smooth launches, jolts,
+pushes), the other three pass. The worst places in `0_0` are M1's (the Connector fork (919, 283), MLK Drive and the I-20 ramps
+(394, 656), Memorial over I-20 (200, 812)).
+
 ## Residuals
+
+Round three's list, kept for its causes; the places left after round five are in `docs/fixes/ROADMAP.md` (P1).
 
 247 launch episodes in 63 places (1.9 per 10 km), on the re-registered DEM. By cause: deck to ground and back 49, deck to deck 14,
 heightfield steps 41, ghost contacts on the ground 57 and on decks 22, crests and sags 24, hull and wheel hits 26, the lane off the

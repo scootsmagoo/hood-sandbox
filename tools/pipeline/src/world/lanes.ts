@@ -441,8 +441,10 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
       const { road, s } = best;
       const here = atS(road.poly, s);
       let side: 'back' | 'fwd' = here.tx * l.dir[0] + here.tz * l.dir[1] >= 0 ? 'fwd' : 'back';
-      if (s < 1) side = 'fwd';
-      else if (s > road.poly.len - 1) side = 'back';
+      // at an end the leg is the road's (a piece shorter than 2 m, kept because it ends on a seam, by its nearer end)
+      const edge = Math.min(1, road.poly.len / 2);
+      if (s < edge) side = 'fwd';
+      else if (s >= road.poly.len - edge) side = 'back';
       const cut = addCut(road, s, node);
       if (cut[side]) { skippedLegs++; return; }
       const leg: JLeg = { node, road, cut, side, dir: l.dir, trim: l.trim, control: l.control, srcIndex: li, arrive: [], depart: [] };
@@ -534,6 +536,12 @@ export function buildLanes(roadsIn: RoadInput[], jIn: JunctionsInput, opts: Lane
     const a = groups.get(r);
     if (a) a.push(i); else groups.set(r, [i]);
   });
+  // A piece only centimetres long that ends on a seam has both its ends in one group (way 1040543348, 0.21 m from the seam to its
+  // next node): its seam end leaves the junction (it meets the neighbour tile's lanes), or the piece lay inside it and had no lanes.
+  for (const [r, g] of groups) {
+    const kept = g.filter((i) => !(atBounds(ends[i].road, ends[i].at) && g.some((o) => o !== i && ends[o].road === ends[i].road)));
+    if (kept.length !== g.length) groups.set(r, kept);
+  }
 
   // A grid of road segments, for roads whose interior a free end touches.
   const segGrid = new Map<string, { road: Road; i: number }[]>();

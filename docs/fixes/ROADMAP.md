@@ -2,60 +2,60 @@
 
 Known problems, worst first. Owner reports carry a screenshot. Agent findings carry coordinates in game metres, with x east and z south of Five Points, on the M1 tile. Remove an entry when it ships, and record the fix in its commit.
 
-Last updated 16 Oct 2026.
+Last updated 17 Oct 2026.
 
-## P1: Roads and overpasses (owner, 16 Oct)
+## P1: Roads and overpasses (owner, 16 Oct; round five, 17 Oct)
 
-The ground audit says there are no launches on smooth road. These problems are the drawn road and deck network itself, and they need a pass by the ground lane.
+Round five (`docs/ground-audit.md`) fixed the barrier box on the Capitol Square SW stub and the GPS there (verify: 0 lanes through
+or ending against a barrier, 0 deck lanes off the main network), brought dead deck ends down or walled them, and draped large
+junctions. What is left:
 
-### 1. An overpass ramp humps up and goes nowhere; road surfaces end in blunt slabs
+### 1. Overpass humps and blunt deck ends near the Capitol and I-20
 
 ![overpass hump](overpass-hump-capitol.jpg)
 
-- **Where:** near the Capitol and I-20 deck network.
-- **What:** a deck rises into a hump and stops mid-air. Carriageways meet grey ground slabs with blunt ends instead of joining. One deck sits askew.
-- **Likely causes:**
-  - deck ribbons whose OSM ways end at a bridge joint;
-  - the derived-bridge landings;
-  - the ground carve around junctions.
+- **The hump** in the owner's shot is the service ramp 1451206631 / 561203364 / 561203367 at (224, 735) to (230, 768): it climbs
+  2 m from the ground onto the loop over the Connector and is drawn the same as before (`.shots/round5/*-capsq-stub-low.png`). It
+  goes on now (the barriers are open and its lanes are on the network), but it still reads as a hump from the ground: a short
+  steep ramp with a curved barrier.
+- **Deck ends that meet nothing and stand off the ground** (walled now, not drops): 562648391 at (-394, -111) 7.4 m,
+  561694954 at (166, 915) 4.5 m, 1280097288 at (-384, -114) 1.7 m, 1266333950 at (-598, 73) 1.2 m.
+- **Steep deck joins** (verify's grades): Capitol Avenue 563545714 at (191, 831) 24% over 5 m, 547758714 at (722, -848) 21%,
+  service roads 563545717 at (126, 831) 18% and 561203363 at (269, 813) 17%.
+- **Memorial Drive over I-20, Capitol Avenue's join** (200, 812): Capitol Avenue climbs 0.7 m over 6 m where it leaves the deck it
+  takes the height of (46 audit events there; 2 hull-ghost launches on smooth road at (202, 811) in the M2 tile `0_0`). A 15 m fade
+  of the join fixed the climb but was dropped for a ghost launch elsewhere (`docs/ground-audit.md`, round five).
 
-  Compare with the "Residuals" list in `docs/ground-audit.md`.
-
-### 2. Barriers box a car in on a deck stub; the GPS finds no route
-
-![barrier box](barrier-box-capitol-square.jpg)
-
-- **Where:** Capitol Square SW.
-- **What:**
-  - The new deck barriers (round 9) close off a short deck piece on three sides, so the car is trapped on a stub.
-  - The GPS says "No road route. Head straight for…", because that stub isn't connected in the lane graph.
-- **Fix direction:**
-  - Leave barriers open wherever a lane continues off the deck, not only at deck-to-deck forks.
-  - Check every deck piece for a drivable exit.
-  - Add a verify check: no lane on a deck may end against a barrier.
-
-### 3. Junction surfaces break into blobs; a raised hump mid-road
+### 2. Junction surfaces: a raised hump mid-road
 
 ![junction blobs](junction-blobs-hump.jpg)
 
-- **What:**
-  - Junction polygons render as separate dark and grey patches (asphalt and sidewalk material mixed, islands) instead of one clean surface.
-  - A short raised hump sits on an otherwise flat street.
-- **Fix direction:** the junction polygon builder (`tools/pipeline/src/world/junctions.ts`), the fan triangulation on large irregular junctions, and road-profile crests on short ways.
+- The blobs (the ground showing through the fan of a large junction) are fixed: junctions are cut by the heightmap's cells and
+  draped (`.shots/round5/*-junction-w-738-406.png`). Not checked at the owner's junction (its place is not known).
+- **Still open:** the short raised hump on an otherwise flat street (road-profile crests on short ways); find the place first.
 
-### 4. Earlier ground residuals, still open (agent findings)
+### 3. Ground residuals (agent findings, the round-five tile)
 
-- **Seam launches** (about 115 events in 27 places). Map steps of about 0.22 m under a car's footprint.
-  - MLK Dr and the I-20 ramps: (385, 655), (347, 629).
-  - Pryor St over the rail gulch: (704, -844), (719, -836).
-  - The Connector fork: (925, 288).
-  - Wide-carriageway edges: (932, 164), (944, 145).
-  - Northside Dr: (-562, 195).
-  - Memorial Dr over I-20: (202, 811).
-- **Steep service-road joins** on Memorial over I-20: 563545717 at 19%, and 561203363 at 17%.
+- **Seam launches**: 116 of 132 launches are on seams (the map's steps under a car's footprint). The worst places:
+  - the Connector fork (919, 283) and (952, 263): deck ends landing at the junction;
+  - Pryor St over the rail gulch (704, -844), (719, -833), (719, -846);
+  - MLK Dr and the I-20 ramps (394, 656), (355, 629), (378, 645);
+  - Northside Dr (-561, 203);
+  - Memorial Dr over I-20 (200, 812);
+  - wide-carriageway edges (930, 164);
+  - (-461, 78): unexplained deck pushes and a slab edge; (-848, -166).
 - **The Connector's two carriageways** at (690, 480): 3 m apart and 4 m apart in height.
-- **M2 seam gap:** several northbound lanes in M2 tile `0_0` stop 1–4 m short of the z = 0 seam, so routes north of the Capitol detour 4–5 km. That's a bake fix, not a GPS fix.
-- **Six unmatched M2 lane ports** (ways 631611892, 1040543348, 9245347).
+- **A walk ramp under a deck's slab** at (492, 678): the sidewalk ramp 7090 to 7094 in `paths.json` falls from -9.6 to -13.8 m
+  under a slab by the end of MLK Jr Drive's bridge 755543581 (its top -9.1 m there); a person put on it is stuck between the slab and the ground (the
+  collision audit's player, 17 windows; the same in round four's tile).
+- **M2 seams** (the full bake): 186 lane ports of 1982 unmatched. Of 194 (before the key match): 44 have the same lane across
+  within 1 m but more than 0.25 m off in height or far off in heading (1467386397 at (0, -1493): 0.26 m; 9275841 at (2048, -1706)
+  is on another level), 52 at 1 to 5 m and 48 further along the line (a lane count that changes at the seam: 337901447 at
+  (0, -1603)), 27 where only the other direction crosses (9275841 along x = 2048), 21 another road, 2 nothing. Ways 631611892,
+  1040543348 and 9245347 now match, and the northbound lanes of `0_0` that stopped 1 to 4 m short of z = 0 reach it (one left:
+  1034188590 at the tile's corner, (1024, 4.2)). The largest port step is 0.25 m on lanes and 0.54 m on walks.
+- **M2 ground audit** (the four downtown tiles): `0_0` fails the M1 gate (2 launches on smooth road, jolts 14.8 and pushes 2.8 per
+  10 km); `-1_-1`, `0_-1` and `-1_0` pass.
 
 ## P2: Gameplay and world
 
@@ -70,7 +70,9 @@ The ground audit says there are no launches on smooth road. These problems are t
   - The rifle mount is roughly tuned, and shoes are a bit platform-like.
 - **Trees:** a visible switch between detail levels at about 30 m, and distant trees are plain silhouettes at night.
 - **Car sodium light:** strength set to 0.35 by eye; check at night.
-- **Peds on freeways:** fixed in round 9. Recheck after any M2 bake.
+- **Peds on freeways:** fixed in round 9. Recheck after any M2 bake. (Round five: a traffic car on a junction curve between deck
+  lanes was put on the ground under the deck, crashed into the freeway's cars at (255, 820), and its driver walked on the Connector;
+  junction curves off deck lanes are on the deck now, `LaneGraph.ts`.)
 
 ## P2: Harness and performance housekeeping
 

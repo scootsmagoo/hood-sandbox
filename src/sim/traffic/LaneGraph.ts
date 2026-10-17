@@ -372,6 +372,15 @@ export class LaneGraph {
       if (a < 0 || b < 0 || !this.fwClass[a] || !this.fwClass[b]) continue;
       this.speed[i] = Math.max(this.speed[i], 0.85 * Math.min(this.speed[a], this.speed[b]));
     }
+    // A connector that leaves or enters a deck lane (a junction on a viaduct, a ramp off one) is on the deck too: a car on it takes
+    // the connector's height, not the ground's under it (one between Memorial Drive's deck lanes over I-20 was put on the freeway
+    // below, in the cars there).
+    for (let i = base; i < base + n; i++) {
+      if (!this.isConnector[i]) continue;
+      const a = this.from[i];
+      const b = this.to[i];
+      if ((a >= 0 && this.bridge[a]) || (b >= 0 && this.bridge[b])) this.bridge[i] = 1;
+    }
     // one-way: no lane of the same road runs the other way (within the tile: a road cut by a seam is in both, both ways)
     const ways = new Set<string>();
     for (const e of edges) if (e.t === 0) ways.add(`${e.road}|${e.dir}`);

@@ -956,22 +956,15 @@ function emitPiece(
   const rY: number[] = [];
   // a deck the pipeline made is drawn `lift` over the surface it is solid at (see the collision slab below)
   const drop = deckY && derived ? lift : 0;
-  // (which vertices took a greater deck's height, see below)
-  const dominated: boolean[] = [];
-  const dom = { dominated: false };
   for (let i = 0; i < n; i++) {
     if (deckY) {
       // where decks overlap every ribbon takes the blended height, corner by corner, so overlapping ribbons coincide
       const col = deckY[i] - drop;
       const pl = what.blend;
       const rk = way.kind === 'car' ? deckRank(way) : Infinity;
-      let on = false;
-      topY.push((pl ? pl.adjust(pts[i][0], pts[i][1], col, rk, dom) : col) + drop);
-      on ||= dom.dominated;
-      lY.push((pl ? pl.adjust(left[i][0], left[i][1], col, rk, dom) : col) + drop);
-      on ||= dom.dominated;
-      rY.push((pl ? pl.adjust(right[i][0], right[i][1], col, rk, dom) : col) + drop);
-      dominated.push(on || dom.dominated);
+      topY.push((pl ? pl.adjust(pts[i][0], pts[i][1], col, rk) : col) + drop);
+      lY.push((pl ? pl.adjust(left[i][0], left[i][1], col, rk) : col) + drop);
+      rY.push((pl ? pl.adjust(right[i][0], right[i][1], col, rk) : col) + drop);
     } else {
       const c = ground(pts[i][0], pts[i][1]);
       const l = ground(left[i][0], left[i][1]);
@@ -979,28 +972,6 @@ function emitPiece(
       topY.push(c + lift);
       lY.push(Math.max(c - 0.5, Math.min(c + 0.5, l)) + lift);
       rY.push(Math.max(c - 0.5, Math.min(c + 0.5, r)) + lift);
-    }
-  }
-
-  if (deckY && n >= 2 && what.blend && way.kind === 'car') {
-    // A lesser deck's vertices on a greater one's carriageway took its height there (DeckBlend.adjust), and the first vertex past
-    // its kerb kept the lesser road's own design: a street that ends level on one falling across it (Capitol Avenue on Memorial
-    // Drive over I-20) climbed the half metre between the two in one segment, a 14% ramp and a crest that threw a car. The move
-    // carries on past the kerb instead, fading out over JOIN_FADE m.
-    const s: number[] = [0];
-    for (let i = 1; i < n; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    const dC = topY.map((y, i) => y - deckY[i]), dL = lY.map((y, i) => y - deckY[i]), dR = rY.map((y, i) => y - deckY[i]);
-    const moved = dC.map((_, i) => dominated[i] && Math.max(Math.abs(dC[i]), Math.abs(dL[i]), Math.abs(dR[i])) > JOIN_MOVED);
-    if (moved.some((m) => m) && !moved.every((m) => m)) {
-      for (let i = 0; i < n; i++) {
-        if (dominated[i]) continue;
-        let j = -1;
-        for (let k = 0; k < n; k++) if (moved[k] && Math.abs(s[k] - s[i]) <= JOIN_FADE && (j < 0 || Math.abs(s[k] - s[i]) < Math.abs(s[j] - s[i]))) j = k;
-        if (j < 0) continue;
-        const u = Math.abs(s[j] - s[i]) / JOIN_FADE;
-        const f = 1 - u * u * (3 - 2 * u);
-        topY[i] += dC[j] * f; lY[i] += dL[j] * f; rY[i] += dR[j] * f;
-      }
     }
   }
 
@@ -1245,9 +1216,6 @@ const endKey = (p: V2) => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`;
 const LANDED = 0.3;
 /** A joint of decks this close (m) to the ground lands like an end on its own: every deck at it is brought to the ground alike. */
 const JOINT_LAND = 0.6;
-/** A deck vertex a greater deck moved more than this (m) carries the move on over JOIN_FADE m of the lesser deck beyond it. */
-const JOIN_MOVED = 0.05;
-const JOIN_FADE = 15;
 /** A footbridge's or a rail deck's underside less than this over a carriageway below it leaves the slab out there, m. */
 const LOW_DECK = 4;
 /** A walk ramp off a bridge's sidewalk is not drawn over a car carriageway whose ground is within this (m) of it or below it. */
@@ -1373,8 +1341,7 @@ export class DeckBlend {
    * lies on a greater one's carriageway takes that carriageway's height (a ramp or a side street joining a viaduct meets its
    * cross-section, as a minor road meets a major one, instead of standing on it at its own grade: half a metre proud 7 m in).
    */
-  adjust(x: number, z: number, y: number, rank = Infinity, info?: { dominated: boolean }): number {
-    if (info) info.dominated = false;
+  adjust(x: number, z: number, y: number, rank = Infinity): number {
     let sw = 0, sy = 0;
     let top = -Infinity, topH = 0;
     for (const j of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
@@ -1390,10 +1357,7 @@ export class DeckBlend {
       top = s.rank;
       topH = hy;
     }
-    if (top > -Infinity) {
-      if (info) info.dominated = true;
-      return topH;
-    }
+    if (top > -Infinity) return topH;
     // (a lesser road beside does not bend a greater one: its vertices blend only with roads at least as great)
     for (const j of this.cells.get(`${Math.floor(x / 16)},${Math.floor(z / 16)}`) ?? []) {
       const s = this.segs[j];

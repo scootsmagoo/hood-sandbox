@@ -30,10 +30,10 @@ Each link opens the live build with the right options. "#n" is the entry in the 
 | Night look | [11 pm, clock stopped](https://hood-sandbox.adam-021.workers.dev/?time=23:00&timescale=0) | The sodium street lights, headlights, windows and trees at night. |
 | **Rail transit** | [Default start](https://hood-sandbox.adam-021.workers.dev/) | You start at Five Points. Walk down into the station, through the fare gates to a platform, and board at an open door. On the train you can skip to the next station or get off; the on-screen prompts show the keys. |
 | **Hartsfield-Jackson** | [Airport](https://hood-sandbox.adam-021.workers.dev/?spawn=airport) | Walk in through the Domestic Terminal's north doors to ticketing, the Atrium, security and Concourse T. Watch the aircraft land, taxi, push back and take off. See [docs/airport.md](docs/airport.md). |
+| **The bigger city (M2)** | [Streamed tiles](https://hood-sandbox.adam-021.workers.dev/?tiles=tiles/atlanta/m2/) | The first multi-tile bake: 80 tiles streamed as you drive. Head up the Connector or Peachtree to Midtown, east to Inman Park, Little Five Points and Candler Park, north to Buckhead, or west over the river to Vinings. Look for gaps or steps at tile edges (every 1,024 m), roads that stop at a seam, and tiles that load late. |
 | Old renderer | [Classic look](https://hood-sandbox.adam-021.workers.dev/?gfx=classic) | The flat pre-GTA IV renderer, for comparison. |
 | **Phone** | [Default start](https://hood-sandbox.adam-021.workers.dev/) | On an iPhone 15 Pro (the minimum device): the touch controls and the frame rate. The checklist is in [docs/deploy.md](docs/deploy.md). |
 
-The streamed multi-tile city (`?tiles=tiles/atlanta/m2/`) isn't deployed yet: the M2 bake is waiting on the OpenStreetMap download.
 
 ### What's there
 

@@ -224,5 +224,5 @@ describe.skipIf(!process.env.STREAM_REAL || !existsSync('public/tiles/atlanta/m2
     }
     console.log('M2 seam audit', JSON.stringify(out), JSON.stringify(st.stats().seams));
     console.log('window swaps near (-5,-249):', swapAt.filter(([x, z]) => Math.hypot(x + 5, z + 249) < 30).map(([x, z]) => `${x.toFixed(0)},${z.toFixed(0)}`).join(' '), 'of', swapAt.length);
-  }, 600_000);
+  }, 0); // no limit: an opt-in audit, and the 80 tiles of the M2 slice take longer than any fixed one
 });

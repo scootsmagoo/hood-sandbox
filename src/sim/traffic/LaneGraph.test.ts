@@ -106,6 +106,23 @@ describe('lane graph data', () => {
   });
 });
 
+describe('lanes on decks', () => {
+  it('puts a connector between deck lanes on the deck (a car on it takes its height, not the ground under the viaduct)', () => {
+    // two pieces of one deck 8 m up, end to end at a bend, and a street on the ground
+    const deck = { bridge: true, layer: 1 };
+    const roads = [road('a', [[-100, 0], [0, 0]], deck), road('b', [[0, 0], [100, 30]], deck), road('g', [[-100, 50], [100, 50]])];
+    for (const r of roads.slice(0, 2)) r.points = r.points.map(([x, , z]) => [x, 8, z]);
+    const g = new LaneGraph(parseLanes(JSON.parse(JSON.stringify(buildLanes(roads, { junctions: [] }))))!);
+    let connectors = 0;
+    for (let i = 0; i < g.count; i++) {
+      if (!g.isConnector[i] || g.road[g.from[i]] === 'g') continue;
+      connectors++;
+      expect(g.bridge[i]).toBe(1);
+    }
+    expect(connectors).toBeGreaterThan(0);
+  });
+});
+
 describe('routes', () => {
   it('plans a route to another lane over lanes and connectors that leads where it says', () => {
     const g = grid();

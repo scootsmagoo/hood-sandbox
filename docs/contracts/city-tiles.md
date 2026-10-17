@@ -165,7 +165,13 @@ so a grid may still choose 2 m or the corridor layer later; nothing in the runti
                       "roads": [ { "key": "R|x1024|osm:way/123|0", "road": 40, "end": 1 } ] }, "n": {...}, "s": {...}, "w": {...} } }
   ```
 - **Stitching (runtime).** When both tiles of a seam are loaded, every out port is joined to the in port with its key, checked:
-  within 0.75 m in plan and 0.25 m in height, and the two lanes' directions within 20 degrees. A joined lane's `next` becomes the
+  within 0.75 m in plan and 0.25 m in height, and the two lanes' directions within 20 degrees; or, for the same lane of the same
+  road and direction, within 0.35 m of the out lane's line and up to 2.5 m ahead or behind along it (`PORT_MATCH` in
+  `src/shared/seams.ts`: a road that crosses the seam at a grazing angle has its lanes cross the line metres either side of where
+  its centreline does, and a kink of the way at the seam moves the crossing a metre along the line on one side only); or, for the
+  in port with its own key, within 0.3 m with the directions up to 40 degrees apart (a lane only centimetres long, on a piece of
+  road that ends on the seam, has its ends to 0.1 m and its heading tens of degrees off). A port whose key has no partner takes
+  the nearest in port of the same road, direction and lane that fits. A joined lane's `next` becomes the
   other tile's lane (its own turnaround connector, which the bake adds where a two-way road leaves the tile, is taken out of `next`
   while the seam is joined, and put back when the neighbour drops). Walk ports are joined by a `link` edge, nearest pairs first: two
   on the seam within 0.75 m, or a near dead end within 6 m (and 0.6 m in height) of a port across. Road ends merge into one node of the police road graph (it already merges ends within 0.5 m). A port with no partner stays a
@@ -310,11 +316,17 @@ seam line, and buildings assigned by their first vertex. **Done (ground lane, 20
   sides have a vertex on the seam line at that height.
 - **No junction polygon within 30 m of a tile's edge** (`buildRoads(..., { seamClear })`): the roads meet there as a junction
   without a polygon, and their lanes run on to the seam.
-- **Lane ends on the seam** (`buildLanes(..., { bounds })`): a lane end within 0.3 m of a bounds line is put on it (lanes offset from
-  a centreline that crosses the seam at an angle ended a few centimetres off it), and a road piece that ends on the bounds is kept
-  however short (a way whose next node is 0.2 m across the seam).
+- **Lane ends on the seam** (`buildLanes(..., { bounds })`): a lane end within 6 m of a bounds line that its road ends on is put on
+  it, along the lane (`SEAM_SNAP`; a lane offset from a centreline that crosses the seam at an angle ends short of the line or past
+  it by its offset times the angle's tangent: 0.3 m on a two-lane street at 10 degrees, metres on a wide one). Only the end that
+  runs toward the line moves, and a lane wholly past it (an offset lane of a piece centimetres long) is left as it is, not turned
+  round. A road piece that ends on the bounds is kept however short (down to 0.05 m: a way whose next node is 0.2 m across the
+  seam), and its seam end stays out of the junction at its other end (way 1040543348 in `-1_-1`, 0.21 m long, had both ends in
+  one implicit junction and no lanes).
 - Smoke tiles: lane ports 45 matched and 24 not before, 71 and 6 after; the seam audit's lanes across seams 50 before, 106 after,
   with as many events at the seams as the same tiles merged into one world (the control): 6, 3 and 6 at 15, 25 and 35 m/s.
+- The M2 slice (80 tiles, round five of the ground lane, 2026-10-17): lane ports 1796 matched and 186 not, walk ports 459 and 44;
+  the largest port step 0.25 m on lanes, 0.54 m on walks (`seams-report.json`; what the unmatched ones are: `docs/fixes/ROADMAP.md`).
 
 ## 11. Hosting
 

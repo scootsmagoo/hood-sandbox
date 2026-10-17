@@ -14,9 +14,13 @@ export const ON_SEAM = 0.05;
  * Ports of two tiles join when they are within these, m (plan, height). A lane of the same road, direction and lane number also
  * joins one up to `gap` m ahead or behind it along the way they run when it is within `lateral` m of its line: a road that crosses
  * the seam at a grazing angle has its lanes cross the line metres either side of where its centreline does, and a kink of the
- * way at the seam moves that crossing a metre along the line on one side and not on the other.
+ * way at the seam moves that crossing a metre along the line on one side and not on the other. Two ports with the same key within
+ * `keyPlan` m of each other join with their headings up to 40 degrees apart: a lane only centimetres long, on a piece of road that
+ * ends on the seam, has its ends to 0.1 m and its heading tens of degrees off (way 1040543348 at x = 0: 27 degrees).
  */
-export const PORT_MATCH = { plan: 0.75, height: 0.25, cosHeading: Math.cos((20 * Math.PI) / 180), lateral: 0.35, gap: 2.5 } as const;
+export const PORT_MATCH = {
+  plan: 0.75, height: 0.25, cosHeading: Math.cos((20 * Math.PI) / 180), lateral: 0.35, gap: 2.5, keyPlan: 0.3, cosKeyHeading: Math.cos((40 * Math.PI) / 180),
+} as const;
 
 export interface LanePort {
   key: string;
@@ -241,6 +245,11 @@ export function matchLanePorts(a: readonly LanePort[], b: readonly LanePort[]): 
     Math.hypot(o.p[0] - i.p[0], o.p[2] - i.p[2]) <= PORT_MATCH.plan &&
     Math.abs(o.p[1] - i.p[1]) <= PORT_MATCH.height &&
     o.dir[0] * i.dir[0] + o.dir[1] * i.dir[1] >= PORT_MATCH.cosHeading;
+  // the same key, in the same place (see PORT_MATCH)
+  const fitsKey = (o: LanePort, i: LanePort) =>
+    Math.hypot(o.p[0] - i.p[0], o.p[2] - i.p[2]) <= PORT_MATCH.keyPlan &&
+    Math.abs(o.p[1] - i.p[1]) <= PORT_MATCH.height &&
+    o.dir[0] * i.dir[0] + o.dir[1] * i.dir[1] >= PORT_MATCH.cosKeyHeading;
   // the same lane of the same road, offset along the way it runs (see PORT_MATCH)
   const fitsAlong = (o: LanePort, i: LanePort) => {
     if (i.road !== o.road || i.ldir !== o.ldir || i.k !== o.k) return false;
@@ -257,7 +266,7 @@ export function matchLanePorts(a: readonly LanePort[], b: readonly LanePort[]): 
     for (const o of outs) {
       if (o.end !== 'out') continue;
       let best: LanePort | undefined = byKey.get(o.key);
-      if (best && (used.has(best) || !(fits(o, best) || fitsAlong(o, best)))) best = undefined;
+      if (best && (used.has(best) || !(fits(o, best) || fitsAlong(o, best) || fitsKey(o, best)))) best = undefined;
       if (!best) {
         let bd = Infinity;
         for (const i of ins) {
