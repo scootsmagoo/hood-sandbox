@@ -1,0 +1,154 @@
+{
+  "format": "hood-tile",
+  "version": 1,
+  "id": "atlanta/m1-five-points",
+  "projection": "+proj=tmerc +lat_0=33.85 +lon_0=-84.3 +k=1 +x_0=0 +y_0=0 +ellps=WGS84 +units=m",
+  "origin": {
+    "lat": 33.7543,
+    "lon": -84.3898,
+    "E": -8319.964,
+    "N": -10611.308
+  },
+  "baseElevation": 318.58,
+  "bounds": {
+    "minX": -1000,
+    "minZ": -1000,
+    "maxX": 1000,
+    "maxZ": 1000
+  },
+  "heightmap": {
+    "file": "height.bin",
+    "cols": 501,
+    "rows": 501,
+    "cellSize": 4,
+    "minX": -1000,
+    "minZ": -1000
+  },
+  "meshes": {
+    "ground": "ground.glb",
+    "roads": "roads.glb",
+    "buildings": "buildings.glb"
+  },
+  "chunks": {
+    "size": 256,
+    "minX": -1000,
+    "minZ": -1000,
+    "cols": 8,
+    "rows": 8,
+    "groundLevels": [
+      {
+        "lod": 0,
+        "step": 1
+      },
+      {
+        "lod": 1,
+        "step": 4,
+        "lower": 0.5,
+        "skirt": 3
+      }
+    ]
+  },
+  "collision": {
+    "file": "collision.bin",
+    "vertexCount": 100339,
+    "indexCount": 243816,
+    "buildingTriangles": 21159
+  },
+  "roads": "roads.json",
+  "junctions": "junctions.json",
+  "lanes": "lanes.json",
+  "paths": "paths.json",
+  "scenarios": "scenarios.json",
+  "props": "props.json",
+  "landmarks": "landmarks.json",
+  "transit": "transit.json",
+  "meshFormat": 3,
+  "buildingKinds": [
+    "generic",
+    "office",
+    "glass",
+    "brick",
+    "parking",
+    "retail",
+    "civic",
+    "religious",
+    "industrial",
+    "residential",
+    "house",
+    "small",
+    "venue"
+  ],
+  "buildingMaterials": [
+    "unknown",
+    "brick",
+    "glass",
+    "concrete",
+    "stone",
+    "metal",
+    "stucco",
+    "wood"
+  ],
+  "buildingStyles": [
+    "unknown",
+    "classical",
+    "victorian",
+    "artdeco",
+    "modernist",
+    "brutalist",
+    "postmodern",
+    "contemporary",
+    "vernacular"
+  ],
+  "roofMaterials": [
+    "membrane",
+    "metal",
+    "tile",
+    "shingle",
+    "concrete",
+    "green",
+    "copper",
+    "gold",
+    "white"
+  ],
+  "landClasses": [
+    "urban",
+    "grass",
+    "woodland",
+    "dirt",
+    "plaza",
+    "parking",
+    "industrial",
+    "rail",
+    "water",
+    "pitch",
+    "cemetery",
+    "residential",
+    "commercial"
+  ],
+  "spawns": {
+    "player": {
+      "x": 3.09,
+      "y": 0.2,
+      "z": 8.68
+    },
+    "vehicle": {
+      "x": -2.6,
+      "y": 0.56,
+      "z": 13.54,
+      "heading": -0.574
+    }
+  },
+  "attribution": [
+    "© OpenStreetMap contributors",
+    "Overture Maps Foundation",
+    "USGS 3DEP",
+    "Building heights and dates: Wikidata (CC0) and Wikipedia (CC BY-SA)"
+  ],
+  "sources": {
+    "osm": true,
+    "overtureBuildings": "2026-09-23.1",
+    "overtureParts": 335,
+    "osmProps": true,
+    "elevation": "usgs-3dep"
+  }
+}
